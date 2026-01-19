@@ -11,13 +11,17 @@ import { useWebSocket } from "@/hooks/use-websocket";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
 import Templates from "@/pages/templates";
-import Campaigns from "@/pages/campaigns";
+import TemplateEditor from "@/pages/template-editor";
 import Messages from "@/pages/messages";
 import Analytics from "@/pages/analytics";
 import Settings from "@/pages/settings";
 import Inbox from "@/pages/inbox";
 import Contacts from "@/pages/contacts";
+import ContactsLists from "@/pages/contacts-lists";
+import ContactsTags from "@/pages/contacts-tags";
+import ContactsImport from "@/pages/contacts-import";
 import Notifications from "@/pages/notifications";
+import NotificationEditor from "@/pages/notification-editor";
 import { useQuery } from "@tanstack/react-query";
 import type { Template, Campaign, DashboardMetrics } from "@shared/schema";
 
@@ -27,9 +31,15 @@ function Router() {
       <Route path="/" component={Dashboard} />
       <Route path="/inbox" component={Inbox} />
       <Route path="/templates" component={Templates} />
+      <Route path="/templates/new" component={TemplateEditor} />
+      <Route path="/templates/:id/edit" component={TemplateEditor} />
       <Route path="/contacts" component={Contacts} />
+      <Route path="/contacts/lists" component={ContactsLists} />
+      <Route path="/contacts/tags" component={ContactsTags} />
+      <Route path="/contacts/import" component={ContactsImport} />
       <Route path="/notifications" component={Notifications} />
-      <Route path="/campaigns" component={Campaigns} />
+      <Route path="/notifications/new" component={NotificationEditor} />
+      <Route path="/notifications/:id/edit" component={NotificationEditor} />
       <Route path="/messages" component={Messages} />
       <Route path="/analytics" component={Analytics} />
       <Route path="/settings" component={Settings} />
@@ -39,7 +49,6 @@ function Router() {
 }
 
 function AppContent() {
-  // Connect to WebSocket for real-time updates
   const { isConnected } = useWebSocket();
 
   const { data: templates = [] } = useQuery<Template[]>({
@@ -52,7 +61,7 @@ function AppContent() {
 
   const { data: metrics } = useQuery<DashboardMetrics>({
     queryKey: ["/api/dashboard/metrics"],
-    refetchInterval: 30000, // Fallback polling every 30 seconds
+    refetchInterval: 30000,
   });
 
   const pendingTemplates = templates.filter((t) => t.status === "PENDING").length;

@@ -1,24 +1,9 @@
-import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Plus,
   MoreVertical,
@@ -32,6 +17,7 @@ import {
   FileText,
   Trash2,
   Play,
+  Edit,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -39,15 +25,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useForm, Controller } from "react-hook-form";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { cn } from "@/lib/utils";
-import type { Notification, Template, ContactList } from "@shared/schema";
+import type { Notification, Template } from "@shared/schema";
 
 export default function Notifications() {
-  const [createOpen, setCreateOpen] = useState(false);
   const { toast } = useToast();
 
   const { data: notifications = [], isLoading } = useQuery<Notification[]>({
@@ -56,32 +38,6 @@ export default function Notifications() {
 
   const { data: templates = [] } = useQuery<Template[]>({
     queryKey: ["/api/templates"],
-  });
-
-  const { data: lists = [] } = useQuery<ContactList[]>({
-    queryKey: ["/api/lists"],
-  });
-
-  const approvedTemplates = templates.filter((t) => t.status === "APPROVED");
-
-  const createNotificationMutation = useMutation({
-    mutationFn: async (data: {
-      name: string;
-      templateId: string;
-      listIds: string[];
-      scheduledAt?: string;
-    }) => {
-      return apiRequest("POST", "/api/notifications", data);
-    },
-    onSuccess: () => {
-      toast({ title: "Notification created successfully" });
-      setCreateOpen(false);
-      form.reset();
-      queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
-    },
-    onError: () => {
-      toast({ title: "Failed to create notification", variant: "destructive" });
-    },
   });
 
   const deleteNotificationMutation = useMutation({
@@ -101,15 +57,6 @@ export default function Notifications() {
     onSuccess: () => {
       toast({ title: "Notification is being sent" });
       queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
-    },
-  });
-
-  const form = useForm({
-    defaultValues: {
-      name: "",
-      templateId: "",
-      listIds: [] as string[],
-      scheduledAt: "",
     },
   });
 
@@ -160,133 +107,12 @@ export default function Notifications() {
             Create and schedule broadcast notifications
           </p>
         </div>
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogTrigger asChild>
-            <Button data-testid="button-create-notification">
-              <Plus className="h-4 w-4 mr-2" />
-              New Notification
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>Create Notification</DialogTitle>
-            </DialogHeader>
-            <Form {...form}>
-              <form
-                onSubmit={form.handleSubmit((data) => createNotificationMutation.mutate(data))}
-                className="space-y-4"
-              >
-                <FormField
-                  control={form.control}
-                  name="name"
-                  rules={{ required: "Name is required" }}
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Notification Name</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g., Weekly Newsletter" {...field} data-testid="input-notification-name" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="templateId"
-                  rules={{ required: "Template is required" }}
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Template</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger data-testid="select-template">
-                            <SelectValue placeholder="Select a template" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {approvedTemplates.length === 0 ? (
-                            <SelectItem value="_none" disabled>No approved templates</SelectItem>
-                          ) : (
-                            approvedTemplates.map((template) => (
-                              <SelectItem key={template.id} value={template.id}>
-                                {template.name}
-                              </SelectItem>
-                            ))
-                          )}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="listIds"
-                  rules={{ validate: (v) => v.length > 0 || "Select at least one list" }}
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Recipient Lists</FormLabel>
-                      <div className="space-y-2">
-                        {lists.map((list) => (
-                          <label
-                            key={list.id}
-                            className={cn(
-                              "flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover-elevate",
-                              field.value.includes(list.id) && "border-primary bg-primary/5"
-                            )}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={field.value.includes(list.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  field.onChange([...field.value, list.id]);
-                                } else {
-                                  field.onChange(field.value.filter((id) => id !== list.id));
-                                }
-                              }}
-                              className="h-4 w-4 rounded border-muted"
-                              data-testid={`checkbox-list-${list.id}`}
-                            />
-                            <div className="flex-1">
-                              <div className="font-medium text-sm">{list.name}</div>
-                              <div className="text-xs text-muted-foreground">{list.contactCount.toLocaleString()} contacts</div>
-                            </div>
-                          </label>
-                        ))}
-                      </div>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="scheduledAt"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Schedule (optional)</FormLabel>
-                      <FormControl>
-                        <Input type="datetime-local" {...field} data-testid="input-schedule-time" />
-                      </FormControl>
-                      <p className="text-xs text-muted-foreground">
-                        Leave empty to save as draft
-                      </p>
-                    </FormItem>
-                  )}
-                />
-
-                <div className="flex gap-2 pt-2">
-                  <Button type="submit" className="flex-1" disabled={createNotificationMutation.isPending} data-testid="button-submit-notification">
-                    {createNotificationMutation.isPending ? "Creating..." : "Create Notification"}
-                  </Button>
-                </div>
-              </form>
-            </Form>
-          </DialogContent>
-        </Dialog>
+        <Button asChild data-testid="button-create-notification">
+          <Link href="/notifications/new">
+            <Plus className="h-4 w-4 mr-2" />
+            New Notification
+          </Link>
+        </Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
@@ -386,10 +212,18 @@ export default function Notifications() {
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
                                 {notification.status === "draft" && (
-                                  <DropdownMenuItem onClick={() => sendNotificationMutation.mutate(notification.id)}>
-                                    <Play className="h-4 w-4 mr-2" />
-                                    Send Now
-                                  </DropdownMenuItem>
+                                  <>
+                                    <DropdownMenuItem asChild>
+                                      <Link href={`/notifications/${notification.id}/edit`}>
+                                        <Edit className="h-4 w-4 mr-2" />
+                                        Edit
+                                      </Link>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => sendNotificationMutation.mutate(notification.id)}>
+                                      <Play className="h-4 w-4 mr-2" />
+                                      Send Now
+                                    </DropdownMenuItem>
+                                  </>
                                 )}
                                 <DropdownMenuItem
                                   className="text-destructive"

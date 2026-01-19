@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, RefreshCw, Search, MoreHorizontal, Eye, Copy, Trash2, Filter } from "lucide-react";
+import { Link } from "wouter";
+import { Plus, RefreshCw, Search, MoreHorizontal, Eye, Copy, Trash2, Filter, Edit } from "lucide-react";
 import { format } from "date-fns";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -24,11 +24,8 @@ import {
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
-  DialogFooter,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -37,91 +34,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/status-badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Template, InsertTemplate } from "@shared/schema";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-  FormDescription,
-} from "@/components/ui/form";
-
-const templateFormSchema = z.object({
-  name: z.string().min(1, "Template name is required").max(512),
-  category: z.enum(["MARKETING", "UTILITY", "AUTHENTICATION"]),
-  language: z.string().min(1, "Language is required"),
-  bodyText: z.string().min(1, "Message body is required").max(1024),
-  headerText: z.string().max(60).optional(),
-  footerText: z.string().max(60).optional(),
-});
-
-type TemplateFormValues = z.infer<typeof templateFormSchema>;
+import type { Template } from "@shared/schema";
 
 export default function Templates() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const { toast } = useToast();
 
   const { data: templates = [], isLoading, refetch, isRefetching } = useQuery<Template[]>({
     queryKey: ["/api/templates"],
-  });
-
-  const form = useForm<TemplateFormValues>({
-    resolver: zodResolver(templateFormSchema),
-    defaultValues: {
-      name: "",
-      category: "MARKETING",
-      language: "en",
-      bodyText: "",
-      headerText: "",
-      footerText: "",
-    },
-  });
-
-  const createMutation = useMutation({
-    mutationFn: async (data: TemplateFormValues) => {
-      const template: Partial<InsertTemplate> = {
-        name: data.name,
-        category: data.category,
-        language: data.language,
-        status: "PENDING",
-        components: [
-          ...(data.headerText ? [{ type: "HEADER" as const, text: data.headerText }] : []),
-          { type: "BODY" as const, text: data.bodyText },
-          ...(data.footerText ? [{ type: "FOOTER" as const, text: data.footerText }] : []),
-        ],
-      };
-      return apiRequest("POST", "/api/templates", template);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/templates"] });
-      setCreateDialogOpen(false);
-      form.reset();
-      toast({
-        title: "Template Created",
-        description: "Your template has been submitted for approval.",
-      });
-    },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to create template. Please try again.",
-        variant: "destructive",
-      });
-    },
   });
 
   const deleteMutation = useMutation({
@@ -178,173 +104,12 @@ export default function Templates() {
             <RefreshCw className={`h-4 w-4 mr-2 ${isRefetching ? "animate-spin" : ""}`} />
             Sync
           </Button>
-          <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-            <DialogTrigger asChild>
-              <Button data-testid="button-create-template">
-                <Plus className="h-4 w-4 mr-2" />
-                Create Template
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-2xl">
-              <DialogHeader>
-                <DialogTitle>Create New Template</DialogTitle>
-                <DialogDescription>
-                  Create a new message template. Templates require Meta approval before use.
-                </DialogDescription>
-              </DialogHeader>
-              <Form {...form}>
-                <form onSubmit={form.handleSubmit((data) => createMutation.mutate(data))} className="space-y-4">
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <FormField
-                      control={form.control}
-                      name="name"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Template Name</FormLabel>
-                          <FormControl>
-                            <Input 
-                              placeholder="e.g., order_confirmation" 
-                              data-testid="input-template-name"
-                              {...field} 
-                            />
-                          </FormControl>
-                          <FormDescription>Use lowercase with underscores</FormDescription>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="category"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Category</FormLabel>
-                          <Select onValueChange={field.onChange} defaultValue={field.value}>
-                            <FormControl>
-                              <SelectTrigger data-testid="select-category">
-                                <SelectValue placeholder="Select category" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              <SelectItem value="MARKETING">Marketing</SelectItem>
-                              <SelectItem value="UTILITY">Utility</SelectItem>
-                              <SelectItem value="AUTHENTICATION">Authentication</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-
-                  <FormField
-                    control={form.control}
-                    name="language"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Language</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                          <FormControl>
-                            <SelectTrigger data-testid="select-language">
-                              <SelectValue placeholder="Select language" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="en">English</SelectItem>
-                            <SelectItem value="es">Spanish</SelectItem>
-                            <SelectItem value="pt">Portuguese</SelectItem>
-                            <SelectItem value="fr">French</SelectItem>
-                            <SelectItem value="de">German</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="headerText"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Header (Optional)</FormLabel>
-                        <FormControl>
-                          <Input 
-                            placeholder="e.g., Order Update" 
-                            maxLength={60}
-                            data-testid="input-header-text"
-                            {...field} 
-                          />
-                        </FormControl>
-                        <FormDescription>{field.value?.length || 0}/60 characters</FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="bodyText"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Message Body</FormLabel>
-                        <FormControl>
-                          <Textarea 
-                            placeholder="Enter your message. Use {{1}}, {{2}} for variables."
-                            className="min-h-[120px] resize-none"
-                            maxLength={1024}
-                            data-testid="input-body-text"
-                            {...field} 
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          {field.value?.length || 0}/1024 characters. Use {"{{1}}"}, {"{{2}}"} for dynamic content.
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="footerText"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Footer (Optional)</FormLabel>
-                        <FormControl>
-                          <Input 
-                            placeholder="e.g., Reply STOP to unsubscribe" 
-                            maxLength={60}
-                            data-testid="input-footer-text"
-                            {...field} 
-                          />
-                        </FormControl>
-                        <FormDescription>{field.value?.length || 0}/60 characters</FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <DialogFooter>
-                    <Button 
-                      type="button" 
-                      variant="outline" 
-                      onClick={() => setCreateDialogOpen(false)}
-                    >
-                      Cancel
-                    </Button>
-                    <Button 
-                      type="submit" 
-                      disabled={createMutation.isPending}
-                      data-testid="button-submit-template"
-                    >
-                      {createMutation.isPending ? "Creating..." : "Create Template"}
-                    </Button>
-                  </DialogFooter>
-                </form>
-              </Form>
-            </DialogContent>
-          </Dialog>
+          <Button asChild data-testid="button-create-template">
+            <Link href="/templates/new">
+              <Plus className="h-4 w-4 mr-2" />
+              Create Template
+            </Link>
+          </Button>
         </div>
       </div>
 
@@ -465,6 +230,12 @@ export default function Templates() {
                           <DropdownMenuItem onClick={() => setSelectedTemplate(template)}>
                             <Eye className="h-4 w-4 mr-2" />
                             Preview
+                          </DropdownMenuItem>
+                          <DropdownMenuItem asChild>
+                            <Link href={`/templates/${template.id}/edit`}>
+                              <Edit className="h-4 w-4 mr-2" />
+                              Edit
+                            </Link>
                           </DropdownMenuItem>
                           <DropdownMenuItem>
                             <Copy className="h-4 w-4 mr-2" />

@@ -13,8 +13,12 @@ import {
   Bell,
   Inbox,
   ChevronDown,
+  ChevronRight,
   Plus,
   Check,
+  List,
+  Tag,
+  Upload,
 } from "lucide-react";
 import {
   Sidebar,
@@ -26,6 +30,9 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubItem,
+  SidebarMenuSubButton,
   SidebarFooter,
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +51,11 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { WhatsAppAccount, Conversation } from "@shared/schema";
 import { useState } from "react";
@@ -72,22 +84,21 @@ const navigationItems = [
     icon: FileText,
     badge: "pendingTemplates",
   },
-  {
-    title: "Contacts",
-    url: "/contacts",
-    icon: Users,
-  },
-  {
-    title: "Notifications",
-    url: "/notifications",
-    icon: Bell,
-  },
-  {
-    title: "Campaigns",
-    url: "/campaigns",
-    icon: Send,
-    badge: "activeCampaigns",
-  },
+];
+
+const contactsSubItems = [
+  { title: "Contacts", url: "/contacts", icon: Users },
+  { title: "Lists", url: "/contacts/lists", icon: List },
+  { title: "Tags", url: "/contacts/tags", icon: Tag },
+  { title: "Import / Export", url: "/contacts/import", icon: Upload },
+];
+
+const notificationsSubItems = [
+  { title: "Notifications", url: "/notifications", icon: Bell },
+  { title: "Add New", url: "/notifications/new", icon: Plus },
+];
+
+const bottomNavItems = [
   {
     title: "Messages",
     url: "/messages",
@@ -115,6 +126,8 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const [location] = useLocation();
   const [addAccountOpen, setAddAccountOpen] = useState(false);
+  const [contactsOpen, setContactsOpen] = useState(location.startsWith("/contacts"));
+  const [notificationsOpen, setNotificationsOpen] = useState(location.startsWith("/notifications"));
 
   const { data: accountsData } = useQuery<{ accounts: WhatsAppAccount[]; activeAccountId: string }>({
     queryKey: ["/api/accounts"],
@@ -240,6 +253,99 @@ export function AppSidebar({
                             {badgeCount}
                           </Badge>
                         )}
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+
+              <Collapsible open={contactsOpen} onOpenChange={setContactsOpen}>
+                <SidebarMenuItem>
+                  <CollapsibleTrigger asChild>
+                    <SidebarMenuButton
+                      isActive={location.startsWith("/contacts")}
+                      data-testid="nav-contacts"
+                    >
+                      <Users className="h-4 w-4" />
+                      <span className="flex-1">Contacts</span>
+                      {contactsOpen ? (
+                        <ChevronDown className="h-4 w-4" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4" />
+                      )}
+                    </SidebarMenuButton>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <SidebarMenuSub>
+                      {contactsSubItems.map((subItem) => (
+                        <SidebarMenuSubItem key={subItem.title}>
+                          <SidebarMenuSubButton
+                            asChild
+                            isActive={location === subItem.url}
+                            data-testid={`nav-contacts-${subItem.title.toLowerCase().replace(/\s+/g, "-")}`}
+                          >
+                            <Link href={subItem.url}>
+                              <subItem.icon className="h-4 w-4" />
+                              <span>{subItem.title}</span>
+                            </Link>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      ))}
+                    </SidebarMenuSub>
+                  </CollapsibleContent>
+                </SidebarMenuItem>
+              </Collapsible>
+
+              <Collapsible open={notificationsOpen} onOpenChange={setNotificationsOpen}>
+                <SidebarMenuItem>
+                  <CollapsibleTrigger asChild>
+                    <SidebarMenuButton
+                      isActive={location.startsWith("/notifications")}
+                      data-testid="nav-notifications"
+                    >
+                      <Bell className="h-4 w-4" />
+                      <span className="flex-1">Notifications</span>
+                      {notificationsOpen ? (
+                        <ChevronDown className="h-4 w-4" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4" />
+                      )}
+                    </SidebarMenuButton>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <SidebarMenuSub>
+                      {notificationsSubItems.map((subItem) => (
+                        <SidebarMenuSubItem key={subItem.title}>
+                          <SidebarMenuSubButton
+                            asChild
+                            isActive={location === subItem.url}
+                            data-testid={`nav-notifications-${subItem.title.toLowerCase().replace(/\s+/g, "-")}`}
+                          >
+                            <Link href={subItem.url}>
+                              <subItem.icon className="h-4 w-4" />
+                              <span>{subItem.title}</span>
+                            </Link>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      ))}
+                    </SidebarMenuSub>
+                  </CollapsibleContent>
+                </SidebarMenuItem>
+              </Collapsible>
+
+              {bottomNavItems.map((item) => {
+                const isActive = location === item.url;
+                
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton 
+                      asChild 
+                      isActive={isActive}
+                      data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}
+                    >
+                      <Link href={item.url}>
+                        <item.icon className="h-4 w-4" />
+                        <span className="flex-1">{item.title}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
