@@ -74,6 +74,10 @@ The platform supports multiple WhatsApp Business numbers with account switching:
 - Created Contacts page with contacts table, lists management, and tags
 - Created Notifications page for broadcast scheduling and delivery tracking
 - All contact-related data is now scoped per WhatsApp account
+- Implemented collapsible sidebar sections for Contacts (Contacts, Lists, Tags, Import/Export) and Notifications (Notifications, Add New)
+- Created full-page Template Editor with media headers (text/image/video/document), body with formatting, footer, and interactive buttons (QUICK_REPLY, URL, PHONE_NUMBER)
+- Created full-page Notification Editor with template selection, recipient targeting via contact lists, scheduling, and live preview
+- Split Contacts into dedicated pages: main contacts table, lists management, tags management, and import/export with CSV upload
 
 ### Development vs Production
 
