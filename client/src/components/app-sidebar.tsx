@@ -1,4 +1,5 @@
 import { Link, useLocation } from "wouter";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   LayoutDashboard,
   FileText,
@@ -8,6 +9,12 @@ import {
   Settings,
   Wifi,
   WifiOff,
+  Users,
+  Bell,
+  Inbox,
+  ChevronDown,
+  Plus,
+  Check,
 } from "lucide-react";
 import {
   Sidebar,
@@ -22,7 +29,24 @@ import {
   SidebarFooter,
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import type { WhatsAppAccount, Conversation } from "@shared/schema";
+import { useState } from "react";
 
 interface AppSidebarProps {
   pendingTemplates?: number;
@@ -37,10 +61,26 @@ const navigationItems = [
     icon: LayoutDashboard,
   },
   {
+    title: "Inbox",
+    url: "/inbox",
+    icon: Inbox,
+    badge: "unreadMessages",
+  },
+  {
     title: "Templates",
     url: "/templates",
     icon: FileText,
     badge: "pendingTemplates",
+  },
+  {
+    title: "Contacts",
+    url: "/contacts",
+    icon: Users,
+  },
+  {
+    title: "Notifications",
+    url: "/notifications",
+    icon: Bell,
   },
   {
     title: "Campaigns",
@@ -74,25 +114,103 @@ export function AppSidebar({
   apiStatus = "disconnected" 
 }: AppSidebarProps) {
   const [location] = useLocation();
+  const [addAccountOpen, setAddAccountOpen] = useState(false);
+
+  const { data: accountsData } = useQuery<{ accounts: WhatsAppAccount[]; activeAccountId: string }>({
+    queryKey: ["/api/accounts"],
+  });
+
+  const { data: conversations = [] } = useQuery<Conversation[]>({
+    queryKey: ["/api/conversations"],
+  });
+
+  const switchAccountMutation = useMutation({
+    mutationFn: async (accountId: string) => {
+      await apiRequest("PUT", `/api/accounts/${accountId}/active`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
+    },
+  });
+
+  const accounts = accountsData?.accounts || [];
+  const activeAccount = accounts.find(a => a.id === accountsData?.activeAccountId);
+  const unreadMessages = conversations.reduce((sum, c) => sum + c.unreadCount, 0);
 
   const getBadgeCount = (key: string) => {
     if (key === "pendingTemplates") return pendingTemplates;
     if (key === "activeCampaigns") return activeCampaigns;
+    if (key === "unreadMessages") return unreadMessages;
     return 0;
   };
 
   return (
     <Sidebar>
       <SidebarHeader className="border-b border-sidebar-border px-4 py-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <MessageSquare className="h-5 w-5" />
-          </div>
-          <div className="flex flex-col">
-            <span className="text-sm font-semibold">WhatsApp Broadcast</span>
-            <span className="text-xs text-muted-foreground">Enterprise Platform</span>
-          </div>
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="flex w-full items-center gap-3 rounded-lg p-2 hover-elevate text-left" data-testid="button-account-switcher">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                <MessageSquare className="h-5 w-5" />
+              </div>
+              <div className="flex flex-1 flex-col min-w-0">
+                <span className="text-sm font-semibold truncate">{activeAccount?.name || "WhatsApp Broadcast"}</span>
+                <span className="text-xs text-muted-foreground truncate">{activeAccount?.phoneNumber || "No account"}</span>
+              </div>
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-64">
+            {accounts.map((account) => (
+              <DropdownMenuItem 
+                key={account.id}
+                onClick={() => switchAccountMutation.mutate(account.id)}
+                className="flex items-center gap-2"
+                data-testid={`account-${account.id}`}
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <MessageSquare className="h-4 w-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate">{account.name}</div>
+                  <div className="text-xs text-muted-foreground truncate">{account.phoneNumber}</div>
+                </div>
+                {account.id === accountsData?.activeAccountId && (
+                  <Check className="h-4 w-4 text-primary" />
+                )}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <Dialog open={addAccountOpen} onOpenChange={setAddAccountOpen}>
+              <DialogTrigger asChild>
+                <DropdownMenuItem onSelect={(e) => e.preventDefault()} data-testid="button-add-account">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add WhatsApp Number
+                </DropdownMenuItem>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Connect WhatsApp Number</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <p className="text-sm text-muted-foreground">
+                    To connect a WhatsApp Business number, you need to authenticate with your Facebook Business account.
+                  </p>
+                  <Button className="w-full" size="lg" data-testid="button-facebook-login">
+                    <svg className="mr-2 h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                    </svg>
+                    Login with Facebook
+                  </Button>
+                  <p className="text-xs text-muted-foreground text-center">
+                    You'll be redirected to Facebook to authorize access to your WhatsApp Business account.
+                  </p>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </SidebarHeader>
 
       <SidebarContent>
@@ -109,7 +227,7 @@ export function AppSidebar({
                     <SidebarMenuButton 
                       asChild 
                       isActive={isActive}
-                      data-testid={`nav-${item.title.toLowerCase()}`}
+                      data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}
                     >
                       <Link href={item.url}>
                         <item.icon className="h-4 w-4" />

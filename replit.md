@@ -52,7 +52,28 @@ The platform uses WebSocket for real-time updates:
 - **ORM**: Drizzle ORM with PostgreSQL dialect
 - **Schema**: Defined in `shared/schema.ts` with Zod validation schemas generated via `drizzle-zod`
 - **Migrations**: Drizzle Kit configured to output migrations to `./migrations` directory
-- **Key Entities**: Users, Templates (with approval statuses), Campaigns (with execution states), Messages (with delivery tracking), CampaignMetrics, ApiSettings
+- **Key Entities**: Users, Templates (with approval statuses), Campaigns (with execution states), Messages (with delivery tracking), CampaignMetrics, ApiSettings, WhatsAppAccounts, Contacts, ContactLists, ContactTags, Conversations, ConversationMessages, Notifications
+
+### Multi-Account Support
+
+The platform supports multiple WhatsApp Business numbers with account switching:
+- **Account Switcher**: Dropdown in sidebar header to switch between connected WhatsApp numbers
+- **Data Scoping**: Contacts, lists, tags, conversations, and notifications are scoped to the active account
+- **Account Verification**: All update/delete operations verify accountId before allowing mutations
+- **Account Creation**: Facebook OAuth flow for connecting new WhatsApp Business accounts (UI stub - backend OAuth not yet implemented)
+
+### Known Limitations (MVP)
+- Active account selection is stored in memory only (resets on server restart)
+- Facebook OAuth for adding new WhatsApp numbers is a UI stub only
+- Dashboard analytics are global, not yet filtered by active account
+
+### Recent Changes (January 2026)
+
+- Added multi-account support with account switcher in sidebar
+- Created Inbox page for 2-way messaging with conversation list and message threads
+- Created Contacts page with contacts table, lists management, and tags
+- Created Notifications page for broadcast scheduling and delivery tracking
+- All contact-related data is now scoped per WhatsApp account
 
 ### Development vs Production
 

@@ -519,5 +519,290 @@ export async function registerRoutes(
     }
   });
 
+  // ============== WhatsApp Accounts ==============
+  app.get("/api/accounts", async (req, res) => {
+    try {
+      const accounts = await storage.getAccounts();
+      const activeId = await storage.getActiveAccountId();
+      res.json({ accounts, activeAccountId: activeId });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch accounts" });
+    }
+  });
+
+  app.get("/api/accounts/active", async (req, res) => {
+    try {
+      const activeId = await storage.getActiveAccountId();
+      if (!activeId) {
+        return res.json(null);
+      }
+      const account = await storage.getAccount(activeId);
+      res.json(account);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch active account" });
+    }
+  });
+
+  app.post("/api/accounts", async (req, res) => {
+    try {
+      const account = await storage.createAccount(req.body);
+      broadcast("account-added", { account });
+      res.status(201).json(account);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create account" });
+    }
+  });
+
+  app.put("/api/accounts/:id/active", async (req, res) => {
+    try {
+      await storage.setActiveAccount(req.params.id);
+      const account = await storage.getAccount(req.params.id);
+      broadcast("account-switched", { account });
+      res.json({ success: true, account });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to switch account" });
+    }
+  });
+
+  app.delete("/api/accounts/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteAccount(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Account not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete account" });
+    }
+  });
+
+  // ============== Contacts ==============
+  app.get("/api/contacts", async (req, res) => {
+    try {
+      const contacts = await storage.getContacts();
+      res.json(contacts);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch contacts" });
+    }
+  });
+
+  app.post("/api/contacts", async (req, res) => {
+    try {
+      const contact = await storage.createContact(req.body);
+      res.status(201).json(contact);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create contact" });
+    }
+  });
+
+  app.patch("/api/contacts/:id", async (req, res) => {
+    try {
+      const contact = await storage.updateContact(req.params.id, req.body);
+      if (!contact) {
+        return res.status(404).json({ error: "Contact not found" });
+      }
+      res.json(contact);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update contact" });
+    }
+  });
+
+  app.delete("/api/contacts/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteContact(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Contact not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete contact" });
+    }
+  });
+
+  app.post("/api/contacts/import", async (req, res) => {
+    try {
+      const { contacts, listId } = req.body;
+      const imported = await storage.importContacts(contacts, listId);
+      res.json({ imported });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to import contacts" });
+    }
+  });
+
+  // ============== Contact Lists ==============
+  app.get("/api/lists", async (req, res) => {
+    try {
+      const lists = await storage.getLists();
+      res.json(lists);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch lists" });
+    }
+  });
+
+  app.post("/api/lists", async (req, res) => {
+    try {
+      const list = await storage.createList(req.body);
+      res.status(201).json(list);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create list" });
+    }
+  });
+
+  app.delete("/api/lists/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteList(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "List not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete list" });
+    }
+  });
+
+  // ============== Contact Tags ==============
+  app.get("/api/tags", async (req, res) => {
+    try {
+      const tags = await storage.getTags();
+      res.json(tags);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch tags" });
+    }
+  });
+
+  app.post("/api/tags", async (req, res) => {
+    try {
+      const tag = await storage.createTag(req.body);
+      res.status(201).json(tag);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create tag" });
+    }
+  });
+
+  app.delete("/api/tags/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteTag(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Tag not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete tag" });
+    }
+  });
+
+  // ============== Conversations ==============
+  app.get("/api/conversations", async (req, res) => {
+    try {
+      const conversations = await storage.getConversations();
+      res.json(conversations);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch conversations" });
+    }
+  });
+
+  app.get("/api/conversations/:id", async (req, res) => {
+    try {
+      const conversation = await storage.getConversation(req.params.id);
+      if (!conversation) {
+        return res.status(404).json({ error: "Conversation not found" });
+      }
+      res.json(conversation);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch conversation" });
+    }
+  });
+
+  app.get("/api/conversations/:id/messages", async (req, res) => {
+    try {
+      const messages = await storage.getConversationMessages(req.params.id);
+      res.json(messages);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch messages" });
+    }
+  });
+
+  app.post("/api/conversations/:id/messages", async (req, res) => {
+    try {
+      const message = await storage.addConversationMessage({
+        ...req.body,
+        conversationId: req.params.id,
+      });
+      broadcast("conversation-message", { message });
+      res.status(201).json(message);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to send message" });
+    }
+  });
+
+  app.patch("/api/conversations/:id", async (req, res) => {
+    try {
+      const conversation = await storage.updateConversation(req.params.id, req.body);
+      if (!conversation) {
+        return res.status(404).json({ error: "Conversation not found" });
+      }
+      res.json(conversation);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update conversation" });
+    }
+  });
+
+  // ============== Notifications/Broadcasts ==============
+  app.get("/api/notifications", async (req, res) => {
+    try {
+      const notifications = await storage.getNotifications();
+      res.json(notifications);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch notifications" });
+    }
+  });
+
+  app.get("/api/notifications/:id", async (req, res) => {
+    try {
+      const notification = await storage.getNotification(req.params.id);
+      if (!notification) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
+      res.json(notification);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch notification" });
+    }
+  });
+
+  app.post("/api/notifications", async (req, res) => {
+    try {
+      const notification = await storage.createNotification(req.body);
+      broadcast("notification-created", { notification });
+      res.status(201).json(notification);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create notification" });
+    }
+  });
+
+  app.patch("/api/notifications/:id", async (req, res) => {
+    try {
+      const notification = await storage.updateNotification(req.params.id, req.body);
+      if (!notification) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
+      broadcast("notification-updated", { notification });
+      res.json(notification);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update notification" });
+    }
+  });
+
+  app.delete("/api/notifications/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteNotification(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete notification" });
+    }
+  });
+
   return httpServer;
 }

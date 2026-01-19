@@ -15,6 +15,9 @@ import Campaigns from "@/pages/campaigns";
 import Messages from "@/pages/messages";
 import Analytics from "@/pages/analytics";
 import Settings from "@/pages/settings";
+import Inbox from "@/pages/inbox";
+import Contacts from "@/pages/contacts";
+import Notifications from "@/pages/notifications";
 import { useQuery } from "@tanstack/react-query";
 import type { Template, Campaign, DashboardMetrics } from "@shared/schema";
 
@@ -22,7 +25,10 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
+      <Route path="/inbox" component={Inbox} />
       <Route path="/templates" component={Templates} />
+      <Route path="/contacts" component={Contacts} />
+      <Route path="/notifications" component={Notifications} />
       <Route path="/campaigns" component={Campaigns} />
       <Route path="/messages" component={Messages} />
       <Route path="/analytics" component={Analytics} />

@@ -4,7 +4,14 @@ import {
   type Campaign, type InsertCampaign,
   type Message, type InsertMessage,
   type CampaignMetrics, type InsertCampaignMetrics,
-  type DashboardMetrics, type ActivityItem, type ApiSettings
+  type DashboardMetrics, type ActivityItem, type ApiSettings,
+  type WhatsAppAccount, type InsertWhatsAppAccount,
+  type Contact, type InsertContact,
+  type ContactList, type InsertContactList,
+  type ContactTag, type InsertContactTag,
+  type Conversation, type ConversationMessage, type InsertConversationMessage,
+  type Notification, type InsertNotification,
+  type MediaAsset
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -52,6 +59,52 @@ export interface IStorage {
 
   // Analytics
   getAnalyticsData(timeRange: string): Promise<AnalyticsData>;
+
+  // WhatsApp Accounts
+  getAccounts(): Promise<WhatsAppAccount[]>;
+  getAccount(id: string): Promise<WhatsAppAccount | undefined>;
+  createAccount(account: InsertWhatsAppAccount): Promise<WhatsAppAccount>;
+  updateAccount(id: string, updates: Partial<WhatsAppAccount>): Promise<WhatsAppAccount | undefined>;
+  deleteAccount(id: string): Promise<boolean>;
+  setActiveAccount(id: string): Promise<void>;
+  getActiveAccountId(): Promise<string | undefined>;
+
+  // Contacts
+  getContacts(): Promise<Contact[]>;
+  getContact(id: string): Promise<Contact | undefined>;
+  createContact(contact: InsertContact): Promise<Contact>;
+  updateContact(id: string, updates: Partial<Contact>): Promise<Contact | undefined>;
+  deleteContact(id: string): Promise<boolean>;
+  importContacts(contacts: InsertContact[], listId?: string): Promise<number>;
+
+  // Contact Lists
+  getLists(): Promise<ContactList[]>;
+  getList(id: string): Promise<ContactList | undefined>;
+  createList(list: InsertContactList): Promise<ContactList>;
+  updateList(id: string, updates: Partial<ContactList>): Promise<ContactList | undefined>;
+  deleteList(id: string): Promise<boolean>;
+
+  // Contact Tags
+  getTags(): Promise<ContactTag[]>;
+  getTag(id: string): Promise<ContactTag | undefined>;
+  createTag(tag: InsertContactTag): Promise<ContactTag>;
+  deleteTag(id: string): Promise<boolean>;
+
+  // Conversations
+  getConversations(): Promise<Conversation[]>;
+  getConversation(id: string): Promise<Conversation | undefined>;
+  getConversationByPhone(phone: string): Promise<Conversation | undefined>;
+  createConversation(phone: string, name?: string): Promise<Conversation>;
+  updateConversation(id: string, updates: Partial<Conversation>): Promise<Conversation | undefined>;
+  getConversationMessages(conversationId: string): Promise<ConversationMessage[]>;
+  addConversationMessage(message: InsertConversationMessage): Promise<ConversationMessage>;
+
+  // Notifications/Broadcasts
+  getNotifications(): Promise<Notification[]>;
+  getNotification(id: string): Promise<Notification | undefined>;
+  createNotification(notification: InsertNotification): Promise<Notification>;
+  updateNotification(id: string, updates: Partial<Notification>): Promise<Notification | undefined>;
+  deleteNotification(id: string): Promise<boolean>;
 }
 
 export interface AnalyticsData {
@@ -79,6 +132,14 @@ export class MemStorage implements IStorage {
   private campaignMetrics: Map<string, CampaignMetrics>;
   private activities: ActivityItem[];
   private settings: ApiSettings | undefined;
+  private accounts: Map<string, WhatsAppAccount>;
+  private activeAccountId: string | undefined;
+  private contacts: Map<string, Contact>;
+  private contactLists: Map<string, ContactList>;
+  private contactTags: Map<string, ContactTag>;
+  private conversations: Map<string, Conversation>;
+  private conversationMessages: Map<string, ConversationMessage[]>;
+  private notifications: Map<string, Notification>;
 
   constructor() {
     this.users = new Map();
@@ -88,6 +149,13 @@ export class MemStorage implements IStorage {
     this.campaignMetrics = new Map();
     this.activities = [];
     this.settings = undefined;
+    this.accounts = new Map();
+    this.contacts = new Map();
+    this.contactLists = new Map();
+    this.contactTags = new Map();
+    this.conversations = new Map();
+    this.conversationMessages = new Map();
+    this.notifications = new Map();
 
     // Seed with sample data
     this.seedData();
@@ -303,6 +371,116 @@ export class MemStorage implements IStorage {
         timestamp: new Date(Date.now() - 3 * 60 * 60 * 1000),
       },
     ];
+
+    // Seed WhatsApp accounts
+    const acc1Id = randomUUID();
+    this.accounts.set(acc1Id, {
+      id: acc1Id,
+      name: "Thoughtful Services",
+      phoneNumber: "+91 89203 90530",
+      phoneNumberId: "123456789",
+      businessAccountId: "987654321",
+      accessToken: "",
+      status: "connected",
+      qualityRating: "GREEN",
+      messagingLimit: 100000,
+      messagingUsed: 3409,
+      createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+    });
+    this.activeAccountId = acc1Id;
+
+    // Seed contact lists
+    const listIds: string[] = [];
+    const listData = [
+      { name: "Default", description: "Default contact list" },
+      { name: "17-01-04", description: "Contacts from January 2026" },
+      { name: "list 2", description: "Second contact list" },
+      { name: "all ivr data", description: "IVR contacts" },
+    ];
+    listData.forEach((list, i) => {
+      const id = randomUUID();
+      listIds.push(id);
+      this.contactLists.set(id, {
+        id,
+        accountId: acc1Id,
+        name: list.name,
+        description: list.description,
+        contactCount: [0, 3391, 2299, 2649][i],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+
+    // Seed contact tags
+    const tagData = [
+      { name: "VIP", color: "#22c55e" },
+      { name: "New Customer", color: "#3b82f6" },
+      { name: "Inactive", color: "#ef4444" },
+    ];
+    tagData.forEach((tag) => {
+      const id = randomUUID();
+      this.contactTags.set(id, {
+        id,
+        accountId: acc1Id,
+        name: tag.name,
+        color: tag.color,
+        contactCount: Math.floor(Math.random() * 500),
+        createdAt: new Date(),
+      });
+    });
+
+    // Seed some contacts
+    const contactData = [
+      { phone: "+918840843567", name: undefined },
+      { phone: "+919310967063", name: undefined },
+      { phone: "+918826446429", name: undefined },
+      { phone: "+918410201403", name: undefined },
+      { phone: "+919971853500", name: undefined },
+      { phone: "+919267938981", name: undefined },
+      { phone: "+919911413381", name: "Manish" },
+      { phone: "+918826446429", name: "Ahammad Rezauddin" },
+    ];
+    contactData.forEach((c) => {
+      const id = randomUUID();
+      this.contacts.set(id, {
+        id,
+        accountId: acc1Id,
+        phone: c.phone,
+        name: c.name,
+        status: "subscribed",
+        listIds: listIds.length > 0 ? [listIds[0]] : [],
+        tagIds: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+
+    // Seed conversations
+    const convData = [
+      { phone: "+918840843567", lastMessage: "Get Brochure", unread: 1 },
+      { phone: "+919310967063", lastMessage: "Thank you for your message. We...", unread: 2 },
+      { phone: "+918826446429", lastMessage: "Get Brochure", unread: 1 },
+      { phone: "+918410201403", lastMessage: "Get Brochure", unread: 1 },
+      { phone: "+919971853500", lastMessage: "Get Brochure", unread: 1 },
+    ];
+    convData.forEach((conv) => {
+      const id = randomUUID();
+      const contact = Array.from(this.contacts.values()).find(c => c.phone === conv.phone);
+      this.conversations.set(id, {
+        id,
+        accountId: acc1Id,
+        contactId: contact?.id || "",
+        contactPhone: conv.phone,
+        contactName: contact?.name,
+        lastMessage: conv.lastMessage,
+        lastMessageAt: new Date(Date.now() - Math.random() * 3600000),
+        unreadCount: conv.unread,
+        status: "active",
+        windowEndsAt: new Date(Date.now() + 20 * 60 * 60 * 1000),
+        createdAt: new Date(),
+      });
+      this.conversationMessages.set(id, []);
+    });
   }
 
   // Users
@@ -485,6 +663,7 @@ export class MemStorage implements IStorage {
     const messages = Array.from(this.messages.values());
     const templates = Array.from(this.templates.values());
     const campaigns = Array.from(this.campaigns.values());
+    const activeAccount = this.activeAccountId ? this.accounts.get(this.activeAccountId) : undefined;
 
     const sentCount = messages.filter((m) => m.status !== "queued").length;
     const deliveredCount = messages.filter((m) => m.status === "delivered" || m.status === "read").length;
@@ -505,9 +684,9 @@ export class MemStorage implements IStorage {
       activeCampaigns: campaigns.filter((c) => c.status === "running").length,
       approvedTemplates: templates.filter((t) => t.status === "APPROVED").length,
       pendingTemplates: templates.filter((t) => t.status === "PENDING").length,
-      messagingLimit: 100000,
-      messagingUsed: messages.length,
-      qualityRating: "GREEN",
+      messagingLimit: activeAccount?.messagingLimit || 100000,
+      messagingUsed: activeAccount?.messagingUsed || messages.length,
+      qualityRating: (activeAccount?.qualityRating as "GREEN" | "YELLOW" | "RED" | "UNKNOWN") || "GREEN",
       apiStatus: this.settings ? "connected" : "disconnected",
     };
   }
@@ -678,6 +857,305 @@ export class MemStorage implements IStorage {
         totalCost: Math.round(totalCost * 100) / 100,
       },
     };
+  }
+
+  // WhatsApp Accounts
+  async getAccounts(): Promise<WhatsAppAccount[]> {
+    return Array.from(this.accounts.values());
+  }
+
+  async getAccount(id: string): Promise<WhatsAppAccount | undefined> {
+    return this.accounts.get(id);
+  }
+
+  async createAccount(account: InsertWhatsAppAccount): Promise<WhatsAppAccount> {
+    const id = randomUUID();
+    const newAccount: WhatsAppAccount = {
+      ...account,
+      id,
+      status: "pending",
+      qualityRating: "UNKNOWN",
+      messagingLimit: 1000,
+      messagingUsed: 0,
+      createdAt: new Date(),
+    };
+    this.accounts.set(id, newAccount);
+    return newAccount;
+  }
+
+  async updateAccount(id: string, updates: Partial<WhatsAppAccount>): Promise<WhatsAppAccount | undefined> {
+    const account = this.accounts.get(id);
+    if (!account) return undefined;
+    const updated = { ...account, ...updates };
+    this.accounts.set(id, updated);
+    return updated;
+  }
+
+  async deleteAccount(id: string): Promise<boolean> {
+    return this.accounts.delete(id);
+  }
+
+  async setActiveAccount(id: string): Promise<void> {
+    this.activeAccountId = id;
+  }
+
+  async getActiveAccountId(): Promise<string | undefined> {
+    return this.activeAccountId;
+  }
+
+  // Contacts
+  async getContacts(): Promise<Contact[]> {
+    const accountId = this.activeAccountId;
+    return Array.from(this.contacts.values()).filter(c => c.accountId === accountId);
+  }
+
+  async getContact(id: string): Promise<Contact | undefined> {
+    return this.contacts.get(id);
+  }
+
+  async createContact(contact: InsertContact): Promise<Contact> {
+    const id = randomUUID();
+    const accountId = this.activeAccountId || "";
+    const newContact: Contact = {
+      ...contact,
+      id,
+      accountId,
+      status: contact.status || "subscribed",
+      listIds: contact.listIds || [],
+      tagIds: contact.tagIds || [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.contacts.set(id, newContact);
+    return newContact;
+  }
+
+  async updateContact(id: string, updates: Partial<Contact>): Promise<Contact | undefined> {
+    const contact = this.contacts.get(id);
+    if (!contact || contact.accountId !== this.activeAccountId) return undefined;
+    const updated = { ...contact, ...updates, updatedAt: new Date() };
+    this.contacts.set(id, updated);
+    return updated;
+  }
+
+  async deleteContact(id: string): Promise<boolean> {
+    const contact = this.contacts.get(id);
+    if (!contact || contact.accountId !== this.activeAccountId) return false;
+    return this.contacts.delete(id);
+  }
+
+  async importContacts(contacts: InsertContact[], listId?: string): Promise<number> {
+    const accountId = this.activeAccountId;
+    let imported = 0;
+    for (const contact of contacts) {
+      const existing = Array.from(this.contacts.values()).find(c => c.phone === contact.phone && c.accountId === accountId);
+      if (!existing) {
+        await this.createContact({
+          ...contact,
+          listIds: listId ? [listId] : contact.listIds || [],
+        });
+        imported++;
+      }
+    }
+    if (listId) {
+      const list = this.contactLists.get(listId);
+      if (list) {
+        list.contactCount += imported;
+        this.contactLists.set(listId, list);
+      }
+    }
+    return imported;
+  }
+
+  // Contact Lists
+  async getLists(): Promise<ContactList[]> {
+    const accountId = this.activeAccountId;
+    return Array.from(this.contactLists.values()).filter(l => l.accountId === accountId);
+  }
+
+  async getList(id: string): Promise<ContactList | undefined> {
+    return this.contactLists.get(id);
+  }
+
+  async createList(list: InsertContactList): Promise<ContactList> {
+    const id = randomUUID();
+    const accountId = this.activeAccountId || "";
+    const newList: ContactList = {
+      ...list,
+      id,
+      accountId,
+      contactCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.contactLists.set(id, newList);
+    return newList;
+  }
+
+  async updateList(id: string, updates: Partial<ContactList>): Promise<ContactList | undefined> {
+    const list = this.contactLists.get(id);
+    if (!list || list.accountId !== this.activeAccountId) return undefined;
+    const updated = { ...list, ...updates, updatedAt: new Date() };
+    this.contactLists.set(id, updated);
+    return updated;
+  }
+
+  async deleteList(id: string): Promise<boolean> {
+    const list = this.contactLists.get(id);
+    if (!list || list.accountId !== this.activeAccountId) return false;
+    return this.contactLists.delete(id);
+  }
+
+  // Contact Tags
+  async getTags(): Promise<ContactTag[]> {
+    const accountId = this.activeAccountId;
+    return Array.from(this.contactTags.values()).filter(t => t.accountId === accountId);
+  }
+
+  async getTag(id: string): Promise<ContactTag | undefined> {
+    return this.contactTags.get(id);
+  }
+
+  async createTag(tag: InsertContactTag): Promise<ContactTag> {
+    const id = randomUUID();
+    const accountId = this.activeAccountId || "";
+    const newTag: ContactTag = {
+      ...tag,
+      id,
+      accountId,
+      contactCount: 0,
+      createdAt: new Date(),
+    };
+    this.contactTags.set(id, newTag);
+    return newTag;
+  }
+
+  async deleteTag(id: string): Promise<boolean> {
+    const tag = this.contactTags.get(id);
+    if (!tag || tag.accountId !== this.activeAccountId) return false;
+    return this.contactTags.delete(id);
+  }
+
+  // Conversations
+  async getConversations(): Promise<Conversation[]> {
+    const accountId = this.activeAccountId;
+    return Array.from(this.conversations.values())
+      .filter(c => c.accountId === accountId)
+      .sort((a, b) => new Date(b.lastMessageAt || b.createdAt).getTime() - new Date(a.lastMessageAt || a.createdAt).getTime());
+  }
+
+  async getConversation(id: string): Promise<Conversation | undefined> {
+    return this.conversations.get(id);
+  }
+
+  async getConversationByPhone(phone: string): Promise<Conversation | undefined> {
+    const accountId = this.activeAccountId;
+    return Array.from(this.conversations.values()).find(c => c.contactPhone === phone && c.accountId === accountId);
+  }
+
+  async createConversation(phone: string, name?: string): Promise<Conversation> {
+    const id = randomUUID();
+    const accountId = this.activeAccountId || "";
+    const contact = Array.from(this.contacts.values()).find(c => c.phone === phone);
+    const newConv: Conversation = {
+      id,
+      accountId,
+      contactId: contact?.id || "",
+      contactPhone: phone,
+      contactName: name || contact?.name,
+      unreadCount: 0,
+      status: "open",
+      createdAt: new Date(),
+    };
+    this.conversations.set(id, newConv);
+    this.conversationMessages.set(id, []);
+    return newConv;
+  }
+
+  async updateConversation(id: string, updates: Partial<Conversation>): Promise<Conversation | undefined> {
+    const conv = this.conversations.get(id);
+    if (!conv || conv.accountId !== this.activeAccountId) return undefined;
+    const updated = { ...conv, ...updates };
+    this.conversations.set(id, updated);
+    return updated;
+  }
+
+  async getConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
+    return this.conversationMessages.get(conversationId) || [];
+  }
+
+  async addConversationMessage(message: InsertConversationMessage): Promise<ConversationMessage> {
+    const id = randomUUID();
+    const newMessage: ConversationMessage = {
+      ...message,
+      id,
+      sentAt: new Date(),
+    };
+    const messages = this.conversationMessages.get(message.conversationId) || [];
+    messages.push(newMessage);
+    this.conversationMessages.set(message.conversationId, messages);
+    
+    // Update conversation
+    const conv = this.conversations.get(message.conversationId);
+    if (conv) {
+      conv.lastMessage = message.content;
+      conv.lastMessageAt = new Date();
+      if (message.direction === "inbound") {
+        conv.unreadCount++;
+      }
+      this.conversations.set(message.conversationId, conv);
+    }
+    return newMessage;
+  }
+
+  // Notifications/Broadcasts
+  async getNotifications(): Promise<Notification[]> {
+    const accountId = this.activeAccountId;
+    return Array.from(this.notifications.values())
+      .filter(n => n.accountId === accountId)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  async getNotification(id: string): Promise<Notification | undefined> {
+    return this.notifications.get(id);
+  }
+
+  async createNotification(notification: InsertNotification): Promise<Notification> {
+    const id = randomUUID();
+    const accountId = this.activeAccountId || "";
+    const totalRecipients = notification.listIds.reduce((sum, listId) => {
+      const list = this.contactLists.get(listId);
+      return sum + (list?.contactCount || 0);
+    }, 0);
+    
+    const newNotification: Notification = {
+      ...notification,
+      id,
+      accountId,
+      status: notification.scheduledAt ? "scheduled" : "draft",
+      totalRecipients,
+      sentCount: 0,
+      deliveredCount: 0,
+      readCount: 0,
+      failedCount: 0,
+      createdAt: new Date(),
+    };
+    this.notifications.set(id, newNotification);
+    return newNotification;
+  }
+
+  async updateNotification(id: string, updates: Partial<Notification>): Promise<Notification | undefined> {
+    const notification = this.notifications.get(id);
+    if (!notification || notification.accountId !== this.activeAccountId) return undefined;
+    const updated = { ...notification, ...updates };
+    this.notifications.set(id, updated);
+    return updated;
+  }
+
+  async deleteNotification(id: string): Promise<boolean> {
+    const notification = this.notifications.get(id);
+    if (!notification || notification.accountId !== this.activeAccountId) return false;
+    return this.notifications.delete(id);
   }
 }
 

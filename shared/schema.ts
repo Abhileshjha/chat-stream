@@ -182,3 +182,184 @@ export interface ApiSettings {
   webhookVerifyToken: string;
   apiVersion: string;
 }
+
+// WhatsApp Account/Number type
+export interface WhatsAppAccount {
+  id: string;
+  name: string;
+  phoneNumber: string;
+  phoneNumberId: string;
+  businessAccountId: string;
+  accessToken: string;
+  status: "connected" | "disconnected" | "pending";
+  qualityRating: QualityScore;
+  messagingLimit: number;
+  messagingUsed: number;
+  createdAt: Date;
+}
+
+export interface InsertWhatsAppAccount {
+  name: string;
+  phoneNumber: string;
+  phoneNumberId: string;
+  businessAccountId: string;
+  accessToken: string;
+}
+
+// Contact Lists
+export interface ContactList {
+  id: string;
+  accountId: string;
+  name: string;
+  description?: string;
+  contactCount: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface InsertContactList {
+  name: string;
+  description?: string;
+}
+
+// Contact Tags
+export interface ContactTag {
+  id: string;
+  accountId: string;
+  name: string;
+  color: string;
+  contactCount: number;
+  createdAt: Date;
+}
+
+export interface InsertContactTag {
+  name: string;
+  color: string;
+}
+
+// Contacts
+export interface Contact {
+  id: string;
+  accountId: string;
+  phone: string;
+  name?: string;
+  email?: string;
+  status: "subscribed" | "unsubscribed";
+  listIds: string[];
+  tagIds: string[];
+  customFields?: Record<string, string>;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface InsertContact {
+  phone: string;
+  name?: string;
+  email?: string;
+  status?: "subscribed" | "unsubscribed";
+  listIds?: string[];
+  tagIds?: string[];
+  customFields?: Record<string, string>;
+}
+
+// Conversation
+export interface Conversation {
+  id: string;
+  accountId: string;
+  contactId: string;
+  contactPhone: string;
+  contactName?: string;
+  lastMessage?: string;
+  lastMessageAt?: Date;
+  unreadCount: number;
+  status: "open" | "active" | "closed";
+  windowEndsAt?: Date;
+  createdAt: Date;
+}
+
+export interface ConversationMessage {
+  id: string;
+  conversationId: string;
+  direction: "inbound" | "outbound";
+  type: "text" | "image" | "video" | "document" | "template";
+  content: string;
+  mediaUrl?: string;
+  templateName?: string;
+  status?: MessageStatus;
+  sentAt: Date;
+  deliveredAt?: Date;
+  readAt?: Date;
+}
+
+export interface InsertConversationMessage {
+  conversationId: string;
+  direction: "inbound" | "outbound";
+  type: "text" | "image" | "video" | "document" | "template";
+  content: string;
+  mediaUrl?: string;
+  templateName?: string;
+}
+
+// Enhanced Template with header media and buttons
+export interface TemplateButton {
+  type: "QUICK_REPLY" | "PHONE_NUMBER" | "URL";
+  text: string;
+  phoneNumber?: string;
+  url?: string;
+}
+
+export interface TemplateHeader {
+  type: "NONE" | "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT";
+  text?: string;
+  mediaUrl?: string;
+}
+
+export interface EnhancedTemplateData {
+  header?: TemplateHeader;
+  body: string;
+  footer?: string;
+  buttons?: TemplateButton[];
+}
+
+// Notification/Broadcast
+export interface Notification {
+  id: string;
+  accountId: string;
+  name: string;
+  status: "draft" | "scheduled" | "sending" | "completed" | "failed";
+  templateId: string;
+  listIds: string[];
+  excludeTags?: string[];
+  includeTags?: string[];
+  scheduledAt?: Date;
+  sentAt?: Date;
+  completedAt?: Date;
+  totalRecipients: number;
+  sentCount: number;
+  deliveredCount: number;
+  readCount: number;
+  failedCount: number;
+  templateVariables?: Record<string, string>;
+  createdAt: Date;
+}
+
+export interface InsertNotification {
+  name: string;
+  templateId: string;
+  listIds: string[];
+  excludeTags?: string[];
+  includeTags?: string[];
+  scheduledAt?: string;
+  templateVariables?: Record<string, string>;
+}
+
+// Content Library Media
+export interface MediaAsset {
+  id: string;
+  name: string;
+  type: "image" | "video" | "document";
+  url: string;
+  size: number;
+  mimeType: string;
+  createdAt: Date;
+}
