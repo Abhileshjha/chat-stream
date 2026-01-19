@@ -1,0 +1,497 @@
+I'll create a detailed prompt that emphasizes real-time data synchronization with Meta WhatsApp Business API.
+Project Overview
+Create a modern, professional WhatsApp broadcasting web application with real-time Meta Business API integration, featuring live data synchronization for template statuses, message delivery tracking, and campaign analytics.
+Core Meta WhatsApp Business API Integration
+1. Real-time Template Status Synchronization
+Requirements:
+
+Automatic template status updates from Meta API
+Status types: PENDING, APPROVED, REJECTED, DISABLED, PAUSED
+Real-time webhook listeners for status changes
+Manual "Fetch Templates" and "Refresh Statuses" buttons
+Template quality ratings from Meta
+Rejection reasons display
+
+Implementation:
+- Webhook endpoint for template status updates
+- Polling mechanism (fallback): Check every 5 minutes
+- Store template metadata:
+  - Template ID from Meta
+  - Name, category, language
+  - Status and last updated timestamp
+  - Rejection reason (if rejected)
+  - Quality score
+  - Components (header, body, footer, buttons)
+- Sync templates from Meta on:
+  - Initial page load
+  - Manual refresh button click
+  - Webhook notification received
+  - After template submission
+2. Real-time Message Delivery Tracking
+Requirements:
+
+Live message status updates via webhooks
+Message statuses: sent, delivered, read, failed
+Error codes and failure reasons from Meta
+Real-time campaign metrics updates
+Individual message tracking
+
+Implementation:
+- Webhook endpoint for message status updates
+- Message status flow:
+  1. queued (in our system)
+  2. sent (accepted by Meta)
+  3. delivered (delivered to recipient)
+  4. read (read by recipient)
+  5. failed (with error code and description)
+  
+- Store for each message:
+  - Message ID (WhatsApp message ID)
+  - Campaign ID
+  - Recipient phone number
+  - Template used
+  - Status
+  - Timestamps (queued, sent, delivered, read)
+  - Error code and description (if failed)
+  - Cost/pricing data
+  
+- Real-time updates to:
+  - Campaign dashboard metrics
+  - Notification detail pages
+  - Analytics charts
+  - Cost calculations
+3. Live Dashboard Metrics
+Requirements:
+
+Real-time API usage statistics
+Message delivery stats updating automatically
+Cost tracking based on Meta pricing
+Quality rating updates
+Phone number status monitoring
+
+Implementation:
+- WebSocket/Server-Sent Events for live updates
+- Metrics updated from:
+  - Message webhooks (delivery status)
+  - Meta API polling (account info, limits)
+  - Template webhooks (quality changes)
+  
+- Dashboard widgets auto-refresh:
+  - Message counts (sent, delivered, read, failed)
+  - Cost breakdown by category
+  - Quality rating changes
+  - Messaging limit usage (X/100k per 24hr)
+  - API connection status
+4. Meta API Endpoints Integration
+Required Meta API Calls:
+A. Template Management:
+GET /v18.0/{whatsapp-business-account-id}/message_templates
+- Fetch all templates with current status
+- Sync to local database
+- Update UI in real-time
+
+POST /v18.0/{whatsapp-business-account-id}/message_templates
+- Submit new template for approval
+- Receive template ID
+- Track submission status
+
+DELETE /v18.0/{whatsapp-business-account-id}/message_templates
+- Delete template
+- Update local database
+B. Sending Messages:
+POST /v18.0/{phone-number-id}/messages
+- Send individual message
+- Receive WhatsApp message ID
+- Store for tracking
+
+Request body structure:
+{
+  "messaging_product": "whatsapp",
+  "to": "recipient_phone",
+  "type": "template",
+  "template": {
+    "name": "template_name",
+    "language": { "code": "en" },
+    "components": [...]
+  }
+}
+
+Response:
+{
+  "messages": [{
+    "id": "wamid.XXX"
+  }]
+}
+C. Account Information:
+GET /v18.0/{phone-number-id}
+- Get phone number details
+- Quality rating
+- Messaging limits
+- Verification status
+
+GET /v18.0/{whatsapp-business-account-id}
+- Account status
+- Current tier
+- Messaging limits
+5. Webhook Configuration
+Required Webhooks:
+A. Message Status Webhook:
+POST /webhook/messages
+Receives:
+{
+  "object": "whatsapp_business_account",
+  "entry": [{
+    "changes": [{
+      "field": "messages",
+      "value": {
+        "messaging_product": "whatsapp",
+        "metadata": {
+          "phone_number_id": "..."
+        },
+        "statuses": [{
+          "id": "wamid.XXX",
+          "status": "delivered|read|failed",
+          "timestamp": "...",
+          "recipient_id": "...",
+          "errors": [...]
+        }]
+      }
+    }]
+  }]
+}
+
+Actions:
+1. Extract message ID
+2. Find message in database
+3. Update status and timestamp
+4. If failed, store error details
+5. Update campaign metrics
+6. Emit real-time update to frontend
+7. Update cost calculations
+B. Template Status Webhook:
+POST /webhook/templates
+Receives:
+{
+  "object": "whatsapp_business_account",
+  "entry": [{
+    "changes": [{
+      "field": "message_template_status_update",
+      "value": {
+        "event": "APPROVED|REJECTED|DISABLED",
+        "message_template_id": "...",
+        "message_template_name": "...",
+        "message_template_language": "...",
+        "reason": "..."
+      }
+    }]
+  }]
+}
+
+Actions:
+1. Find template in database
+2. Update status
+3. Store rejection reason if applicable
+4. Update UI in real-time
+5. Notify user of status change
+C. Account Update Webhook:
+POST /webhook/account
+Receives quality rating changes, limit updates, etc.
+
+Actions:
+1. Update account information
+2. Refresh dashboard metrics
+3. Alert if quality degraded
+Enhanced Features with Real-time Data
+1. Campaign Dashboard with Live Updates
+Features:
+- Live message counter (updates as messages are sent/delivered)
+- Real-time delivery rate calculation
+- Live cost tracking
+- Status distribution chart (updating live)
+- Error rate monitoring
+- Average delivery time calculation
+
+UI Elements:
+- Animated counters
+- Progress bars for campaign completion
+- Live status badges
+- Real-time notification badges
+- Color-coded metrics (green=good, yellow=warning, red=error)
+2. Template Management with Status Sync
+Features:
+- Auto-refresh template list every 5 minutes
+- Manual refresh button
+- Status change notifications
+- Quality score display
+- Last updated timestamp
+- Rejection reason viewer
+
+UI Elements:
+- Status badges (color-coded)
+- Sync status indicator
+- Last sync timestamp
+- Loading states during refresh
+- Toast notifications for status changes
+3. Message Tracking Table
+Columns:
+- Message ID (WhatsApp ID)
+- Recipient
+- Template
+- Status (with icon)
+- Sent time
+- Delivered time
+- Read time
+- Error (if failed)
+- Cost
+
+Features:
+- Real-time row updates
+- Status filter
+- Search by phone/ID
+- Export with current data
+- Auto-scroll to new messages
+- Highlight recently updated rows
+4. Error Handling & Reporting
+Meta API Error Codes to Handle:
+- 130472: User phone number not registered
+- 131026: Message undeliverable
+- 131047: Re-engagement message not sent (24hr window)
+- 131051: Unsupported message type
+- 133016: Template paused/disabled
+- 135000: Generic error
+
+Implementation:
+- Store error code and description
+- Display user-friendly error messages
+- Categorize errors (permanent vs temporary)
+- Retry logic for temporary errors
+- Error analytics dashboard
+- Alert on high error rates
+Technical Implementation Details
+Backend Architecture
+javascript// Webhook Handler Structure
+app.post('/webhook/messages', async (req, res) => {
+  // 1. Verify webhook signature
+  // 2. Parse webhook payload
+  // 3. Extract message status updates
+  // 4. Update database
+  // 5. Emit real-time event to frontend
+  // 6. Update campaign metrics
+  // 7. Respond to Meta within 20 seconds
+});
+
+// Template Sync Service
+class TemplateSyncService {
+  async syncTemplates() {
+    // 1. Call Meta API to get all templates
+    // 2. Compare with local database
+    // 3. Update changed templates
+    // 4. Add new templates
+    // 5. Mark deleted templates
+    // 6. Emit update event
+    // 7. Return sync summary
+  }
+  
+  async scheduledSync() {
+    // Run every 5 minutes
+    setInterval(() => this.syncTemplates(), 5 * 60 * 1000);
+  }
+}
+
+// Message Sender Service
+class MessageSenderService {
+  async sendMessage(recipient, templateName, params) {
+    // 1. Build Meta API request
+    // 2. Send to Meta API
+    // 3. Receive WhatsApp message ID
+    // 4. Store in database with status "sent"
+    // 5. Return message ID
+    // 6. Wait for webhook updates
+  }
+  
+  async sendBulkMessages(campaign) {
+    // 1. Get recipient list
+    // 2. Check messaging limits
+    // 3. Send in batches (rate limiting)
+    // 4. Track progress
+    // 5. Update campaign status
+    // 6. Handle errors
+  }
+}
+Frontend Real-time Updates
+javascript// WebSocket Connection
+const socket = io();
+
+socket.on('message-status-update', (data) => {
+  // Update message status in UI
+  updateMessageRow(data.messageId, data.status);
+  updateCampaignMetrics(data.campaignId);
+});
+
+socket.on('template-status-update', (data) => {
+  // Update template status badge
+  updateTemplateStatus(data.templateId, data.status);
+  showNotification(`Template ${data.name} is now ${data.status}`);
+});
+
+socket.on('campaign-progress', (data) => {
+  // Update campaign progress bar
+  updateProgressBar(data.campaignId, data.percentage);
+  updateMetrics(data.metrics);
+});
+
+// Auto-refresh mechanism
+useEffect(() => {
+  const interval = setInterval(() => {
+    fetchLatestMetrics();
+  }, 10000); // Every 10 seconds
+  
+  return () => clearInterval(interval);
+}, []);
+Database Schema for Real-time Tracking
+sql-- Messages table with full tracking
+CREATE TABLE messages (
+  id SERIAL PRIMARY KEY,
+  whatsapp_message_id VARCHAR(255) UNIQUE,
+  campaign_id INTEGER REFERENCES campaigns(id),
+  recipient_phone VARCHAR(20),
+  template_id INTEGER REFERENCES templates(id),
+  status VARCHAR(20), -- queued, sent, delivered, read, failed
+  queued_at TIMESTAMP,
+  sent_at TIMESTAMP,
+  delivered_at TIMESTAMP,
+  read_at TIMESTAMP,
+  error_code VARCHAR(50),
+  error_description TEXT,
+  cost DECIMAL(10, 4),
+  metadata JSONB
+);
+
+-- Index for fast lookups
+CREATE INDEX idx_messages_whatsapp_id ON messages(whatsapp_message_id);
+CREATE INDEX idx_messages_campaign ON messages(campaign_id);
+CREATE INDEX idx_messages_status ON messages(status);
+
+-- Templates with Meta sync data
+CREATE TABLE templates (
+  id SERIAL PRIMARY KEY,
+  meta_template_id VARCHAR(255) UNIQUE,
+  name VARCHAR(512),
+  category VARCHAR(50),
+  language VARCHAR(10),
+  status VARCHAR(20), -- PENDING, APPROVED, REJECTED, DISABLED
+  quality_score VARCHAR(20), -- GREEN, YELLOW, RED
+  rejection_reason TEXT,
+  components JSONB,
+  last_synced_at TIMESTAMP,
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
+);
+
+-- Campaign metrics (updated in real-time)
+CREATE TABLE campaign_metrics (
+  campaign_id INTEGER PRIMARY KEY REFERENCES campaigns(id),
+  total_messages INTEGER DEFAULT 0,
+  sent_count INTEGER DEFAULT 0,
+  delivered_count INTEGER DEFAULT 0,
+  read_count INTEGER DEFAULT 0,
+  failed_count INTEGER DEFAULT 0,
+  total_cost DECIMAL(10, 2) DEFAULT 0,
+  last_updated_at TIMESTAMP,
+  
+  -- Percentages calculated on read
+  delivery_rate DECIMAL(5, 2) GENERATED ALWAYS AS 
+    (CASE WHEN sent_count > 0 THEN (delivered_count::DECIMAL / sent_count * 100) ELSE 0 END) STORED,
+  read_rate DECIMAL(5, 2) GENERATED ALWAYS AS 
+    (CASE WHEN delivered_count > 0 THEN (read_count::DECIMAL / delivered_count * 100) ELSE 0 END) STORED
+);
+API Integration Configuration
+javascript// Meta API Configuration
+const META_CONFIG = {
+  apiVersion: 'v18.0',
+  baseUrl: 'https://graph.facebook.com',
+  accessToken: process.env.META_ACCESS_TOKEN,
+  phoneNumberId: process.env.META_PHONE_NUMBER_ID,
+  businessAccountId: process.env.META_BUSINESS_ACCOUNT_ID,
+  webhookVerifyToken: process.env.WEBHOOK_VERIFY_TOKEN,
+  webhookSecret: process.env.WEBHOOK_SECRET
+};
+
+// Rate Limiting
+const RATE_LIMITS = {
+  messagesPerSecond: 80, // Meta's limit
+  messagesPerHour: 100000, // Based on tier
+  maxRetries: 3,
+  retryDelay: 1000 // ms
+};
+```
+
+## UI Components for Real-time Data
+
+### 1. **Live Campaign Dashboard**
+```
+Components:
+- <LiveMetricCard /> - Auto-updating metric displays
+- <RealTimeChart /> - Updates as data comes in
+- <StatusBadge /> - Changes color based on status
+- <ProgressRing /> - Shows campaign completion
+- <LiveActivityFeed /> - Shows recent message events
+```
+
+### 2. **Template Status Indicator**
+```
+<TemplateStatusBadge
+  status={template.status}
+  lastSynced={template.lastSyncedAt}
+  qualityScore={template.qualityScore}
+  onRefresh={handleManualRefresh}
+/>
+
+States:
+- PENDING: Yellow badge, pulsing animation
+- APPROVED: Green badge, checkmark icon
+- REJECTED: Red badge, error icon + reason tooltip
+- DISABLED: Gray badge, warning icon
+```
+
+### 3. **Message Tracking Table**
+```
+<MessageTable
+  data={messages}
+  onRowUpdate={handleRealtimeUpdate}
+  highlightRecent={true}
+  autoRefresh={true}
+/>
+
+Features:
+- Row highlighting for recent updates
+- Status icon animations
+- Timestamp formatting (relative time)
+- Error popover on failed messages
+- Export current data button
+```
+
+## Monitoring & Analytics
+
+### Real-time Dashboards
+```
+1. Operations Dashboard:
+   - Messages per minute graph
+   - Current sending rate
+   - Queue depth
+   - Error rate trend
+   - API latency
+
+2. Business Dashboard:
+   - Campaign ROI
+   - Cost per message by category
+   - Engagement rates
+   - Best performing templates
+   - Peak usage times
+
+3. System Health:
+   - Webhook success rate
+   - Database query performance
+   - API response times
+   - Failed job retries
+   - System uptime
