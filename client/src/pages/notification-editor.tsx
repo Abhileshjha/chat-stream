@@ -291,7 +291,7 @@ export default function NotificationEditor() {
                   </SelectTrigger>
                   <SelectContent>
                     {approvedTemplates.length === 0 ? (
-                      <SelectItem value="" disabled>No approved templates</SelectItem>
+                      <SelectItem value="none" disabled>No approved templates</SelectItem>
                     ) : (
                       approvedTemplates.map((template) => (
                         <SelectItem key={template.id} value={template.id}>

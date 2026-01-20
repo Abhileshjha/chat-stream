@@ -202,12 +202,12 @@ export default function ContactsImport() {
                 <div className="space-y-4">
                   <div>
                     <Label>Contact List</Label>
-                    <Select value={selectedList} onValueChange={setSelectedList}>
+                    <Select value={selectedList || "none"} onValueChange={(val) => setSelectedList(val === "none" ? "" : val)}>
                       <SelectTrigger className="mt-1.5" data-testid="select-import-list">
                         <SelectValue placeholder="Select..." />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">No list (import directly)</SelectItem>
+                        <SelectItem value="none">No list (import directly)</SelectItem>
                         {lists.map((list) => (
                           <SelectItem key={list.id} value={list.id}>
                             {list.name}
@@ -399,12 +399,12 @@ export default function ContactsImport() {
             <CardContent className="space-y-4">
               <div>
                 <Label>Select Contact List to Export</Label>
-                <Select defaultValue="">
+                <Select defaultValue="all">
                   <SelectTrigger className="mt-1.5" data-testid="select-export-list">
                     <SelectValue placeholder={`All contacts (${contacts.length} contacts)`} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All contacts ({contacts.length} contacts)</SelectItem>
+                    <SelectItem value="all">All contacts ({contacts.length} contacts)</SelectItem>
                     {lists.map((list) => (
                       <SelectItem key={list.id} value={list.id}>
                         {list.name} ({list.contactCount} contacts)
