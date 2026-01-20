@@ -1,5 +1,4 @@
 import { 
-  type User, type InsertUser,
   type Template, type InsertTemplate,
   type Campaign, type InsertCampaign,
   type Message, type InsertMessage,
@@ -16,10 +15,6 @@ import {
 import { randomUUID } from "crypto";
 
 export interface IStorage {
-  // Users
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
 
   // Templates
   getTemplates(): Promise<Template[]>;
@@ -125,7 +120,6 @@ export interface AnalyticsData {
 }
 
 export class MemStorage implements IStorage {
-  private users: Map<string, User>;
   private templates: Map<string, Template>;
   private campaigns: Map<string, Campaign>;
   private messages: Map<string, Message>;
@@ -142,7 +136,6 @@ export class MemStorage implements IStorage {
   private notifications: Map<string, Notification>;
 
   constructor() {
-    this.users = new Map();
     this.templates = new Map();
     this.campaigns = new Map();
     this.messages = new Map();
@@ -156,9 +149,8 @@ export class MemStorage implements IStorage {
     this.conversations = new Map();
     this.conversationMessages = new Map();
     this.notifications = new Map();
-
-    // Seed with sample data
-    this.seedData();
+    
+    // No sample data - production mode
   }
 
   private seedData() {
@@ -481,24 +473,6 @@ export class MemStorage implements IStorage {
       });
       this.conversationMessages.set(id, []);
     });
-  }
-
-  // Users
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
-  }
-
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username
-    );
-  }
-
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
   }
 
   // Templates

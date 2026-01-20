@@ -66,8 +66,28 @@ The platform supports multiple WhatsApp Business numbers with account switching:
 - Active account selection is stored in memory only (resets on server restart)
 - Dashboard analytics are global, not yet filtered by active account
 
+### Authentication & Subscription
+
+- **Authentication**: Replit Auth with Google login support via `/api/login` and `/api/logout` endpoints
+- **User Model**: Extended user schema with roles (super_admin, admin, user), subscription status (trial, active, canceled, expired), payment tracking (hasPaid, grantedFreeAccess), and trial end date
+- **Access Control**: Regular users require active subscription or free access grant; super_admin can view all users and grant free access
+- **Pricing**: ₹799/month subscription with 7-day free trial
+
+### Public Pages
+
+- **Landing Page** (`/`): Hero section, features showcase, pricing card with ₹799/month, and CTAs for login/signup
+- **Privacy Policy** (`/privacy`): Standard privacy policy for payment gateway compliance
+- **Terms of Service** (`/terms`): Service terms including subscription and usage policies
+- **Refund Policy** (`/refund`): 7-day money-back guarantee policy
+- **Contact Us** (`/contact`): Contact form with email, phone, and address information
+
 ### Recent Changes (January 2026)
 
+- Integrated Replit Auth for user authentication with Google login
+- Created landing page with marketing content and ₹799/month pricing
+- Created legal pages (Privacy, Terms, Refund, Contact) for payment gateway verification
+- Updated user schema to support roles and subscription management
+- Removed sample data for production readiness
 - Added multi-account support with account switcher in sidebar
 - Created Inbox page for 2-way messaging with conversation list and message threads
 - Created Contacts page with contacts table, lists management, and tags
