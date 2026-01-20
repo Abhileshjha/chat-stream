@@ -60,11 +60,10 @@ The platform supports multiple WhatsApp Business numbers with account switching:
 - **Account Switcher**: Dropdown in sidebar header to switch between connected WhatsApp numbers
 - **Data Scoping**: Contacts, lists, tags, conversations, and notifications are scoped to the active account
 - **Account Verification**: All update/delete operations verify accountId before allowing mutations
-- **Account Creation**: Facebook OAuth flow for connecting new WhatsApp Business accounts (UI stub - backend OAuth not yet implemented)
+- **Account Creation**: Facebook OAuth flow for connecting new WhatsApp Business accounts with full backend integration
 
 ### Known Limitations (MVP)
 - Active account selection is stored in memory only (resets on server restart)
-- Facebook OAuth for adding new WhatsApp numbers is a UI stub only
 - Dashboard analytics are global, not yet filtered by active account
 
 ### Recent Changes (January 2026)
@@ -80,6 +79,7 @@ The platform supports multiple WhatsApp Business numbers with account switching:
 - Split Contacts into dedicated pages: main contacts table, lists management, tags management, and import/export with CSV upload
 - Enhanced Settings page with collapsible step-by-step Setup Guide for WhatsApp API integration, including resource links to Meta documentation
 - Fixed SelectItem component empty value bug that caused blank page rendering on Import/Export and Notification Editor pages
+- Implemented Facebook OAuth flow for adding WhatsApp Business accounts with full token exchange and account creation
 
 ### Development vs Production
 
