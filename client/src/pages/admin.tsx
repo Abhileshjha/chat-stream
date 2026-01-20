@@ -46,6 +46,27 @@ export default function Admin() {
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
+  // Check if bootstrap is available (no super admin exists yet)
+  const { data: bootstrapData } = useQuery<{ available: boolean }>({
+    queryKey: ["/api/admin/bootstrap-available"],
+  });
+
+  const bootstrapMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", "/api/admin/bootstrap", {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/bootstrap-available"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+      toast({ title: "Success", description: "You are now a Super Admin!" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message || "Failed to claim super admin role", variant: "destructive" });
+    },
+  });
+
   const { data: stats, isLoading: statsLoading } = useQuery<AdminStats>({
     queryKey: ["/api/admin/stats"],
   });
@@ -130,6 +151,33 @@ export default function Admin() {
     const isUnauthorized = errorMessage.includes("401") || errorMessage.includes("Unauthorized");
     
     if (isForbidden || isUnauthorized) {
+      // Show bootstrap option if no super admin exists yet
+      if (bootstrapData?.available) {
+        return (
+          <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
+            <Shield className="h-16 w-16 text-primary" />
+            <h2 className="text-2xl font-semibold">Claim Super Admin Role</h2>
+            <p className="text-muted-foreground">No super admin has been set up yet.</p>
+            <p className="text-sm text-muted-foreground">As the first user, you can claim the super admin role to manage the platform.</p>
+            <Button 
+              onClick={() => bootstrapMutation.mutate()}
+              disabled={bootstrapMutation.isPending}
+              data-testid="button-claim-super-admin"
+            >
+              {bootstrapMutation.isPending ? (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Claiming...
+                </>
+              ) : (
+                <>
+                  <Shield className="h-4 w-4 mr-2" /> Claim Super Admin Role
+                </>
+              )}
+            </Button>
+          </div>
+        );
+      }
+      
       return (
         <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
           <Shield className="h-16 w-16 text-muted-foreground" />
