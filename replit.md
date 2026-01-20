@@ -78,6 +78,8 @@ The platform supports multiple WhatsApp Business numbers with account switching:
 - Created full-page Template Editor with media headers (text/image/video/document), body with formatting, footer, and interactive buttons (QUICK_REPLY, URL, PHONE_NUMBER)
 - Created full-page Notification Editor with template selection, recipient targeting via contact lists, scheduling, and live preview
 - Split Contacts into dedicated pages: main contacts table, lists management, tags management, and import/export with CSV upload
+- Enhanced Settings page with collapsible step-by-step Setup Guide for WhatsApp API integration, including resource links to Meta documentation
+- Fixed SelectItem component empty value bug that caused blank page rendering on Import/Export and Notification Editor pages
 
 ### Development vs Production
 
