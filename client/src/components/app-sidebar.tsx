@@ -1,5 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useEffect } from "react";
 import {
   LayoutDashboard,
   FileText,
@@ -21,6 +22,13 @@ import {
   Upload,
   Shield,
 } from "lucide-react";
+
+declare global {
+  interface Window {
+    FB: any;
+    __FB_APP_ID__: string;
+  }
+}
 import {
   Sidebar,
   SidebarContent,
@@ -166,31 +174,105 @@ export function AppSidebar({
     return 0;
   };
 
-  const handleFacebookLogin = async () => {
-    setIsConnecting(true);
-    try {
-      const response = await fetch('/api/auth/facebook');
-      const data = await response.json();
-      
-      if (!response.ok) {
-        toast({
-          title: "Configuration Required",
-          description: data.message || "Facebook App credentials are not configured. Please add them in Settings.",
-          variant: "destructive",
+  // Fetch Facebook App ID for SDK initialization
+  const { data: fbConfig } = useQuery<{ appId: string }>({
+    queryKey: ["/api/auth/facebook/config"],
+  });
+
+  // Set the FB App ID for the SDK when config is loaded
+  useEffect(() => {
+    if (fbConfig?.appId) {
+      window.__FB_APP_ID__ = fbConfig.appId;
+      // Reinitialize FB SDK if it's already loaded
+      if (window.FB) {
+        window.FB.init({
+          appId: fbConfig.appId,
+          cookie: true,
+          xfbml: true,
+          version: 'v18.0'
         });
-        setAddAccountOpen(false);
-        return;
       }
-      
-      // Redirect to Facebook OAuth
-      window.location.href = data.authUrl;
+    }
+  }, [fbConfig?.appId]);
+
+  // Mutation to process the embedded signup response
+  const processEmbeddedSignupMutation = useMutation({
+    mutationFn: async (data: { accessToken: string; userId: string }) => {
+      return apiRequest("POST", "/api/auth/facebook/embedded-signup", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/accounts"] });
+      setAddAccountOpen(false);
+      toast({
+        title: "Account Connected",
+        description: "Your WhatsApp Business account has been connected successfully.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Connection Error",
+        description: error.message || "Failed to connect WhatsApp Business account.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleFacebookLogin = async () => {
+    if (!fbConfig?.appId) {
+      toast({
+        title: "Configuration Required",
+        description: "Facebook App credentials are not configured. Please contact the administrator.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!window.FB) {
+      toast({
+        title: "Loading",
+        description: "Facebook SDK is still loading. Please try again in a moment.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsConnecting(true);
+    
+    try {
+      // Use Meta's Embedded Signup flow
+      window.FB.login(
+        (response: any) => {
+          console.log("Embedded signup response:", response);
+          
+          if (response.authResponse) {
+            // Successfully authenticated - send to backend
+            processEmbeddedSignupMutation.mutate({
+              accessToken: response.authResponse.accessToken,
+              userId: response.authResponse.userID,
+            });
+          } else {
+            toast({
+              title: "Login Cancelled",
+              description: "Facebook login was cancelled or failed.",
+              variant: "destructive",
+            });
+          }
+          setIsConnecting(false);
+        },
+        {
+          scope: 'whatsapp_business_management,whatsapp_business_messaging',
+          extras: {
+            feature: 'whatsapp_embedded_signup'
+          }
+        }
+      );
     } catch (error) {
+      console.error("Facebook login error:", error);
       toast({
         title: "Connection Error",
         description: "Failed to initiate Facebook login. Please try again.",
         variant: "destructive",
       });
-    } finally {
       setIsConnecting(false);
     }
   };

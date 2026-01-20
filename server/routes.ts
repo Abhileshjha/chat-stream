@@ -581,7 +581,80 @@ export async function registerRoutes(
   const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
   const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
 
-  // Generate the OAuth URL for Facebook login
+  // Return Facebook App ID for SDK initialization (frontend needs this)
+  app.get("/api/auth/facebook/config", (req, res) => {
+    if (!FACEBOOK_APP_ID) {
+      return res.status(500).json({ 
+        error: "Facebook App ID not configured",
+        message: "Please add FACEBOOK_APP_ID to your secrets"
+      });
+    }
+    res.json({ appId: FACEBOOK_APP_ID });
+  });
+
+  // Handle Embedded Signup response from Facebook SDK
+  app.post("/api/auth/facebook/embedded-signup", async (req, res) => {
+    const { accessToken, userId } = req.body;
+
+    if (!accessToken || !userId) {
+      return res.status(400).json({ error: "Missing access token or user ID" });
+    }
+
+    try {
+      // Get WhatsApp Business Accounts using the access token
+      const wabaResponse = await fetch(
+        `https://graph.facebook.com/v18.0/me/businesses?` +
+        `fields=id,name,owned_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}` +
+        `&access_token=${accessToken}`
+      );
+
+      if (!wabaResponse.ok) {
+        const errorData = await wabaResponse.json();
+        console.error('WABA fetch failed:', errorData);
+        return res.status(400).json({ error: "Failed to fetch WhatsApp Business accounts" });
+      }
+
+      const wabaData = await wabaResponse.json() as any;
+      
+      // Find WhatsApp Business Accounts
+      let accountsCreated = 0;
+      for (const business of wabaData.data || []) {
+        const wabas = business.owned_whatsapp_business_accounts?.data || [];
+        for (const waba of wabas) {
+          const phoneNumbers = waba.phone_numbers?.data || [];
+          for (const phone of phoneNumbers) {
+            // Create account for each phone number
+            const existingAccounts = await storage.getAccounts();
+            const alreadyExists = existingAccounts.some(a => a.phoneNumberId === phone.id);
+            
+            if (!alreadyExists) {
+              await storage.createAccount({
+                name: phone.verified_name || waba.name || business.name,
+                phoneNumber: phone.display_phone_number,
+                phoneNumberId: phone.id,
+                businessAccountId: waba.id,
+                accessToken: accessToken,
+              });
+              accountsCreated++;
+            }
+          }
+        }
+      }
+
+      if (accountsCreated > 0) {
+        broadcast("accounts-updated", { count: accountsCreated });
+        res.json({ success: true, message: `Connected ${accountsCreated} WhatsApp account(s)` });
+      } else {
+        res.json({ success: true, message: "No new WhatsApp Business numbers found" });
+      }
+
+    } catch (error) {
+      console.error('Embedded signup error:', error);
+      res.status(500).json({ error: "Failed to connect WhatsApp account" });
+    }
+  });
+
+  // Generate the OAuth URL for Facebook login (legacy - keeping for compatibility)
   app.get("/api/auth/facebook", (req, res) => {
     if (!FACEBOOK_APP_ID) {
       return res.status(500).json({ 
