@@ -5,6 +5,7 @@ import { storage } from "./storage";
 import { insertTemplateSchema, insertCampaignSchema, insertMessageSchema } from "@shared/schema";
 import { z } from "zod";
 import { authStorage } from "./replit_integrations/auth/storage";
+import { isAuthenticated } from "./replit_integrations/auth/replitAuth";
 
 // WebSocket clients for real-time updates
 const wsClients = new Set<WebSocket>();
@@ -582,7 +583,8 @@ export async function registerRoutes(
   const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
 
   // Return Facebook App ID for SDK initialization (frontend needs this)
-  app.get("/api/auth/facebook/config", (req, res) => {
+  // Protected to ensure only authenticated users can connect accounts
+  app.get("/api/auth/facebook/config", isAuthenticated, (req: any, res) => {
     if (!FACEBOOK_APP_ID) {
       return res.status(500).json({ 
         error: "Facebook App ID not configured",
@@ -593,7 +595,8 @@ export async function registerRoutes(
   });
 
   // Handle Embedded Signup response from Facebook SDK
-  app.post("/api/auth/facebook/embedded-signup", async (req, res) => {
+  // Protected - only authenticated users can add WhatsApp accounts
+  app.post("/api/auth/facebook/embedded-signup", isAuthenticated, async (req: any, res) => {
     const { accessToken, userId } = req.body;
 
     if (!accessToken || !userId) {
@@ -602,6 +605,7 @@ export async function registerRoutes(
 
     try {
       // Get WhatsApp Business Accounts using the access token
+      // First try the direct shared WABA endpoint for embedded signup
       const wabaResponse = await fetch(
         `https://graph.facebook.com/v18.0/me/businesses?` +
         `fields=id,name,owned_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}` +
@@ -609,9 +613,18 @@ export async function registerRoutes(
       );
 
       if (!wabaResponse.ok) {
-        const errorData = await wabaResponse.json();
+        const errorData = await wabaResponse.json() as any;
         console.error('WABA fetch failed:', errorData);
-        return res.status(400).json({ error: "Failed to fetch WhatsApp Business accounts" });
+        
+        // Return more detailed error information
+        const errorMessage = errorData.error?.message || "Failed to fetch WhatsApp Business accounts";
+        const errorCode = errorData.error?.code;
+        
+        return res.status(400).json({ 
+          error: errorMessage,
+          code: errorCode,
+          details: "Please ensure you have granted all required permissions during the signup flow."
+        });
       }
 
       const wabaData = await wabaResponse.json() as any;
@@ -645,12 +658,12 @@ export async function registerRoutes(
         broadcast("accounts-updated", { count: accountsCreated });
         res.json({ success: true, message: `Connected ${accountsCreated} WhatsApp account(s)` });
       } else {
-        res.json({ success: true, message: "No new WhatsApp Business numbers found" });
+        res.json({ success: true, message: "No new WhatsApp Business numbers found. You may have already connected this account." });
       }
 
     } catch (error) {
       console.error('Embedded signup error:', error);
-      res.status(500).json({ error: "Failed to connect WhatsApp account" });
+      res.status(500).json({ error: "Failed to connect WhatsApp account. Please try again." });
     }
   });
 

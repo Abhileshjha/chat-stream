@@ -240,6 +240,7 @@ export function AppSidebar({
     
     try {
       // Use Meta's Embedded Signup flow
+      // Note: business_management scope is required to access /me/businesses endpoint
       window.FB.login(
         (response: any) => {
           console.log("Embedded signup response:", response);
@@ -260,7 +261,7 @@ export function AppSidebar({
           setIsConnecting(false);
         },
         {
-          scope: 'whatsapp_business_management,whatsapp_business_messaging',
+          scope: 'whatsapp_business_management,whatsapp_business_messaging,business_management',
           extras: {
             feature: 'whatsapp_embedded_signup'
           }
