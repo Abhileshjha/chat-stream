@@ -102,6 +102,12 @@ export default function Privacy() {
               <li>Request portability of your personal information</li>
               <li>Withdraw consent at any time</li>
             </ul>
+            <p className="text-muted-foreground mt-4">
+              To delete your account and all associated data, visit our{" "}
+              <Link href="/delete-data" className="text-primary hover:underline">
+                Data Deletion Page
+              </Link>.
+            </p>
           </section>
 
           <section>

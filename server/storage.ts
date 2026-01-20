@@ -78,12 +78,16 @@ export interface IStorage {
   createList(list: InsertContactList): Promise<ContactList>;
   updateList(id: string, updates: Partial<ContactList>): Promise<ContactList | undefined>;
   deleteList(id: string): Promise<boolean>;
+  deleteContactList(id: string): Promise<boolean>;
+  getContactListsByAccount(accountId: string): Promise<ContactList[]>;
 
   // Contact Tags
   getTags(): Promise<ContactTag[]>;
   getTag(id: string): Promise<ContactTag | undefined>;
   createTag(tag: InsertContactTag): Promise<ContactTag>;
   deleteTag(id: string): Promise<boolean>;
+  deleteContactTag(id: string): Promise<boolean>;
+  getContactTagsByAccount(accountId: string): Promise<ContactTag[]>;
 
   // Conversations
   getConversations(): Promise<Conversation[]>;
@@ -93,6 +97,8 @@ export interface IStorage {
   updateConversation(id: string, updates: Partial<Conversation>): Promise<Conversation | undefined>;
   getConversationMessages(conversationId: string): Promise<ConversationMessage[]>;
   addConversationMessage(message: InsertConversationMessage): Promise<ConversationMessage>;
+  getConversationsByAccount(accountId: string): Promise<Conversation[]>;
+  deleteConversation(id: string): Promise<boolean>;
 
   // Notifications/Broadcasts
   getNotifications(): Promise<Notification[]>;
@@ -100,6 +106,14 @@ export interface IStorage {
   createNotification(notification: InsertNotification): Promise<Notification>;
   updateNotification(id: string, updates: Partial<Notification>): Promise<Notification | undefined>;
   deleteNotification(id: string): Promise<boolean>;
+  getNotificationsByAccount(accountId: string): Promise<Notification[]>;
+
+  // Contacts by account
+  getContactsByAccount(accountId: string): Promise<Contact[]>;
+
+  // API Settings
+  getApiSettings(): Promise<ApiSettings | undefined>;
+  deleteApiSettings(): Promise<boolean>;
 }
 
 export interface AnalyticsData {
@@ -1130,6 +1144,51 @@ export class MemStorage implements IStorage {
     const notification = this.notifications.get(id);
     if (!notification || notification.accountId !== this.activeAccountId) return false;
     return this.notifications.delete(id);
+  }
+
+  async getNotificationsByAccount(accountId: string): Promise<Notification[]> {
+    return Array.from(this.notifications.values()).filter(n => n.accountId === accountId);
+  }
+
+  async getContactsByAccount(accountId: string): Promise<Contact[]> {
+    return Array.from(this.contacts.values()).filter(c => c.accountId === accountId);
+  }
+
+  async getContactListsByAccount(accountId: string): Promise<ContactList[]> {
+    return Array.from(this.contactLists.values()).filter(l => l.accountId === accountId);
+  }
+
+  async deleteContactList(id: string): Promise<boolean> {
+    return this.contactLists.delete(id);
+  }
+
+  async getContactTagsByAccount(accountId: string): Promise<ContactTag[]> {
+    return Array.from(this.contactTags.values()).filter(t => t.accountId === accountId);
+  }
+
+  async deleteContactTag(id: string): Promise<boolean> {
+    return this.contactTags.delete(id);
+  }
+
+  async getConversationsByAccount(accountId: string): Promise<Conversation[]> {
+    return Array.from(this.conversations.values()).filter(c => c.accountId === accountId);
+  }
+
+  async deleteConversation(id: string): Promise<boolean> {
+    this.conversationMessages.delete(id);
+    return this.conversations.delete(id);
+  }
+
+  async getApiSettings(): Promise<ApiSettings | undefined> {
+    return this.settings;
+  }
+
+  async deleteApiSettings(): Promise<boolean> {
+    if (this.settings) {
+      this.settings = undefined;
+      return true;
+    }
+    return false;
   }
 }
 

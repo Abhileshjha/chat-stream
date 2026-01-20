@@ -29,6 +29,7 @@ import Terms from "@/pages/terms";
 import Refund from "@/pages/refund";
 import Contact from "@/pages/contact";
 import Admin from "@/pages/admin";
+import DeleteData from "@/pages/delete-data";
 import { useQuery } from "@tanstack/react-query";
 import type { Template, Campaign, DashboardMetrics } from "@shared/schema";
 
@@ -55,6 +56,7 @@ function AppRouter() {
       <Route path="/terms" component={Terms} />
       <Route path="/refund" component={Refund} />
       <Route path="/contact" component={Contact} />
+      <Route path="/delete-data" component={DeleteData} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -68,6 +70,7 @@ function PublicRouter() {
       <Route path="/terms" component={Terms} />
       <Route path="/refund" component={Refund} />
       <Route path="/contact" component={Contact} />
+      <Route path="/delete-data" component={DeleteData} />
       <Route component={Landing} />
     </Switch>
   );

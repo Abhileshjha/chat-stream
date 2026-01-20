@@ -11,6 +11,7 @@ export interface IAuthStorage {
   updateUserRole(userId: string, role: string): Promise<User | undefined>;
   updateUserSubscription(userId: string, updates: Partial<User>): Promise<User | undefined>;
   getUserStats(userId: string): Promise<{ contactsCount: number; messagesCount: number; notificationsCount: number }>;
+  deleteUser(userId: string): Promise<boolean>;
 }
 
 class AuthStorage implements IAuthStorage {
@@ -59,6 +60,11 @@ class AuthStorage implements IAuthStorage {
   async getUserStats(userId: string): Promise<{ contactsCount: number; messagesCount: number; notificationsCount: number }> {
     // For now, return mock data - would need user-scoped tables for real implementation
     return { contactsCount: 0, messagesCount: 0, notificationsCount: 0 };
+  }
+
+  async deleteUser(userId: string): Promise<boolean> {
+    const result = await db.delete(users).where(eq(users.id, userId)).returning();
+    return result.length > 0;
   }
 }
 

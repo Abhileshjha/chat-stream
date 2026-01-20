@@ -1021,6 +1021,94 @@ export async function registerRoutes(
     }
   });
 
+  // ============== User Account Deletion (GDPR) ==============
+  
+  app.delete("/api/user/delete-account", isAuthenticated, async (req: any, res) => {
+    try {
+      const user = req.user;
+      if (!user?.claims?.sub) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const userId = user.claims.sub;
+      
+      // Get the user from database to verify they exist
+      const dbUser = await authStorage.getUser(userId);
+      if (!dbUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Delete all user-associated data
+      // 1. Get all accounts belonging to this user and delete associated data
+      const accounts = await storage.getAccounts();
+      for (const account of accounts) {
+        // Delete contacts for this account
+        const contacts = await storage.getContactsByAccount(account.id);
+        for (const contact of contacts) {
+          await storage.deleteContact(contact.id);
+        }
+        
+        // Delete contact lists for this account
+        const lists = await storage.getContactListsByAccount(account.id);
+        for (const list of lists) {
+          await storage.deleteContactList(list.id);
+        }
+        
+        // Delete tags for this account
+        const tags = await storage.getContactTagsByAccount(account.id);
+        for (const tag of tags) {
+          await storage.deleteContactTag(tag.id);
+        }
+        
+        // Delete conversations for this account
+        const conversations = await storage.getConversationsByAccount(account.id);
+        for (const conversation of conversations) {
+          await storage.deleteConversation(conversation.id);
+        }
+        
+        // Delete notifications for this account
+        const notifications = await storage.getNotificationsByAccount(account.id);
+        for (const notification of notifications) {
+          await storage.deleteNotification(notification.id);
+        }
+        
+        // Delete the account itself
+        await storage.deleteAccount(account.id);
+      }
+
+      // 2. Delete templates
+      const templates = await storage.getTemplates();
+      for (const template of templates) {
+        await storage.deleteTemplate(template.id);
+      }
+
+      // 3. Delete campaigns and messages
+      const campaigns = await storage.getCampaigns();
+      for (const campaign of campaigns) {
+        const messages = await storage.getMessagesByCampaign(campaign.id);
+        for (const message of messages) {
+          await storage.deleteMessage(message.id);
+        }
+        await storage.deleteCampaign(campaign.id);
+      }
+
+      // 4. Delete API settings
+      const settings = await storage.getApiSettings();
+      if (settings) {
+        await storage.deleteApiSettings();
+      }
+
+      // 5. Finally, delete the user account
+      await authStorage.deleteUser(userId);
+
+      console.log(`User account deleted: ${userId}`);
+      res.json({ success: true, message: "Account and all associated data have been deleted" });
+    } catch (error) {
+      console.error("Failed to delete user account:", error);
+      res.status(500).json({ error: "Failed to delete account. Please contact support." });
+    }
+  });
+
   // ============== Admin Routes ==============
   
   // Middleware to check if user is super_admin
