@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Save, Eye, EyeOff, RefreshCw, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
+import { Save, Eye, EyeOff, RefreshCw, CheckCircle, XCircle, AlertTriangle, ExternalLink, HelpCircle, ChevronDown, ChevronUp, Copy } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,12 +9,14 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { ApiSettings } from "@shared/schema";
 
 export default function Settings() {
   const [showToken, setShowToken] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const { toast } = useToast();
 
   const { data: settings, isLoading } = useQuery<ApiSettings>({
@@ -78,6 +80,83 @@ export default function Settings() {
           Configure your Meta WhatsApp Business API connection
         </p>
       </div>
+
+      {/* Setup Guide */}
+      <Collapsible open={showGuide} onOpenChange={setShowGuide}>
+        <Card>
+          <CollapsibleTrigger asChild>
+            <CardHeader className="cursor-pointer hover-elevate">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <HelpCircle className="h-5 w-5 text-primary" />
+                  <div>
+                    <CardTitle className="text-base font-semibold">Setup Guide</CardTitle>
+                    <CardDescription>
+                      Step-by-step instructions to connect WhatsApp Business API
+                    </CardDescription>
+                  </div>
+                </div>
+                {showGuide ? (
+                  <ChevronUp className="h-5 w-5 text-muted-foreground" />
+                ) : (
+                  <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                )}
+              </div>
+            </CardHeader>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <CardContent className="pt-0 space-y-6">
+              <div className="space-y-4">
+                <SetupStep
+                  step={1}
+                  title="Create a Meta Developer Account"
+                  description="Go to developers.facebook.com and create a developer account if you don't have one."
+                  link="https://developers.facebook.com/"
+                />
+                <SetupStep
+                  step={2}
+                  title="Create a Business App"
+                  description="Create a new app and select 'Business' as the app type. This will give you access to WhatsApp Business API."
+                  link="https://developers.facebook.com/apps/"
+                />
+                <SetupStep
+                  step={3}
+                  title="Add WhatsApp Product"
+                  description="In your app dashboard, find 'WhatsApp' in the products list and click 'Set Up'. Follow the prompts to link your business account."
+                />
+                <SetupStep
+                  step={4}
+                  title="Get Your Credentials"
+                  description="Navigate to WhatsApp > API Setup. Here you'll find your Phone Number ID, Business Account ID, and can generate a permanent Access Token."
+                />
+                <SetupStep
+                  step={5}
+                  title="Configure Webhook"
+                  description="In WhatsApp > Configuration, add the webhook URL shown below and enter your custom verify token. Subscribe to 'messages' events."
+                />
+              </div>
+              
+              <div className="bg-muted/50 rounded-lg p-4">
+                <p className="text-sm font-medium mb-2">Helpful Resources</p>
+                <div className="space-y-2">
+                  <ResourceLink
+                    text="WhatsApp Cloud API Documentation"
+                    url="https://developers.facebook.com/docs/whatsapp/cloud-api"
+                  />
+                  <ResourceLink
+                    text="Get Permanent Access Token"
+                    url="https://developers.facebook.com/docs/whatsapp/business-management-api/get-started#1--acquire-an-access-token-using-a-system-user-or-facebook-login"
+                  />
+                  <ResourceLink
+                    text="Message Template Guidelines"
+                    url="https://developers.facebook.com/docs/whatsapp/message-templates/guidelines"
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>
 
       {/* Connection Status */}
       <Card>
@@ -397,5 +476,56 @@ function SettingsSkeleton() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+interface SetupStepProps {
+  step: number;
+  title: string;
+  description: string;
+  link?: string;
+}
+
+function SetupStep({ step, title, description, link }: SetupStepProps) {
+  return (
+    <div className="flex gap-4">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-medium">
+        {step}
+      </div>
+      <div className="space-y-1">
+        <p className="font-medium">{title}</p>
+        <p className="text-sm text-muted-foreground">{description}</p>
+        {link && (
+          <a
+            href={link}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-primary hover:underline inline-flex items-center gap-1"
+          >
+            Open Link
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface ResourceLinkProps {
+  text: string;
+  url: string;
+}
+
+function ResourceLink({ text, url }: ResourceLinkProps) {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-sm text-primary hover:underline flex items-center gap-1"
+    >
+      <ExternalLink className="h-3 w-3" />
+      {text}
+    </a>
   );
 }
