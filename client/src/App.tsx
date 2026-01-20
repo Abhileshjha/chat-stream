@@ -28,6 +28,7 @@ import Privacy from "@/pages/privacy";
 import Terms from "@/pages/terms";
 import Refund from "@/pages/refund";
 import Contact from "@/pages/contact";
+import Admin from "@/pages/admin";
 import { useQuery } from "@tanstack/react-query";
 import type { Template, Campaign, DashboardMetrics } from "@shared/schema";
 
@@ -49,6 +50,7 @@ function AppRouter() {
       <Route path="/messages" component={Messages} />
       <Route path="/analytics" component={Analytics} />
       <Route path="/settings" component={Settings} />
+      <Route path="/admin" component={Admin} />
       <Route path="/privacy" component={Privacy} />
       <Route path="/terms" component={Terms} />
       <Route path="/refund" component={Refund} />

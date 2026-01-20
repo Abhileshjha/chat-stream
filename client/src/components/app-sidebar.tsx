@@ -19,6 +19,7 @@ import {
   List,
   Tag,
   Upload,
+  Shield,
 } from "lucide-react";
 import {
   Sidebar,
@@ -60,6 +61,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { WhatsAppAccount, Conversation } from "@shared/schema";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 
 interface AppSidebarProps {
   pendingTemplates?: number;
@@ -131,6 +133,9 @@ export function AppSidebar({
   const [contactsOpen, setContactsOpen] = useState(location.startsWith("/contacts"));
   const [notificationsOpen, setNotificationsOpen] = useState(location.startsWith("/notifications"));
   const { toast } = useToast();
+  const { user } = useAuth();
+  
+  const isSuperAdmin = user?.role === "super_admin";
 
   const { data: accountsData } = useQuery<{ accounts: WhatsAppAccount[]; activeAccountId: string }>({
     queryKey: ["/api/accounts"],
@@ -419,6 +424,21 @@ export function AppSidebar({
                   </SidebarMenuItem>
                 );
               })}
+              
+              {isSuperAdmin && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton 
+                    asChild 
+                    isActive={location === "/admin"}
+                    data-testid="nav-admin"
+                  >
+                    <Link href="/admin">
+                      <Shield className="h-4 w-4" />
+                      <span>Admin</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

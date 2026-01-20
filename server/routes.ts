@@ -1,9 +1,10 @@
-import type { Express } from "express";
+import type { Express, RequestHandler } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { insertTemplateSchema, insertCampaignSchema, insertMessageSchema } from "@shared/schema";
 import { z } from "zod";
+import { authStorage } from "./replit_integrations/auth/storage";
 
 // WebSocket clients for real-time updates
 const wsClients = new Set<WebSocket>();
@@ -931,6 +932,152 @@ export async function registerRoutes(
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Failed to delete notification" });
+    }
+  });
+
+  // ============== Admin Routes ==============
+  
+  // Middleware to check if user is super_admin
+  const requireSuperAdmin: RequestHandler = async (req, res, next) => {
+    const user = req.user as any;
+    if (!req.isAuthenticated() || !user?.claims?.sub) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    
+    const dbUser = await authStorage.getUser(user.claims.sub);
+    if (!dbUser || dbUser.role !== "super_admin") {
+      return res.status(403).json({ error: "Forbidden: Super admin access required" });
+    }
+    
+    next();
+  };
+
+  // Get all users (super_admin only)
+  app.get("/api/admin/users", requireSuperAdmin, async (req, res) => {
+    try {
+      const users = await authStorage.getAllUsers();
+      res.json(users);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
+  // Update user role (super_admin only)
+  app.patch("/api/admin/users/:id/role", requireSuperAdmin, async (req, res) => {
+    try {
+      const { role } = req.body;
+      const userId = req.params.id as string;
+      if (!["super_admin", "admin", "user"].includes(role)) {
+        return res.status(400).json({ error: "Invalid role" });
+      }
+      
+      // Prevent demoting the last super_admin
+      if (role !== "super_admin") {
+        const allUsers = await authStorage.getAllUsers();
+        const superAdmins = allUsers.filter(u => u.role === "super_admin");
+        const targetUser = allUsers.find(u => u.id === userId);
+        
+        if (targetUser?.role === "super_admin" && superAdmins.length <= 1) {
+          return res.status(400).json({ error: "Cannot demote the last super admin" });
+        }
+      }
+      
+      const user = await authStorage.updateUserRole(userId, role);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json(user);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update user role" });
+    }
+  });
+
+  // Grant/revoke free access (super_admin only)
+  app.patch("/api/admin/users/:id/access", requireSuperAdmin, async (req, res) => {
+    try {
+      const { grantedFreeAccess, subscriptionStatus } = req.body;
+      const userId = req.params.id as string;
+      
+      const updates: any = { updatedAt: new Date() };
+      if (typeof grantedFreeAccess === "boolean") {
+        updates.grantedFreeAccess = grantedFreeAccess;
+      }
+      if (subscriptionStatus) {
+        updates.subscriptionStatus = subscriptionStatus;
+      }
+      
+      const user = await authStorage.updateUserSubscription(userId, updates);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json(user);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update user access" });
+    }
+  });
+
+  // Get admin dashboard stats (super_admin only)
+  app.get("/api/admin/stats", requireSuperAdmin, async (req, res) => {
+    try {
+      const users = await authStorage.getAllUsers();
+      const totalUsers = users.length;
+      const activeUsers = users.filter(u => u.subscriptionStatus === "active" || u.grantedFreeAccess).length;
+      const trialUsers = users.filter(u => u.subscriptionStatus === "trial").length;
+      const paidUsers = users.filter(u => u.hasPaid).length;
+      
+      res.json({
+        totalUsers,
+        activeUsers,
+        trialUsers,
+        paidUsers,
+        pendingApproval: users.filter(u => u.subscriptionStatus === "inactive" && !u.grantedFreeAccess).length,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch admin stats" });
+    }
+  });
+
+  // Bootstrap super admin (first authenticated user when no super_admin exists)
+  // This is protected by requiring authentication and only works once
+  app.post("/api/admin/bootstrap", async (req, res) => {
+    try {
+      const user = req.user as any;
+      if (!req.isAuthenticated() || !user?.claims?.sub) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      
+      // Check if any super_admin exists (atomic check)
+      const allUsers = await authStorage.getAllUsers();
+      const existingSuperAdmins = allUsers.filter(u => u.role === "super_admin");
+      
+      if (existingSuperAdmins.length > 0) {
+        return res.status(400).json({ error: "Super admin already exists. Bootstrap disabled." });
+      }
+      
+      // Verify the requesting user exists in database
+      const requestingUser = await authStorage.getUser(user.claims.sub);
+      if (!requestingUser) {
+        return res.status(400).json({ error: "User not found in database" });
+      }
+      
+      // Make the current user super_admin
+      const updatedUser = await authStorage.updateUserRole(user.claims.sub, "super_admin");
+      console.log(`Super admin bootstrapped: ${requestingUser.email} (${user.claims.sub})`);
+      res.json({ message: "You are now a super admin", user: updatedUser });
+    } catch (error) {
+      console.error("Bootstrap error:", error);
+      res.status(500).json({ error: "Failed to bootstrap super admin" });
+    }
+  });
+
+  // Check if bootstrap is available (for UI to show bootstrap button)
+  app.get("/api/admin/bootstrap-available", async (req, res) => {
+    try {
+      const allUsers = await authStorage.getAllUsers();
+      const existingSuperAdmin = allUsers.find(u => u.role === "super_admin");
+      res.json({ available: !existingSuperAdmin });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to check bootstrap status" });
     }
   });
 

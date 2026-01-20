@@ -1,12 +1,16 @@
 import { users, type User, type UpsertUser } from "@shared/models/auth";
 import { db } from "@db";
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 
 // Interface for auth storage operations
 // (IMPORTANT) These user operations are mandatory for Replit Auth.
 export interface IAuthStorage {
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
+  getAllUsers(): Promise<User[]>;
+  updateUserRole(userId: string, role: string): Promise<User | undefined>;
+  updateUserSubscription(userId: string, updates: Partial<User>): Promise<User | undefined>;
+  getUserStats(userId: string): Promise<{ contactsCount: number; messagesCount: number; notificationsCount: number }>;
 }
 
 class AuthStorage implements IAuthStorage {
@@ -28,6 +32,33 @@ class AuthStorage implements IAuthStorage {
       })
       .returning();
     return user;
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    return await db.select().from(users).orderBy(desc(users.createdAt));
+  }
+
+  async updateUserRole(userId: string, role: string): Promise<User | undefined> {
+    const [user] = await db
+      .update(users)
+      .set({ role, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
+    return user;
+  }
+
+  async updateUserSubscription(userId: string, updates: Partial<User>): Promise<User | undefined> {
+    const [user] = await db
+      .update(users)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
+    return user;
+  }
+
+  async getUserStats(userId: string): Promise<{ contactsCount: number; messagesCount: number; notificationsCount: number }> {
+    // For now, return mock data - would need user-scoped tables for real implementation
+    return { contactsCount: 0, messagesCount: 0, notificationsCount: 0 };
   }
 }
 
