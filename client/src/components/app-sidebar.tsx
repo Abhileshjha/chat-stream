@@ -21,6 +21,9 @@ import {
   Tag,
   Upload,
   Shield,
+  Eye,
+  EyeOff,
+  Smartphone,
 } from "lucide-react";
 
 declare global {
@@ -46,6 +49,9 @@ import {
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -140,6 +146,13 @@ export function AppSidebar({
   const [isConnecting, setIsConnecting] = useState(false);
   const [contactsOpen, setContactsOpen] = useState(location.startsWith("/contacts"));
   const [notificationsOpen, setNotificationsOpen] = useState(location.startsWith("/notifications"));
+  const [showManualToken, setShowManualToken] = useState(false);
+  const [manualAccount, setManualAccount] = useState({
+    phoneNumberId: "",
+    businessAccountId: "",
+    accessToken: "",
+    name: "",
+  });
   const { toast } = useToast();
   const { user } = useAuth();
   
@@ -212,6 +225,33 @@ export function AppSidebar({
       toast({
         title: "Connection Error",
         description: error.message || "Failed to connect WhatsApp Business account.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const addManualAccountMutation = useMutation({
+    mutationFn: async (data: typeof manualAccount) => {
+      return apiRequest("POST", "/api/whatsapp-accounts/manual", data);
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/accounts"] });
+      toast({
+        title: "Account Connected",
+        description: data.message || "WhatsApp account connected successfully!",
+      });
+      setManualAccount({
+        phoneNumberId: "",
+        businessAccountId: "",
+        accessToken: "",
+        name: "",
+      });
+      setAddAccountOpen(false);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Connection Failed",
+        description: error.message || "Failed to connect WhatsApp account. Please check your credentials.",
         variant: "destructive",
       });
     },
@@ -322,34 +362,123 @@ export function AppSidebar({
                   Add WhatsApp Number
                 </DropdownMenuItem>
               </DialogTrigger>
-              <DialogContent>
+              <DialogContent className="max-w-md">
                 <DialogHeader>
                   <DialogTitle>Connect WhatsApp Number</DialogTitle>
                 </DialogHeader>
-                <div className="space-y-4 py-4">
-                  <p className="text-sm text-muted-foreground">
-                    To connect a WhatsApp Business number, you need to authenticate with your Facebook Business account.
-                  </p>
-                  <Button 
-                    className="w-full" 
-                    size="lg" 
-                    data-testid="button-facebook-login"
-                    onClick={handleFacebookLogin}
-                    disabled={isConnecting}
-                  >
-                    {isConnecting ? (
-                      <span className="mr-2 h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                    ) : (
-                      <svg className="mr-2 h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                <Tabs defaultValue="manual" className="mt-4">
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="manual" data-testid="tab-manual">
+                      <Smartphone className="h-4 w-4 mr-2" />
+                      Manual Entry
+                    </TabsTrigger>
+                    <TabsTrigger value="facebook" data-testid="tab-facebook">
+                      <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
                       </svg>
-                    )}
-                    {isConnecting ? "Connecting..." : "Login with Facebook"}
-                  </Button>
-                  <p className="text-xs text-muted-foreground text-center">
-                    You'll be redirected to Facebook to authorize access to your WhatsApp Business account.
-                  </p>
-                </div>
+                      Facebook
+                    </TabsTrigger>
+                  </TabsList>
+                  
+                  <TabsContent value="manual" className="space-y-4 mt-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-phone-number-id">Phone Number ID</Label>
+                      <Input
+                        id="dialog-phone-number-id"
+                        value={manualAccount.phoneNumberId}
+                        onChange={(e) => setManualAccount(prev => ({ ...prev, phoneNumberId: e.target.value }))}
+                        placeholder="e.g., 123456789012345"
+                        className="font-mono text-sm"
+                        data-testid="input-dialog-phone-number-id"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-waba-id">WABA ID</Label>
+                      <Input
+                        id="dialog-waba-id"
+                        value={manualAccount.businessAccountId}
+                        onChange={(e) => setManualAccount(prev => ({ ...prev, businessAccountId: e.target.value }))}
+                        placeholder="e.g., 987654321098765"
+                        className="font-mono text-sm"
+                        data-testid="input-dialog-waba-id"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-access-token">Permanent Access Token</Label>
+                      <div className="relative">
+                        <Input
+                          id="dialog-access-token"
+                          type={showManualToken ? "text" : "password"}
+                          value={manualAccount.accessToken}
+                          onChange={(e) => setManualAccount(prev => ({ ...prev, accessToken: e.target.value }))}
+                          placeholder="Enter your access token"
+                          className="pr-10 font-mono text-sm"
+                          data-testid="input-dialog-access-token"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="absolute right-0 top-0"
+                          onClick={() => setShowManualToken(!showManualToken)}
+                          data-testid="button-toggle-dialog-token"
+                        >
+                          {showManualToken ? (
+                            <EyeOff className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <Eye className="h-4 w-4 text-muted-foreground" />
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+
+                    <Button
+                      onClick={() => addManualAccountMutation.mutate(manualAccount)}
+                      disabled={addManualAccountMutation.isPending || !manualAccount.phoneNumberId || !manualAccount.businessAccountId || !manualAccount.accessToken}
+                      className="w-full"
+                      data-testid="button-add-manual-account-dialog"
+                    >
+                      {addManualAccountMutation.isPending ? (
+                        <>
+                          <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                          Verifying...
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="h-4 w-4 mr-2" />
+                          Add WhatsApp Number
+                        </>
+                      )}
+                    </Button>
+                  </TabsContent>
+                  
+                  <TabsContent value="facebook" className="space-y-4 mt-4">
+                    <p className="text-sm text-muted-foreground">
+                      Connect using Facebook Embedded Signup flow.
+                    </p>
+                    <Button 
+                      className="w-full" 
+                      size="lg" 
+                      data-testid="button-facebook-login"
+                      onClick={handleFacebookLogin}
+                      disabled={isConnecting}
+                    >
+                      {isConnecting ? (
+                        <span className="mr-2 h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                      ) : (
+                        <svg className="mr-2 h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                        </svg>
+                      )}
+                      {isConnecting ? "Connecting..." : "Login with Facebook"}
+                    </Button>
+                    <p className="text-xs text-muted-foreground text-center">
+                      You'll be redirected to Facebook to authorize access.
+                    </p>
+                  </TabsContent>
+                </Tabs>
               </DialogContent>
             </Dialog>
           </DropdownMenuContent>
