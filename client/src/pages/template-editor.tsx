@@ -100,6 +100,9 @@ export default function TemplateEditor() {
         } else if (headerComponent.format && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComponent.format)) {
           setHeaderType("media");
           setMediaType(headerComponent.format.toLowerCase() as MediaType);
+          if (headerComponent.mediaUrl) {
+            setHeaderMediaUrl(headerComponent.mediaUrl);
+          }
         }
       }
 
@@ -120,7 +123,11 @@ export default function TemplateEditor() {
       if (headerType === "text" && headerText) {
         components.push({ type: "HEADER", format: "TEXT", text: headerText });
       } else if (headerType === "media") {
-        components.push({ type: "HEADER", format: mediaType.toUpperCase() });
+        components.push({ 
+          type: "HEADER", 
+          format: mediaType.toUpperCase(),
+          mediaUrl: headerMediaUrl || undefined,
+        });
       }
 
       components.push({ type: "BODY", text: bodyText });

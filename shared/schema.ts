@@ -31,6 +31,7 @@ export const templateComponentSchema = z.object({
   type: z.enum(["HEADER", "BODY", "FOOTER", "BUTTONS"]),
   format: z.string().optional(),
   text: z.string().optional(),
+  mediaUrl: z.string().optional(),
   buttons: z.array(z.object({
     type: z.string(),
     text: z.string(),
