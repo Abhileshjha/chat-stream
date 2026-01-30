@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useRoute } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Trash2, Plus, Phone, ExternalLink, MessageSquare, Image, FileText, Video } from "lucide-react";
+import { Trash2, Plus, Phone, ExternalLink, MessageSquare, Image, FileText, Video, Upload, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Template } from "@shared/schema";
@@ -45,9 +45,12 @@ export default function TemplateEditor() {
   const [mediaType, setMediaType] = useState<MediaType>("image");
   const [headerText, setHeaderText] = useState("");
   const [headerMediaUrl, setHeaderMediaUrl] = useState("");
+  const [headerMediaFilename, setHeaderMediaFilename] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
   const [bodyText, setBodyText] = useState("");
   const [footerText, setFooterText] = useState("");
   const [buttons, setButtons] = useState<TemplateButton[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: template } = useQuery<Template>({
     queryKey: ["/api/templates", params?.id],
@@ -168,6 +171,124 @@ export default function TemplateEditor() {
 
   const removeButton = (index: number) => {
     setButtons(buttons.filter((_, i) => i !== index));
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    const allowedTypes: Record<MediaType, string[]> = {
+      image: ["image/jpeg", "image/png", "image/webp"],
+      video: ["video/mp4", "video/quicktime"],
+      document: ["application/pdf"],
+    };
+
+    if (!allowedTypes[mediaType].includes(file.type)) {
+      toast({
+        title: "Invalid file type",
+        description: `Please upload a valid ${mediaType} file.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate file size based on media type (WhatsApp limits)
+    const sizeLimits: Record<MediaType, number> = {
+      image: 5 * 1024 * 1024,     // 5MB for images
+      video: 16 * 1024 * 1024,    // 16MB for videos
+      document: 100 * 1024 * 1024, // 100MB for documents
+    };
+    
+    if (file.size > sizeLimits[mediaType]) {
+      const limitMB = sizeLimits[mediaType] / (1024 * 1024);
+      toast({
+        title: "File too large",
+        description: `Maximum file size for ${mediaType}s is ${limitMB}MB.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsUploading(true);
+    
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        throw new Error("Upload failed");
+      }
+
+      const data = await response.json();
+      setHeaderMediaUrl(data.url);
+      setHeaderMediaFilename(data.filename);
+
+      toast({
+        title: "File uploaded",
+        description: "Your media file has been uploaded successfully.",
+      });
+    } catch (error) {
+      toast({
+        title: "Upload failed",
+        description: "Failed to upload file. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleRemoveMedia = async () => {
+    if (headerMediaFilename) {
+      try {
+        const response = await fetch(`/api/upload/${headerMediaFilename}`, {
+          method: "DELETE",
+          credentials: "include",
+        });
+        
+        if (!response.ok) {
+          const data = await response.json();
+          toast({
+            title: "Delete failed",
+            description: data.error || "Failed to remove file from server.",
+            variant: "destructive",
+          });
+          // Still clear local state even if server delete fails
+        }
+      } catch (error) {
+        console.error("Failed to delete file:", error);
+        toast({
+          title: "Delete failed",
+          description: "Network error while removing file.",
+          variant: "destructive",
+        });
+      }
+    }
+    setHeaderMediaUrl("");
+    setHeaderMediaFilename("");
+  };
+
+  const getAcceptedFileTypes = () => {
+    switch (mediaType) {
+      case "image":
+        return "image/jpeg,image/png,image/webp";
+      case "video":
+        return "video/mp4,video/quicktime";
+      case "document":
+        return "application/pdf";
+      default:
+        return "";
+    }
   };
 
   return (
@@ -350,18 +471,94 @@ export default function TemplateEditor() {
               {headerType === "media" && (
                 <div>
                   <Label>Upload Sample {mediaType === "image" ? "Image" : mediaType === "video" ? "Video" : "Document"}</Label>
-                  <div className="mt-1.5 border-2 border-dashed rounded-lg p-4 text-center">
-                    <div className="flex items-center justify-center gap-2 mb-2">
-                      {mediaType === "image" ? <Image className="h-8 w-8 text-muted-foreground" /> :
-                       mediaType === "video" ? <Video className="h-8 w-8 text-muted-foreground" /> :
-                       <FileText className="h-8 w-8 text-muted-foreground" />}
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    accept={getAcceptedFileTypes()}
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    data-testid="input-media-file"
+                  />
+                  
+                  {headerMediaUrl ? (
+                    <div className="mt-1.5 border-2 border-dashed rounded-lg p-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          {mediaType === "image" ? (
+                            <img 
+                              src={headerMediaUrl} 
+                              alt="Header preview" 
+                              className="h-16 w-16 object-cover rounded"
+                            />
+                          ) : (
+                            <div className="h-16 w-16 bg-muted rounded flex items-center justify-center">
+                              {mediaType === "video" ? (
+                                <Video className="h-8 w-8 text-muted-foreground" />
+                              ) : (
+                                <FileText className="h-8 w-8 text-muted-foreground" />
+                              )}
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{headerMediaFilename}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {mediaType === "image" ? "Image" : mediaType === "video" ? "Video" : "Document"} uploaded
+                            </p>
+                          </div>
+                        </div>
+                        <Button 
+                          variant="ghost" 
+                          size="icon"
+                          onClick={handleRemoveMedia}
+                          data-testid="button-remove-media"
+                        >
+                          <X className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
                     </div>
-                    <Button variant="outline" size="sm">Choose File</Button>
-                    <Button variant="outline" size="sm" className="ml-2">Remove</Button>
-                  </div>
-                  <p className="text-sm text-muted-foreground mt-1">
+                  ) : (
+                    <div
+                      className="mt-1.5 border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors"
+                      onClick={() => fileInputRef.current?.click()}
+                      data-testid="dropzone-media"
+                    >
+                      <div className="flex items-center justify-center gap-2 mb-3">
+                        {mediaType === "image" ? <Image className="h-10 w-10 text-muted-foreground" /> :
+                         mediaType === "video" ? <Video className="h-10 w-10 text-muted-foreground" /> :
+                         <FileText className="h-10 w-10 text-muted-foreground" />}
+                      </div>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        disabled={isUploading}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          fileInputRef.current?.click();
+                        }}
+                        data-testid="button-choose-file"
+                      >
+                        {isUploading ? (
+                          <>
+                            <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                            Uploading...
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="h-4 w-4 mr-2" />
+                            Choose File
+                          </>
+                        )}
+                      </Button>
+                      <p className="text-sm text-muted-foreground mt-2">
+                        Click to select a file
+                      </p>
+                    </div>
+                  )}
+                  
+                  <p className="text-sm text-muted-foreground mt-2">
                     Upload a sample {mediaType} for WhatsApp to review. The header {mediaType} is dynamic and can be replaced when sending template.
-                    Supported file formats: {mediaType === "image" ? "JPEG and PNG" : mediaType === "video" ? "MP4" : "PDF"}. Max allowed file size: 5MB
+                    Supported file formats: {mediaType === "image" ? "JPEG, PNG, WebP" : mediaType === "video" ? "MP4, MOV" : "PDF"}. 
+                    Max allowed file size: {mediaType === "image" ? "5MB" : mediaType === "video" ? "16MB" : "100MB"}
                   </p>
                 </div>
               )}

@@ -16,6 +16,25 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
+// WhatsApp media type limits
+const whatsappMediaLimits: Record<string, number> = {
+  "image/jpeg": 5 * 1024 * 1024,      // 5MB for images
+  "image/png": 5 * 1024 * 1024,        // 5MB for images
+  "image/webp": 5 * 1024 * 1024,       // 5MB for images
+  "video/mp4": 16 * 1024 * 1024,       // 16MB for videos
+  "video/quicktime": 16 * 1024 * 1024, // 16MB for videos
+  "application/pdf": 100 * 1024 * 1024, // 100MB for documents (WhatsApp limit)
+};
+
+const allowedExtensions: Record<string, string[]> = {
+  "image/jpeg": [".jpg", ".jpeg"],
+  "image/png": [".png"],
+  "image/webp": [".webp"],
+  "video/mp4": [".mp4"],
+  "video/quicktime": [".mov"],
+  "application/pdf": [".pdf"],
+};
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
@@ -23,33 +42,40 @@ const upload = multer({
     },
     filename: (req, file, cb) => {
       const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-      cb(null, uniqueSuffix + path.extname(file.originalname));
+      const ext = path.extname(file.originalname).toLowerCase();
+      cb(null, uniqueSuffix + ext);
     },
   }),
   limits: {
-    fileSize: 16 * 1024 * 1024, // 16MB limit
+    fileSize: 100 * 1024 * 1024, // 100MB max (documents), actual check done in fileFilter
   },
   fileFilter: (req, file, cb) => {
-    const allowedMimes = [
-      "image/jpeg",
-      "image/png",
-      "image/webp",
-      "video/mp4",
-      "video/quicktime",
-      "application/pdf",
-      "text/csv",
-      "application/vnd.ms-excel",
-    ];
-    if (allowedMimes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error("Invalid file type. Allowed: JPEG, PNG, WebP, MP4, MOV, PDF, CSV"));
+    const allowedMimes = Object.keys(whatsappMediaLimits);
+    const ext = path.extname(file.originalname).toLowerCase();
+    
+    // Check MIME type
+    if (!allowedMimes.includes(file.mimetype)) {
+      cb(new Error("Invalid file type. Allowed: JPEG, PNG, WebP, MP4, MOV, PDF"));
+      return;
     }
+    
+    // Verify extension matches MIME type
+    const validExtensions = allowedExtensions[file.mimetype] || [];
+    if (!validExtensions.includes(ext)) {
+      cb(new Error(`File extension ${ext} doesn't match content type ${file.mimetype}`));
+      return;
+    }
+    
+    cb(null, true);
   },
 });
 
 // WebSocket clients for real-time updates
 const wsClients = new Set<WebSocket>();
+
+// In-memory upload metadata tracking (maps filename to userId)
+// Note: In production, this should be stored in the database
+const uploadMetadata = new Map<string, { userId: string; uploadedAt: Date }>();
 
 // Broadcast to all connected clients
 function broadcast(event: string, data: any) {
@@ -167,10 +193,11 @@ export async function registerRoutes(
 
   // ============== File Uploads ==============
   // Serve uploaded files statically
+  const express = await import("express");
   app.use("/uploads", (req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     next();
-  }, require("express").static(uploadDir));
+  }, express.default.static(uploadDir));
 
   // File upload endpoint
   app.post("/api/upload", isAuthenticated as RequestHandler, upload.single("file"), (req, res) => {
@@ -179,6 +206,30 @@ export async function registerRoutes(
         return res.status(400).json({ error: "No file uploaded" });
       }
 
+      // Enforce per-type size limits on server side
+      const maxSize = whatsappMediaLimits[req.file.mimetype];
+      if (maxSize && req.file.size > maxSize) {
+        // Delete the uploaded file since it exceeds the limit
+        const filePath = path.join(uploadDir, req.file.filename);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+        const limitMB = Math.round(maxSize / (1024 * 1024));
+        return res.status(400).json({ 
+          error: `File too large. Maximum size for ${req.file.mimetype.split('/')[0]}s is ${limitMB}MB.` 
+        });
+      }
+
+      // Store upload metadata with user association
+      const user = (req as any).user;
+      const userId = user?.id || user?.claims?.sub || "anonymous";
+      
+      // Track this upload for ownership verification
+      uploadMetadata.set(req.file.filename, {
+        userId,
+        uploadedAt: new Date(),
+      });
+      
       const fileUrl = `/uploads/${req.file.filename}`;
       const fileInfo = {
         url: fileUrl,
@@ -186,6 +237,8 @@ export async function registerRoutes(
         originalName: req.file.originalname,
         mimetype: req.file.mimetype,
         size: req.file.size,
+        uploadedBy: userId,
+        uploadedAt: new Date().toISOString(),
       };
 
       res.json(fileInfo);
@@ -198,13 +251,44 @@ export async function registerRoutes(
   // Delete uploaded file
   app.delete("/api/upload/:filename", isAuthenticated as RequestHandler, (req, res) => {
     try {
-      const filename = req.params.filename;
-      const filePath = path.join(uploadDir, filename);
+      const filename = req.params.filename as string;
+      const user = (req as any).user;
+      const currentUserId = user?.id || user?.claims?.sub;
+      const isSuperAdmin = user?.role === "super_admin";
+      
+      // Sanitize filename - prevent path traversal attacks
+      const sanitizedFilename = path.basename(filename);
+      if (sanitizedFilename !== filename || filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
+        return res.status(400).json({ error: "Invalid filename" });
+      }
+      
+      // Validate filename format (timestamp-random.ext)
+      if (!/^\d+-\d+\.\w+$/.test(sanitizedFilename)) {
+        return res.status(400).json({ error: "Invalid filename format" });
+      }
+      
+      const filePath = path.join(uploadDir, sanitizedFilename);
+      
+      // Ensure the resolved path is still within uploadDir
+      const resolvedPath = path.resolve(filePath);
+      const resolvedUploadDir = path.resolve(uploadDir);
+      if (!resolvedPath.startsWith(resolvedUploadDir)) {
+        return res.status(400).json({ error: "Invalid file path" });
+      }
+      
+      // Check ownership (super_admin can delete any file)
+      const metadata = uploadMetadata.get(sanitizedFilename);
+      if (metadata && !isSuperAdmin && metadata.userId !== currentUserId) {
+        return res.status(403).json({ error: "Not authorized to delete this file" });
+      }
       
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
+        uploadMetadata.delete(sanitizedFilename); // Clean up metadata
         res.json({ message: "File deleted successfully" });
       } else {
+        // Also clean up stale metadata
+        uploadMetadata.delete(sanitizedFilename);
         res.status(404).json({ error: "File not found" });
       }
     } catch (error) {
