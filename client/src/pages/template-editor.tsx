@@ -24,6 +24,31 @@ type HeaderType = "none" | "text" | "media";
 type MediaType = "image" | "video" | "document";
 type ButtonType = "QUICK_REPLY" | "URL" | "PHONE_NUMBER";
 
+// Function to format WhatsApp text formatting to HTML
+function formatWhatsAppText(text: string): string {
+  if (!text) return "";
+  
+  // Escape HTML first to prevent XSS
+  let formatted = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  
+  // Bold: *text* -> <strong>text</strong>
+  formatted = formatted.replace(/\*([^*]+)\*/g, "<strong>$1</strong>");
+  
+  // Italic: _text_ -> <em>text</em>
+  formatted = formatted.replace(/_([^_]+)_/g, "<em>$1</em>");
+  
+  // Strikethrough: ~text~ -> <s>text</s>
+  formatted = formatted.replace(/~([^~]+)~/g, "<s>$1</s>");
+  
+  // Monospace: ```text``` -> <code>text</code>
+  formatted = formatted.replace(/```([^`]+)```/g, "<code>$1</code>");
+  
+  return formatted;
+}
+
 interface TemplateButton {
   type: ButtonType;
   text: string;
@@ -763,17 +788,32 @@ export default function TemplateEditor() {
               <div className="rounded-lg bg-muted p-4">
                 <div className="bg-background rounded-lg shadow-sm border overflow-hidden max-w-xs mx-auto">
                   {headerType === "media" && (
-                    <div className="aspect-video bg-muted flex items-center justify-center">
-                      {mediaType === "image" ? <Image className="h-12 w-12 text-muted-foreground" /> :
-                       mediaType === "video" ? <Video className="h-12 w-12 text-muted-foreground" /> :
-                       <FileText className="h-12 w-12 text-muted-foreground" />}
+                    <div className="aspect-video bg-muted flex items-center justify-center overflow-hidden">
+                      {headerMediaUrl && mediaType === "image" ? (
+                        <img 
+                          src={headerMediaUrl} 
+                          alt="Header preview" 
+                          className="w-full h-full object-cover"
+                        />
+                      ) : mediaType === "image" ? (
+                        <Image className="h-12 w-12 text-muted-foreground" />
+                      ) : mediaType === "video" ? (
+                        <Video className="h-12 w-12 text-muted-foreground" />
+                      ) : (
+                        <FileText className="h-12 w-12 text-muted-foreground" />
+                      )}
                     </div>
                   )}
                   <div className="p-3 space-y-2">
                     {headerType === "text" && headerText && (
                       <p className="font-semibold text-sm">{headerText}</p>
                     )}
-                    <p className="text-sm whitespace-pre-wrap">{bodyText || "Your message content will appear here..."}</p>
+                    <p 
+                      className="text-sm whitespace-pre-wrap"
+                      dangerouslySetInnerHTML={{ 
+                        __html: formatWhatsAppText(bodyText) || "Your message content will appear here..." 
+                      }}
+                    />
                     {footerText && (
                       <p className="text-xs text-muted-foreground">{footerText}</p>
                     )}

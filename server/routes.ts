@@ -759,6 +759,52 @@ export async function registerRoutes(
     }
   });
 
+  // Test connection for a specific WhatsApp account
+  app.post("/api/whatsapp-accounts/:id/test", isAuthenticated as RequestHandler, async (req, res) => {
+    try {
+      const accountId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const account = await storage.getAccount(accountId);
+      if (!account) {
+        return res.json({ 
+          success: false, 
+          message: "Account not found" 
+        });
+      }
+
+      if (!account.accessToken) {
+        return res.json({ 
+          success: false, 
+          message: "No access token configured for this account" 
+        });
+      }
+
+      // Test the connection by making a simple API call to Meta
+      const response = await fetch(
+        `https://graph.facebook.com/v18.0/${account.phoneNumberId}?access_token=${account.accessToken}`
+      );
+
+      if (response.ok) {
+        const data = await response.json() as any;
+        res.json({ 
+          success: true, 
+          message: `Connection successful! Phone: ${data.display_phone_number || account.phoneNumber}`
+        });
+      } else {
+        const errorData = await response.json() as any;
+        res.json({ 
+          success: false, 
+          message: errorData.error?.message || "Connection failed. Check your credentials."
+        });
+      }
+    } catch (error) {
+      console.error("Test connection error:", error);
+      res.json({ 
+        success: false, 
+        message: "Connection test failed. Please check your credentials."
+      });
+    }
+  });
+
   // ============== Facebook OAuth for WhatsApp Business ==============
   const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
   const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;

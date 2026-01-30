@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Save, Eye, EyeOff, RefreshCw, CheckCircle, XCircle, AlertTriangle, ExternalLink, HelpCircle, ChevronDown, ChevronUp, Copy, Plus, Smartphone } from "lucide-react";
+import { Save, Eye, EyeOff, RefreshCw, CheckCircle, XCircle, AlertTriangle, ExternalLink, HelpCircle, ChevronDown, ChevronUp, Copy, Plus, Smartphone, Trash2, MessageSquare } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,12 +12,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { ApiSettings } from "@shared/schema";
+import type { ApiSettings, WhatsAppAccount } from "@shared/schema";
 
 export default function Settings() {
   const [showToken, setShowToken] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [showManualToken, setShowManualToken] = useState(false);
+  const [showAddAccount, setShowAddAccount] = useState(false);
   const { toast } = useToast();
 
   // Manual account form state
@@ -31,6 +32,14 @@ export default function Settings() {
   const { data: settings, isLoading } = useQuery<ApiSettings>({
     queryKey: ["/api/settings"],
   });
+
+  // Fetch connected WhatsApp accounts
+  const { data: accountsData } = useQuery<{ accounts: WhatsAppAccount[]; activeAccountId: string }>({
+    queryKey: ["/api/accounts"],
+  });
+
+  const accounts = accountsData?.accounts || [];
+  const activeAccount = accounts.find(a => a.id === accountsData?.activeAccountId);
 
   const [formData, setFormData] = useState<Partial<ApiSettings>>({
     accessToken: "",
@@ -62,13 +71,25 @@ export default function Settings() {
 
   const testMutation = useMutation({
     mutationFn: async () => {
+      // Test connection with the active account
+      if (activeAccount) {
+        return apiRequest("POST", `/api/whatsapp-accounts/${activeAccount.id}/test`);
+      }
       return apiRequest("POST", "/api/settings/test");
     },
     onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/accounts"] });
       toast({
         title: data.success ? "Connection Successful" : "Connection Failed",
         description: data.message,
         variant: data.success ? "default" : "destructive",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Connection Failed",
+        description: "Failed to test connection. Please check your credentials.",
+        variant: "destructive",
       });
     },
   });
@@ -194,103 +215,173 @@ export default function Settings() {
         </Card>
       </Collapsible>
 
-      {/* Add WhatsApp Number Manually */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <Smartphone className="h-5 w-5 text-primary" />
-            <div>
-              <CardTitle className="text-base font-semibold">Add WhatsApp Number</CardTitle>
-              <CardDescription>
-                Connect a WhatsApp Business number using your Meta API credentials
-              </CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="manual-phone-number-id">Phone Number ID</Label>
-            <Input
-              id="manual-phone-number-id"
-              value={manualAccount.phoneNumberId}
-              onChange={(e) => setManualAccount(prev => ({ ...prev, phoneNumberId: e.target.value }))}
-              placeholder="e.g., 123456789012345"
-              className="font-mono text-sm"
-              data-testid="input-manual-phone-number-id"
-            />
-            <p className="text-xs text-muted-foreground">
-              Find this in Meta Business Suite &gt; WhatsApp &gt; API Setup
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="manual-waba-id">WABA ID (Business Account ID)</Label>
-            <Input
-              id="manual-waba-id"
-              value={manualAccount.businessAccountId}
-              onChange={(e) => setManualAccount(prev => ({ ...prev, businessAccountId: e.target.value }))}
-              placeholder="e.g., 987654321098765"
-              className="font-mono text-sm"
-              data-testid="input-manual-waba-id"
-            />
-            <p className="text-xs text-muted-foreground">
-              WhatsApp Business Account ID from Meta Business Suite
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="manual-access-token">Permanent Access Token</Label>
-            <div className="relative">
-              <Input
-                id="manual-access-token"
-                type={showManualToken ? "text" : "password"}
-                value={manualAccount.accessToken}
-                onChange={(e) => setManualAccount(prev => ({ ...prev, accessToken: e.target.value }))}
-                placeholder="Enter your permanent access token"
-                className="pr-10 font-mono text-sm"
-                data-testid="input-manual-access-token"
-              />
+      {/* Connected WhatsApp Accounts */}
+      {accounts.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <MessageSquare className="h-5 w-5 text-primary" />
+                <div>
+                  <CardTitle className="text-base font-semibold">Connected WhatsApp Numbers</CardTitle>
+                  <CardDescription>
+                    Your connected WhatsApp Business accounts
+                  </CardDescription>
+                </div>
+              </div>
               <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="absolute right-0 top-0"
-                onClick={() => setShowManualToken(!showManualToken)}
-                data-testid="button-toggle-manual-token"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowAddAccount(!showAddAccount)}
+                data-testid="button-toggle-add-account"
               >
-                {showManualToken ? (
-                  <EyeOff className="h-4 w-4 text-muted-foreground" />
-                ) : (
-                  <Eye className="h-4 w-4 text-muted-foreground" />
-                )}
+                <Plus className="h-4 w-4 mr-2" />
+                Add Another
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Generate a permanent System User token from Meta Business Settings
-            </p>
-          </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {accounts.map((account) => (
+                <div
+                  key={account.id}
+                  className={`flex items-center justify-between p-3 rounded-lg border ${
+                    account.id === accountsData?.activeAccountId ? "border-primary bg-primary/5" : ""
+                  }`}
+                  data-testid={`connected-account-${account.id}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <MessageSquare className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="font-medium flex items-center gap-2">
+                        {account.name || "WhatsApp Business"}
+                        {account.id === accountsData?.activeAccountId && (
+                          <Badge variant="secondary" className="text-xs">Active</Badge>
+                        )}
+                      </div>
+                      <div className="text-sm text-muted-foreground">{account.phoneNumber}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {account.status === "connected" ? (
+                      <Badge variant="default" className="bg-green-500/10 text-green-600 border-green-200">
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        Connected
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary">
+                        <AlertTriangle className="h-3 w-3 mr-1" />
+                        {account.status === "pending" ? "Pending" : "Disconnected"}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
-          <div className="space-y-2">
-            <Label htmlFor="manual-name">Account Name (Optional)</Label>
-            <Input
-              id="manual-name"
-              value={manualAccount.name}
-              onChange={(e) => setManualAccount(prev => ({ ...prev, name: e.target.value }))}
-              placeholder="e.g., My Business WhatsApp"
-              className="text-sm"
-              data-testid="input-manual-name"
-            />
-            <p className="text-xs text-muted-foreground">
-              A friendly name to identify this account
-            </p>
-          </div>
+      {/* Add WhatsApp Number Manually - show if no accounts or toggled */}
+      {(accounts.length === 0 || showAddAccount) && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <Smartphone className="h-5 w-5 text-primary" />
+              <div>
+                <CardTitle className="text-base font-semibold">Add WhatsApp Number</CardTitle>
+                <CardDescription>
+                  Connect a WhatsApp Business number using your Meta API credentials
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="manual-phone-number-id">Phone Number ID</Label>
+              <Input
+                id="manual-phone-number-id"
+                value={manualAccount.phoneNumberId}
+                onChange={(e) => setManualAccount(prev => ({ ...prev, phoneNumberId: e.target.value }))}
+                placeholder="e.g., 123456789012345"
+                className="font-mono text-sm"
+                data-testid="input-manual-phone-number-id"
+              />
+              <p className="text-xs text-muted-foreground">
+                Find this in Meta Business Suite &gt; WhatsApp &gt; API Setup
+              </p>
+            </div>
 
-          <Button
-            onClick={() => addManualAccountMutation.mutate(manualAccount)}
-            disabled={addManualAccountMutation.isPending || !manualAccount.phoneNumberId || !manualAccount.businessAccountId || !manualAccount.accessToken}
-            className="w-full"
-            data-testid="button-add-manual-account"
-          >
+            <div className="space-y-2">
+              <Label htmlFor="manual-waba-id">WABA ID (Business Account ID)</Label>
+              <Input
+                id="manual-waba-id"
+                value={manualAccount.businessAccountId}
+                onChange={(e) => setManualAccount(prev => ({ ...prev, businessAccountId: e.target.value }))}
+                placeholder="e.g., 987654321098765"
+                className="font-mono text-sm"
+                data-testid="input-manual-waba-id"
+              />
+              <p className="text-xs text-muted-foreground">
+                WhatsApp Business Account ID from Meta Business Suite
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="manual-access-token">Permanent Access Token</Label>
+              <div className="relative">
+                <Input
+                  id="manual-access-token"
+                  type={showManualToken ? "text" : "password"}
+                  value={manualAccount.accessToken}
+                  onChange={(e) => setManualAccount(prev => ({ ...prev, accessToken: e.target.value }))}
+                  placeholder="Enter your permanent access token"
+                  className="pr-10 font-mono text-sm"
+                  data-testid="input-manual-access-token"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-0 top-0"
+                  onClick={() => setShowManualToken(!showManualToken)}
+                  data-testid="button-toggle-manual-token"
+                >
+                  {showManualToken ? (
+                    <EyeOff className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <Eye className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Generate a permanent System User token from Meta Business Settings
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="manual-name">Account Name (Optional)</Label>
+              <Input
+                id="manual-name"
+                value={manualAccount.name}
+                onChange={(e) => setManualAccount(prev => ({ ...prev, name: e.target.value }))}
+                placeholder="e.g., My Business WhatsApp"
+                className="text-sm"
+                data-testid="input-manual-name"
+              />
+              <p className="text-xs text-muted-foreground">
+                A friendly name to identify this account
+              </p>
+            </div>
+
+            <Button
+              onClick={() => addManualAccountMutation.mutate(manualAccount)}
+              disabled={addManualAccountMutation.isPending || !manualAccount.phoneNumberId || !manualAccount.businessAccountId || !manualAccount.accessToken}
+              className="w-full"
+              data-testid="button-add-manual-account"
+            >
             {addManualAccountMutation.isPending ? (
               <>
                 <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
@@ -303,8 +394,9 @@ export default function Settings() {
               </>
             )}
           </Button>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Connection Status */}
       <Card>
@@ -315,7 +407,7 @@ export default function Settings() {
               variant="outline" 
               size="sm"
               onClick={() => testMutation.mutate()}
-              disabled={testMutation.isPending}
+              disabled={testMutation.isPending || !activeAccount}
               data-testid="button-test-connection"
             >
               <RefreshCw className={`h-4 w-4 mr-2 ${testMutation.isPending ? "animate-spin" : ""}`} />
@@ -325,15 +417,15 @@ export default function Settings() {
         </CardHeader>
         <CardContent>
           <div className="flex items-center gap-4">
-            <StatusIndicator status={settings ? "connected" : "disconnected"} />
+            <StatusIndicator status={activeAccount?.status === "connected" ? "connected" : "disconnected"} />
             <div className="flex-1">
               <p className="font-medium">
-                {settings ? "Connected to Meta API" : "Not Connected"}
+                {activeAccount?.status === "connected" ? "Connected to Meta API" : "Not Connected"}
               </p>
               <p className="text-sm text-muted-foreground">
-                {settings 
-                  ? "Your WhatsApp Business API is configured and operational"
-                  : "Configure your API credentials below to connect"
+                {activeAccount 
+                  ? `Active account: ${activeAccount.name || activeAccount.phoneNumber}`
+                  : "Add a WhatsApp Business account to get started"
                 }
               </p>
             </div>

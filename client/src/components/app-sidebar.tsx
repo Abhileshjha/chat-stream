@@ -24,6 +24,7 @@ import {
   Eye,
   EyeOff,
   Smartphone,
+  LogOut,
 } from "lucide-react";
 
 declare global {
@@ -656,7 +657,7 @@ export function AppSidebar({
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-sidebar-border p-4">
+      <SidebarFooter className="border-t border-sidebar-border p-4 space-y-3">
         <div className="flex items-center gap-2 text-xs">
           {apiStatus === "connected" ? (
             <>
@@ -675,6 +676,25 @@ export function AppSidebar({
             </>
           )}
         </div>
+        {user && (
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-muted-foreground truncate flex-1">
+              {user.email || user.firstName || "User"}
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              asChild
+              className="h-7 px-2"
+              data-testid="button-logout"
+            >
+              <a href="/api/logout">
+                <LogOut className="h-3.5 w-3.5 mr-1" />
+                Logout
+              </a>
+            </Button>
+          </div>
+        )}
       </SidebarFooter>
     </Sidebar>
   );
