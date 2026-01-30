@@ -100,6 +100,12 @@ The platform supports multiple WhatsApp Business numbers with account switching:
 - Enhanced Settings page with collapsible step-by-step Setup Guide for WhatsApp API integration, including resource links to Meta documentation
 - Fixed SelectItem component empty value bug that caused blank page rendering on Import/Export and Notification Editor pages
 - Implemented Facebook OAuth flow for adding WhatsApp Business accounts with full token exchange and account creation
+- Added secure file upload system with multer for media attachments in templates
+  - WhatsApp-compliant size limits: 5MB images, 16MB videos, 100MB documents
+  - MIME type and extension validation to prevent type spoofing
+  - Ownership-based authorization for file deletion (users can only delete their own files)
+  - Path traversal protection and filename format validation
+- Created GDPR-compliant data deletion page at `/delete-data` for users to request account deletion
 
 ### Development vs Production
 
