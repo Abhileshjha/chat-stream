@@ -6,6 +6,47 @@ import { insertTemplateSchema, insertCampaignSchema, insertMessageSchema } from 
 import { z } from "zod";
 import { authStorage } from "./replit_integrations/auth/storage";
 import { isAuthenticated } from "./replit_integrations/auth/replitAuth";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+
+// Configure multer for file uploads
+const uploadDir = path.join(process.cwd(), "uploads");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      cb(null, uploadDir);
+    },
+    filename: (req, file, cb) => {
+      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+      cb(null, uniqueSuffix + path.extname(file.originalname));
+    },
+  }),
+  limits: {
+    fileSize: 16 * 1024 * 1024, // 16MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedMimes = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "video/mp4",
+      "video/quicktime",
+      "application/pdf",
+      "text/csv",
+      "application/vnd.ms-excel",
+    ];
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Invalid file type. Allowed: JPEG, PNG, WebP, MP4, MOV, PDF, CSV"));
+    }
+  },
+});
 
 // WebSocket clients for real-time updates
 const wsClients = new Set<WebSocket>();
@@ -121,6 +162,54 @@ export async function registerRoutes(
       res.json(analytics);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch analytics" });
+    }
+  });
+
+  // ============== File Uploads ==============
+  // Serve uploaded files statically
+  app.use("/uploads", (req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    next();
+  }, require("express").static(uploadDir));
+
+  // File upload endpoint
+  app.post("/api/upload", isAuthenticated as RequestHandler, upload.single("file"), (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const fileUrl = `/uploads/${req.file.filename}`;
+      const fileInfo = {
+        url: fileUrl,
+        filename: req.file.filename,
+        originalName: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+      };
+
+      res.json(fileInfo);
+    } catch (error) {
+      console.error("Upload error:", error);
+      res.status(500).json({ error: "Failed to upload file" });
+    }
+  });
+
+  // Delete uploaded file
+  app.delete("/api/upload/:filename", isAuthenticated as RequestHandler, (req, res) => {
+    try {
+      const filename = req.params.filename;
+      const filePath = path.join(uploadDir, filename);
+      
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        res.json({ message: "File deleted successfully" });
+      } else {
+        res.status(404).json({ error: "File not found" });
+      }
+    } catch (error) {
+      console.error("Delete error:", error);
+      res.status(500).json({ error: "Failed to delete file" });
     }
   });
 
