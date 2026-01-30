@@ -60,6 +60,14 @@ const apiSettingsSchema = z.object({
   apiVersion: z.string().default("v18.0"),
 });
 
+// Schema for manual WhatsApp account addition
+const manualWhatsAppAccountSchema = z.object({
+  phoneNumberId: z.string().min(1, "Phone Number ID is required"),
+  businessAccountId: z.string().min(1, "WABA ID is required"),
+  accessToken: z.string().min(1, "Access Token is required"),
+  name: z.string().optional(),
+});
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -664,6 +672,83 @@ export async function registerRoutes(
     } catch (error) {
       console.error('Embedded signup error:', error);
       res.status(500).json({ error: "Failed to connect WhatsApp account. Please try again." });
+    }
+  });
+
+  // Manual WhatsApp account addition with Phone Number ID, WABA ID, and Access Token
+  app.post("/api/whatsapp-accounts/manual", isAuthenticated, async (req: any, res) => {
+    try {
+      const validation = manualWhatsAppAccountSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          error: "Validation failed", 
+          details: validation.error.errors 
+        });
+      }
+
+      const { phoneNumberId, businessAccountId, accessToken, name } = validation.data;
+
+      // Check if account with this phone number ID already exists
+      const existingAccounts = await storage.getAccounts();
+      const alreadyExists = existingAccounts.some(a => a.phoneNumberId === phoneNumberId);
+      
+      if (alreadyExists) {
+        return res.status(400).json({ 
+          error: "Account already exists",
+          message: "A WhatsApp account with this Phone Number ID is already connected."
+        });
+      }
+
+      // Verify the credentials by making a test API call to Meta
+      try {
+        const verifyResponse = await fetch(
+          `https://graph.facebook.com/v18.0/${phoneNumberId}?access_token=${accessToken}`
+        );
+        
+        if (!verifyResponse.ok) {
+          const errorData = await verifyResponse.json() as any;
+          return res.status(400).json({ 
+            error: "Invalid credentials",
+            message: errorData.error?.message || "Failed to verify WhatsApp Business API credentials. Please check your Phone Number ID and Access Token."
+          });
+        }
+        
+        const phoneData = await verifyResponse.json() as any;
+        
+        // Create the account with verified info
+        const account = await storage.createAccount({
+          name: name || phoneData.verified_name || phoneData.display_phone_number || `WhatsApp ${phoneNumberId}`,
+          phoneNumber: phoneData.display_phone_number || "",
+          phoneNumberId,
+          businessAccountId,
+          accessToken,
+        });
+
+        // Update status to connected since we verified successfully
+        await storage.updateAccount(account.id, { status: "connected" });
+
+        broadcast("accounts-updated", { count: 1 });
+        res.json({ 
+          success: true, 
+          message: "WhatsApp account connected successfully!",
+          account: {
+            id: account.id,
+            name: account.name,
+            phoneNumber: account.phoneNumber
+          }
+        });
+        
+      } catch (fetchError) {
+        console.error('Meta API verification error:', fetchError);
+        return res.status(400).json({ 
+          error: "Verification failed",
+          message: "Could not verify credentials with Meta API. Please ensure your Access Token has the required permissions."
+        });
+      }
+
+    } catch (error) {
+      console.error('Manual account creation error:', error);
+      res.status(500).json({ error: "Failed to add WhatsApp account. Please try again." });
     }
   });
 
