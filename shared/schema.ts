@@ -171,28 +171,29 @@ export interface ApiSettings {
   apiVersion: string;
 }
 
-// WhatsApp Account/Number type
-export interface WhatsAppAccount {
-  id: string;
-  name: string;
-  phoneNumber: string;
-  phoneNumberId: string;
-  businessAccountId: string;
-  accessToken: string;
-  status: "connected" | "disconnected" | "pending";
-  qualityRating: QualityScore;
-  messagingLimit: number;
-  messagingUsed: number;
-  createdAt: Date;
-}
+// WhatsApp Account/Number table
+export const whatsappAccounts = pgTable("whatsapp_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  phoneNumber: varchar("phone_number", { length: 50 }).notNull(),
+  phoneNumberId: varchar("phone_number_id", { length: 100 }).notNull(),
+  businessAccountId: varchar("business_account_id", { length: 100 }).notNull(),
+  accessToken: text("access_token").notNull(),
+  status: varchar("status", { length: 20 }).notNull().default("connected"),
+  qualityRating: varchar("quality_rating", { length: 20 }).default("UNKNOWN"),
+  messagingLimit: integer("messaging_limit").default(1000),
+  messagingUsed: integer("messaging_used").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
 
-export interface InsertWhatsAppAccount {
-  name: string;
-  phoneNumber: string;
-  phoneNumberId: string;
-  businessAccountId: string;
-  accessToken: string;
-}
+export const insertWhatsAppAccountSchema = createInsertSchema(whatsappAccounts).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertWhatsAppAccount = z.infer<typeof insertWhatsAppAccountSchema>;
+export type WhatsAppAccount = typeof whatsappAccounts.$inferSelect;
 
 // Contact Lists
 export interface ContactList {

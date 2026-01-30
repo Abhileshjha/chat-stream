@@ -10,8 +10,11 @@ import {
   type ContactTag, type InsertContactTag,
   type Conversation, type ConversationMessage, type InsertConversationMessage,
   type Notification, type InsertNotification,
-  type MediaAsset
+  type MediaAsset,
+  whatsappAccounts
 } from "@shared/schema";
+import { db } from "@db";
+import { eq } from "drizzle-orm";
 import { randomUUID } from "crypto";
 
 export interface IStorage {
@@ -56,13 +59,14 @@ export interface IStorage {
   getAnalyticsData(timeRange: string): Promise<AnalyticsData>;
 
   // WhatsApp Accounts
+  getAccountsByUser(userId: string): Promise<WhatsAppAccount[]>;
   getAccounts(): Promise<WhatsAppAccount[]>;
   getAccount(id: string): Promise<WhatsAppAccount | undefined>;
   createAccount(account: InsertWhatsAppAccount): Promise<WhatsAppAccount>;
   updateAccount(id: string, updates: Partial<WhatsAppAccount>): Promise<WhatsAppAccount | undefined>;
   deleteAccount(id: string): Promise<boolean>;
-  setActiveAccount(id: string): Promise<void>;
-  getActiveAccountId(): Promise<string | undefined>;
+  setActiveAccount(userId: string, accountId: string): Promise<void>;
+  getActiveAccountId(userId: string): Promise<string | undefined>;
 
   // Contacts
   getContacts(): Promise<Contact[]>;
@@ -140,7 +144,7 @@ export class MemStorage implements IStorage {
   private campaignMetrics: Map<string, CampaignMetrics>;
   private activities: ActivityItem[];
   private settings: ApiSettings | undefined;
-  private accounts: Map<string, WhatsAppAccount>;
+  private activeAccountByUser: Map<string, string>;
   private activeAccountId: string | undefined;
   private contacts: Map<string, Contact>;
   private contactLists: Map<string, ContactList>;
@@ -156,7 +160,7 @@ export class MemStorage implements IStorage {
     this.campaignMetrics = new Map();
     this.activities = [];
     this.settings = undefined;
-    this.accounts = new Map();
+    this.activeAccountByUser = new Map();
     this.contacts = new Map();
     this.contactLists = new Map();
     this.contactTags = new Map();
@@ -378,22 +382,7 @@ export class MemStorage implements IStorage {
       },
     ];
 
-    // Seed WhatsApp accounts
-    const acc1Id = randomUUID();
-    this.accounts.set(acc1Id, {
-      id: acc1Id,
-      name: "Thoughtful Services",
-      phoneNumber: "+91 89203 90530",
-      phoneNumberId: "123456789",
-      businessAccountId: "987654321",
-      accessToken: "",
-      status: "connected",
-      qualityRating: "GREEN",
-      messagingLimit: 100000,
-      messagingUsed: 3409,
-      createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-    });
-    this.activeAccountId = acc1Id;
+    // WhatsApp accounts are now stored in database
 
     // Seed contact lists
     const listIds: string[] = [];
@@ -651,7 +640,6 @@ export class MemStorage implements IStorage {
     const messages = Array.from(this.messages.values());
     const templates = Array.from(this.templates.values());
     const campaigns = Array.from(this.campaigns.values());
-    const activeAccount = this.activeAccountId ? this.accounts.get(this.activeAccountId) : undefined;
 
     const sentCount = messages.filter((m) => m.status !== "queued").length;
     const deliveredCount = messages.filter((m) => m.status === "delivered" || m.status === "read").length;
@@ -659,6 +647,11 @@ export class MemStorage implements IStorage {
     const failedCount = messages.filter((m) => m.status === "failed").length;
 
     const totalCost = messages.reduce((sum, m) => sum + parseFloat(m.cost || "0"), 0);
+
+    // Get all accounts for general stats
+    const allAccounts = await this.getAccounts();
+    const totalMessagingLimit = allAccounts.reduce((sum, a) => sum + (a.messagingLimit || 0), 0);
+    const totalMessagingUsed = allAccounts.reduce((sum, a) => sum + (a.messagingUsed || 0), 0);
 
     return {
       totalMessages: messages.length,
@@ -672,10 +665,10 @@ export class MemStorage implements IStorage {
       activeCampaigns: campaigns.filter((c) => c.status === "running").length,
       approvedTemplates: templates.filter((t) => t.status === "APPROVED").length,
       pendingTemplates: templates.filter((t) => t.status === "PENDING").length,
-      messagingLimit: activeAccount?.messagingLimit || 100000,
-      messagingUsed: activeAccount?.messagingUsed || messages.length,
-      qualityRating: (activeAccount?.qualityRating as "GREEN" | "YELLOW" | "RED" | "UNKNOWN") || "GREEN",
-      apiStatus: this.settings ? "connected" : "disconnected",
+      messagingLimit: totalMessagingLimit || 100000,
+      messagingUsed: totalMessagingUsed || messages.length,
+      qualityRating: allAccounts[0]?.qualityRating as "GREEN" | "YELLOW" | "RED" | "UNKNOWN" || "GREEN",
+      apiStatus: allAccounts.length > 0 ? "connected" : "disconnected",
     };
   }
 
@@ -847,48 +840,52 @@ export class MemStorage implements IStorage {
     };
   }
 
-  // WhatsApp Accounts
+  // WhatsApp Accounts (database-backed)
+  async getAccountsByUser(userId: string): Promise<WhatsAppAccount[]> {
+    const results = await db.select().from(whatsappAccounts).where(eq(whatsappAccounts.userId, userId));
+    return results as WhatsAppAccount[];
+  }
+
   async getAccounts(): Promise<WhatsAppAccount[]> {
-    return Array.from(this.accounts.values());
+    const results = await db.select().from(whatsappAccounts);
+    return results as WhatsAppAccount[];
   }
 
   async getAccount(id: string): Promise<WhatsAppAccount | undefined> {
-    return this.accounts.get(id);
+    const results = await db.select().from(whatsappAccounts).where(eq(whatsappAccounts.id, id));
+    return results[0] as WhatsAppAccount | undefined;
   }
 
   async createAccount(account: InsertWhatsAppAccount): Promise<WhatsAppAccount> {
-    const id = randomUUID();
-    const newAccount: WhatsAppAccount = {
+    const results = await db.insert(whatsappAccounts).values({
       ...account,
-      id,
-      status: "pending",
+      status: "connected",
       qualityRating: "UNKNOWN",
       messagingLimit: 1000,
       messagingUsed: 0,
-      createdAt: new Date(),
-    };
-    this.accounts.set(id, newAccount);
-    return newAccount;
+    }).returning();
+    return results[0] as WhatsAppAccount;
   }
 
   async updateAccount(id: string, updates: Partial<WhatsAppAccount>): Promise<WhatsAppAccount | undefined> {
-    const account = this.accounts.get(id);
-    if (!account) return undefined;
-    const updated = { ...account, ...updates };
-    this.accounts.set(id, updated);
-    return updated;
+    const results = await db.update(whatsappAccounts)
+      .set(updates)
+      .where(eq(whatsappAccounts.id, id))
+      .returning();
+    return results[0] as WhatsAppAccount | undefined;
   }
 
   async deleteAccount(id: string): Promise<boolean> {
-    return this.accounts.delete(id);
+    const result = await db.delete(whatsappAccounts).where(eq(whatsappAccounts.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
-  async setActiveAccount(id: string): Promise<void> {
-    this.activeAccountId = id;
+  async setActiveAccount(userId: string, accountId: string): Promise<void> {
+    this.activeAccountByUser.set(userId, accountId);
   }
 
-  async getActiveAccountId(): Promise<string | undefined> {
-    return this.activeAccountId;
+  async getActiveAccountId(userId: string): Promise<string | undefined> {
+    return this.activeAccountByUser.get(userId);
   }
 
   // Contacts

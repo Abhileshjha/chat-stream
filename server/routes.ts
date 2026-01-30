@@ -703,20 +703,34 @@ export async function registerRoutes(
   });
 
   // ============== WhatsApp Accounts ==============
-  app.get("/api/accounts", async (req, res) => {
+  app.get("/api/accounts", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
-      const accounts = await storage.getAccounts();
-      const activeId = await storage.getActiveAccountId();
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const accounts = await storage.getAccountsByUser(userId);
+      const activeId = await storage.getActiveAccountId(userId);
       res.json({ accounts, activeAccountId: activeId });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch accounts" });
     }
   });
 
-  app.get("/api/accounts/active", async (req, res) => {
+  app.get("/api/accounts/active", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
-      const activeId = await storage.getActiveAccountId();
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.json(null);
+      }
+      const activeId = await storage.getActiveAccountId(userId);
       if (!activeId) {
+        // Get the first account as default
+        const accounts = await storage.getAccountsByUser(userId);
+        if (accounts.length > 0) {
+          await storage.setActiveAccount(userId, accounts[0].id);
+          return res.json(accounts[0]);
+        }
         return res.json(null);
       }
       const account = await storage.getAccount(activeId);
@@ -726,9 +740,13 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/accounts", async (req, res) => {
+  app.post("/api/accounts", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
-      const account = await storage.createAccount(req.body);
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const account = await storage.createAccount({ ...req.body, userId });
       broadcast("account-added", { account });
       res.status(201).json(account);
     } catch (error) {
@@ -736,9 +754,13 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/accounts/:id/active", async (req, res) => {
+  app.put("/api/accounts/:id/active", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
-      await storage.setActiveAccount(req.params.id);
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      await storage.setActiveAccount(userId, req.params.id);
       const account = await storage.getAccount(req.params.id);
       broadcast("account-switched", { account });
       res.json({ success: true, account });
@@ -763,13 +785,24 @@ export async function registerRoutes(
   app.post("/api/whatsapp-accounts/:id/test", isAuthenticated as RequestHandler, async (req, res) => {
     try {
       const accountId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      console.log("Testing connection for account:", accountId);
+      
       const account = await storage.getAccount(accountId);
       if (!account) {
+        console.log("Account not found:", accountId);
         return res.json({ 
           success: false, 
           message: "Account not found" 
         });
       }
+
+      console.log("Account found:", { 
+        id: account.id, 
+        name: account.name, 
+        phoneNumberId: account.phoneNumberId,
+        hasToken: !!account.accessToken,
+        tokenLength: account.accessToken?.length || 0
+      });
 
       if (!account.accessToken) {
         return res.json({ 
@@ -778,22 +811,39 @@ export async function registerRoutes(
         });
       }
 
+      if (!account.phoneNumberId) {
+        return res.json({ 
+          success: false, 
+          message: "No Phone Number ID configured for this account" 
+        });
+      }
+
       // Test the connection by making a simple API call to Meta
-      const response = await fetch(
-        `https://graph.facebook.com/v18.0/${account.phoneNumberId}?access_token=${account.accessToken}`
-      );
+      const apiUrl = `https://graph.facebook.com/v18.0/${account.phoneNumberId}?access_token=${account.accessToken}`;
+      console.log("Testing Meta API with phoneNumberId:", account.phoneNumberId);
+      
+      const response = await fetch(apiUrl);
+      const responseText = await response.text();
+      console.log("Meta API response status:", response.status);
 
       if (response.ok) {
-        const data = await response.json() as any;
+        const data = JSON.parse(responseText) as any;
         res.json({ 
           success: true, 
           message: `Connection successful! Phone: ${data.display_phone_number || account.phoneNumber}`
         });
       } else {
-        const errorData = await response.json() as any;
+        let errorMessage = "Connection failed. Check your credentials.";
+        try {
+          const errorData = JSON.parse(responseText) as any;
+          console.log("Meta API error:", errorData);
+          errorMessage = errorData.error?.message || errorMessage;
+        } catch (e) {
+          console.log("Meta API raw error response:", responseText);
+        }
         res.json({ 
           success: false, 
-          message: errorData.error?.message || "Connection failed. Check your credentials."
+          message: errorMessage
         });
       }
     } catch (error) {
@@ -824,9 +874,10 @@ export async function registerRoutes(
   // Handle Embedded Signup response from Facebook SDK
   // Protected - only authenticated users can add WhatsApp accounts
   app.post("/api/auth/facebook/embedded-signup", isAuthenticated, async (req: any, res) => {
-    const { accessToken, userId } = req.body;
+    const { accessToken, userId: fbUserId } = req.body;
+    const userId = req.user?.id;
 
-    if (!accessToken || !userId) {
+    if (!accessToken || !fbUserId || !userId) {
       return res.status(400).json({ error: "Missing access token or user ID" });
     }
 
@@ -864,11 +915,12 @@ export async function registerRoutes(
           const phoneNumbers = waba.phone_numbers?.data || [];
           for (const phone of phoneNumbers) {
             // Create account for each phone number
-            const existingAccounts = await storage.getAccounts();
+            const existingAccounts = await storage.getAccountsByUser(userId);
             const alreadyExists = existingAccounts.some(a => a.phoneNumberId === phone.id);
             
             if (!alreadyExists) {
               await storage.createAccount({
+                userId,
                 name: phone.verified_name || waba.name || business.name,
                 phoneNumber: phone.display_phone_number,
                 phoneNumberId: phone.id,
@@ -897,6 +949,11 @@ export async function registerRoutes(
   // Manual WhatsApp account addition with Phone Number ID, WABA ID, and Access Token
   app.post("/api/whatsapp-accounts/manual", isAuthenticated, async (req: any, res) => {
     try {
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
       const validation = manualWhatsAppAccountSchema.safeParse(req.body);
       if (!validation.success) {
         return res.status(400).json({ 
@@ -908,7 +965,7 @@ export async function registerRoutes(
       const { phoneNumberId, businessAccountId, accessToken, name } = validation.data;
 
       // Check if account with this phone number ID already exists
-      const existingAccounts = await storage.getAccounts();
+      const existingAccounts = await storage.getAccountsByUser(userId);
       const alreadyExists = existingAccounts.some(a => a.phoneNumberId === phoneNumberId);
       
       if (alreadyExists) {
@@ -936,6 +993,7 @@ export async function registerRoutes(
         
         // Create the account with verified info
         const account = await storage.createAccount({
+          userId,
           name: name || phoneData.verified_name || phoneData.display_phone_number || `WhatsApp ${phoneNumberId}`,
           phoneNumber: phoneData.display_phone_number || "",
           phoneNumberId,
@@ -1004,8 +1062,9 @@ export async function registerRoutes(
   });
 
   // Handle OAuth callback
-  app.get("/api/auth/facebook/callback", async (req, res) => {
+  app.get("/api/auth/facebook/callback", isAuthenticated, async (req: any, res) => {
     const { code, error, error_description } = req.query;
+    const userId = req.user?.id;
 
     if (error) {
       return res.redirect(`/?error=${encodeURIComponent(error_description as string || error as string)}`);
@@ -1013,6 +1072,10 @@ export async function registerRoutes(
 
     if (!code) {
       return res.redirect('/?error=No authorization code received');
+    }
+
+    if (!userId) {
+      return res.redirect('/?error=Please login first');
     }
 
     if (!FACEBOOK_APP_ID || !FACEBOOK_APP_SECRET) {
@@ -1067,11 +1130,12 @@ export async function registerRoutes(
           const phoneNumbers = waba.phone_numbers?.data || [];
           for (const phone of phoneNumbers) {
             // Create account for each phone number
-            const existingAccounts = await storage.getAccounts();
+            const existingAccounts = await storage.getAccountsByUser(userId);
             const alreadyExists = existingAccounts.some(a => a.phoneNumberId === phone.id);
             
             if (!alreadyExists) {
               await storage.createAccount({
+                userId,
                 name: phone.verified_name || waba.name || business.name,
                 phoneNumber: phone.display_phone_number,
                 phoneNumberId: phone.id,
