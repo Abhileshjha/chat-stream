@@ -705,7 +705,7 @@ export async function registerRoutes(
   // ============== WhatsApp Accounts ==============
   app.get("/api/accounts", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.claims?.sub;
       if (!userId) {
         return res.status(401).json({ error: "Unauthorized" });
       }
@@ -719,7 +719,7 @@ export async function registerRoutes(
 
   app.get("/api/accounts/active", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.claims?.sub;
       if (!userId) {
         return res.json(null);
       }
@@ -742,7 +742,7 @@ export async function registerRoutes(
 
   app.post("/api/accounts", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.claims?.sub;
       if (!userId) {
         return res.status(401).json({ error: "Unauthorized" });
       }
@@ -756,7 +756,7 @@ export async function registerRoutes(
 
   app.put("/api/accounts/:id/active", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.claims?.sub;
       if (!userId) {
         return res.status(401).json({ error: "Unauthorized" });
       }
@@ -875,7 +875,7 @@ export async function registerRoutes(
   // Protected - only authenticated users can add WhatsApp accounts
   app.post("/api/auth/facebook/embedded-signup", isAuthenticated, async (req: any, res) => {
     const { accessToken, userId: fbUserId } = req.body;
-    const userId = req.user?.id;
+    const userId = req.user?.claims?.sub;
 
     if (!accessToken || !fbUserId || !userId) {
       return res.status(400).json({ error: "Missing access token or user ID" });
@@ -949,7 +949,7 @@ export async function registerRoutes(
   // Manual WhatsApp account addition with Phone Number ID, WABA ID, and Access Token
   app.post("/api/whatsapp-accounts/manual", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.claims?.sub;
       if (!userId) {
         return res.status(401).json({ error: "Unauthorized" });
       }
@@ -1064,7 +1064,7 @@ export async function registerRoutes(
   // Handle OAuth callback
   app.get("/api/auth/facebook/callback", isAuthenticated, async (req: any, res) => {
     const { code, error, error_description } = req.query;
-    const userId = req.user?.id;
+    const userId = req.user?.claims?.sub;
 
     if (error) {
       return res.redirect(`/?error=${encodeURIComponent(error_description as string || error as string)}`);
