@@ -17,7 +17,7 @@ import {
   type QualityScore,
 } from "@shared/schema";
 import { db } from "@db";
-import { eq, desc, and, sql as dsql } from "drizzle-orm";
+import { eq, desc, and, or, sql as dsql } from "drizzle-orm";
 
 export interface IStorage {
   getTemplates(accountId?: string): Promise<Template[]>;
@@ -624,8 +624,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getConversationByPhone(phone: string, accountId: string): Promise<Conversation | undefined> {
+    const normalizedPhone = phone.startsWith("+") ? phone : `+${phone}`;
+    const withoutPlus = normalizedPhone.substring(1);
     const rows = await db.select().from(conversations)
-      .where(and(eq(conversations.contactPhone, phone), eq(conversations.accountId, accountId)));
+      .where(and(
+        or(eq(conversations.contactPhone, normalizedPhone), eq(conversations.contactPhone, withoutPlus)),
+        eq(conversations.accountId, accountId)
+      ));
     return rows[0];
   }
 

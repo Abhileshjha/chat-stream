@@ -995,8 +995,9 @@ export async function registerRoutes(
               const phoneNumberId = change.value?.metadata?.phone_number_id;
 
               for (const incoming of incomingMessages) {
-                const from = incoming.from;
-                const contactInfo = contacts.find((c: any) => c.wa_id === from);
+                const rawFrom = incoming.from;
+                const from = rawFrom.startsWith("+") ? rawFrom : `+${rawFrom}`;
+                const contactInfo = contacts.find((c: any) => c.wa_id === rawFrom);
                 const contactName = contactInfo?.profile?.name || from;
                 console.log(`[Webhook] Incoming ${incoming.type} message from ${from} (${contactName}), phoneNumberId: ${phoneNumberId}`);
 
