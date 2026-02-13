@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { Plus, RefreshCw, Search, MoreHorizontal, Eye, Copy, Trash2, Filter, Edit } from "lucide-react";
+import { Plus, RefreshCw, Search, MoreHorizontal, Eye, Copy, Trash2, Filter, Edit, Send } from "lucide-react";
 import { format } from "date-fns";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -112,6 +112,34 @@ export default function Templates() {
       });
     },
   });
+
+  const submitMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("POST", `/api/templates/${id}/submit`);
+    },
+    onSuccess: async (response: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/templates"] });
+      toast({
+        title: "Template Submitted",
+        description: "Template has been submitted to WhatsApp for approval.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Submit Failed",
+        description: error.message || "Failed to submit template to Meta.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const autoSyncDone = useRef(false);
+  useEffect(() => {
+    if (!autoSyncDone.current && !isLoading) {
+      autoSyncDone.current = true;
+      syncMutation.mutate();
+    }
+  }, [isLoading]);
 
   const handleRefresh = () => {
     syncMutation.mutate();
@@ -285,6 +313,15 @@ export default function Templates() {
                               Edit
                             </Link>
                           </DropdownMenuItem>
+                          {!template.metaTemplateId && (
+                            <DropdownMenuItem
+                              onClick={() => submitMutation.mutate(template.id)}
+                              data-testid={`button-submit-template-${template.id}`}
+                            >
+                              <Send className="h-4 w-4 mr-2" />
+                              Submit to WhatsApp
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuItem
                             onClick={() => duplicateMutation.mutate(template)}
                             data-testid={`button-duplicate-template-${template.id}`}

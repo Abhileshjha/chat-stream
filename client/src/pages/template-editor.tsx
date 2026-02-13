@@ -197,6 +197,7 @@ export default function TemplateEditor() {
         });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/templates"] });
+      apiRequest("POST", "/api/templates/sync").catch(() => {});
       navigate("/templates");
     },
     onError: async (error: any) => {

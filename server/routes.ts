@@ -499,6 +499,65 @@ export async function registerRoutes(
     }
   });
 
+  // Submit a draft template to Meta
+  app.post("/api/templates/:id/submit", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const account = active.account;
+
+      const template = await storage.getTemplate(req.params.id);
+      if (!template) return res.status(404).json({ error: "Template not found" });
+      if (template.accountId && template.accountId !== active.accountId) {
+        return res.status(404).json({ error: "Template not found" });
+      }
+
+      if (template.metaTemplateId) {
+        return res.status(400).json({ error: "Template is already submitted to Meta" });
+      }
+
+      if (!account?.accessToken || !account?.businessAccountId) {
+        return res.status(400).json({ error: "No connected WhatsApp account" });
+      }
+
+      const bodyComp = (template.components as any[])?.find((c: any) => c.type === "BODY");
+      if (!bodyComp?.text?.trim()) {
+        return res.status(400).json({ error: "Template body text is required" });
+      }
+
+      const facebookAppId = process.env.FACEBOOK_APP_ID || undefined;
+      const metaResult = await whatsappApi.createTemplate(
+        account.businessAccountId,
+        account.accessToken,
+        template.name,
+        template.category,
+        template.language || "en",
+        (template.components || []) as any[],
+        facebookAppId
+      );
+
+      if (metaResult.success && metaResult.data?.id) {
+        const updated = await storage.updateTemplate(template.id, {
+          metaTemplateId: metaResult.data.id,
+          status: metaResult.data.status || "PENDING",
+          lastSyncedAt: new Date(),
+        });
+        console.log(`[Template] Draft "${template.name}" submitted to Meta: ${metaResult.data.id}`);
+        broadcast("template-updated", { template: updated });
+        res.json(updated);
+      } else {
+        console.error(`[Template] Submit failed for "${template.name}":`, metaResult.error);
+        res.status(400).json({
+          error: "Failed to submit template to Meta",
+          details: metaResult.error?.message,
+        });
+      }
+    } catch (error) {
+      console.error("Template submit error:", error);
+      res.status(500).json({ error: "Failed to submit template" });
+    }
+  });
+
   app.post("/api/templates/sync", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
