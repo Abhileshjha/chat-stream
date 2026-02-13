@@ -175,7 +175,15 @@ export async function registerRoutes(
   app.get("/api/dashboard/metrics", async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
-      const metrics = await storage.getDashboardMetrics(active?.accountId);
+      if (!active) {
+        return res.json({
+          totalMessages: 0, sentCount: 0, deliveredCount: 0, readCount: 0, failedCount: 0,
+          deliveryRate: 0, readRate: 0, totalCost: 0, activeCampaigns: 0,
+          approvedTemplates: 0, pendingTemplates: 0, messagingLimit: 0, messagingUsed: 0,
+          qualityRating: "UNKNOWN", apiStatus: "disconnected",
+        });
+      }
+      const metrics = await storage.getDashboardMetrics(active.accountId);
       res.json(metrics);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch dashboard metrics" });
@@ -185,7 +193,8 @@ export async function registerRoutes(
   app.get("/api/dashboard/activities", async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
-      const activities = await storage.getRecentActivities(active?.accountId);
+      if (!active) return res.json([]);
+      const activities = await storage.getRecentActivities(active.accountId);
       res.json(activities);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch activities" });
@@ -197,7 +206,13 @@ export async function registerRoutes(
     try {
       const timeRange = req.query.range as string || "7d";
       const active = await getActiveAccount(req);
-      const analytics = await storage.getAnalyticsData(timeRange, active?.accountId);
+      if (!active) {
+        return res.json({
+          dailyData: [], hourlyData: [], categoryData: [], errorData: [], costData: [],
+          summary: { totalMessages: 0, totalDelivered: 0, totalRead: 0, totalFailed: 0, deliveryRate: 0, readRate: 0, totalCost: 0 },
+        });
+      }
+      const analytics = await storage.getAnalyticsData(timeRange, active.accountId);
       res.json(analytics);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch analytics" });
@@ -314,7 +329,8 @@ export async function registerRoutes(
   app.get("/api/templates", async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
-      const templates = await storage.getTemplates(active?.accountId);
+      if (!active) return res.json([]);
+      const templates = await storage.getTemplates(active.accountId);
       res.json(templates);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch templates" });
@@ -545,7 +561,8 @@ export async function registerRoutes(
   app.get("/api/campaigns", async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
-      const campaigns = await storage.getCampaigns(active?.accountId);
+      if (!active) return res.json([]);
+      const campaigns = await storage.getCampaigns(active.accountId);
       res.json(campaigns);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch campaigns" });
@@ -753,7 +770,8 @@ export async function registerRoutes(
   app.get("/api/messages", async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
-      const messages = await storage.getMessages(active?.accountId);
+      if (!active) return res.json([]);
+      const messages = await storage.getMessages(active.accountId);
       res.json(messages);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch messages" });
@@ -1091,8 +1109,11 @@ export async function registerRoutes(
       if (!userId) {
         return res.status(401).json({ error: "Unauthorized" });
       }
-      await storage.setActiveAccount(userId, req.params.id);
       const account = await storage.getAccount(req.params.id);
+      if (!account || account.userId !== userId) {
+        return res.status(403).json({ error: "Account not found or does not belong to you" });
+      }
+      await storage.setActiveAccount(userId, req.params.id);
       broadcast("account-switched", { account });
       res.json({ success: true, account });
     } catch (error) {
