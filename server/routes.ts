@@ -2613,5 +2613,25 @@ export async function registerRoutes(
     }
   });
 
+  // Auto-subscribe all WABAs to webhook events on startup
+  setTimeout(async () => {
+    try {
+      const accounts = await storage.getAccounts();
+      for (const account of accounts) {
+        if (account.businessAccountId && account.accessToken) {
+          console.log(`[Startup] Auto-subscribing WABA ${account.businessAccountId} (${account.name}) to webhook events...`);
+          const result = await whatsappApi.subscribeAppToWaba(account.businessAccountId, account.accessToken);
+          if (result.success) {
+            console.log(`[Startup] WABA ${account.businessAccountId} subscribed successfully`);
+          } else {
+            console.error(`[Startup] WABA ${account.businessAccountId} subscription failed:`, result.error?.message);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[Startup] Auto-subscribe error:", err);
+    }
+  }, 3000);
+
   return httpServer;
 }
