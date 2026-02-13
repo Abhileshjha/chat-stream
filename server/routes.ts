@@ -337,10 +337,15 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/templates/:id", async (req, res) => {
+  app.get("/api/templates/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
       const template = await storage.getTemplate(req.params.id);
       if (!template) {
+        return res.status(404).json({ error: "Template not found" });
+      }
+      if (template.accountId && template.accountId !== active.accountId) {
         return res.status(404).json({ error: "Template not found" });
       }
       res.json(template);
@@ -352,10 +357,9 @@ export async function registerRoutes(
   app.post("/api/templates", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
       const data = insertTemplateSchema.parse(req.body);
-      const userId = req.user?.claims?.sub;
-
-      const accounts = userId ? await storage.getAccountsByUser(userId) : await storage.getAccounts();
-      const activeAccount = accounts.find(a => a.status === "connected") || accounts[0];
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const activeAccount = active.account;
 
       const bodyComp = (data.components as any[])?.find((c: any) => c.type === "BODY");
       if (!bodyComp?.text?.trim()) {
@@ -399,7 +403,7 @@ export async function registerRoutes(
       const template = await storage.createTemplate({
         ...data,
         name: normalizedName,
-        accountId: activeAccount?.id || null,
+        accountId: active.accountId,
         metaTemplateId,
         status: templateStatus,
       });
@@ -409,16 +413,14 @@ export async function registerRoutes(
         ? `${template.name} submitted to WhatsApp for approval`
         : `${template.name} saved as draft`;
 
-      if (activeAccount) {
-        await storage.addActivity({
-          accountId: activeAccount.id,
-          type: activityType,
-          title: metaTemplateId ? "Template Submitted" : "Template Saved",
-          description: activityDesc,
-          timestamp: new Date(),
-          metadata: null,
-        });
-      }
+      await storage.addActivity({
+        accountId: active.accountId,
+        type: activityType,
+        title: metaTemplateId ? "Template Submitted" : "Template Saved",
+        description: activityDesc,
+        timestamp: new Date(),
+        metadata: null,
+      });
 
       const response: any = { ...template };
       if (metaError) {
@@ -435,8 +437,15 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/templates/:id", async (req, res) => {
+  app.patch("/api/templates/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const existing = await storage.getTemplate(req.params.id);
+      if (!existing) return res.status(404).json({ error: "Template not found" });
+      if (existing.accountId && existing.accountId !== active.accountId) {
+        return res.status(404).json({ error: "Template not found" });
+      }
       const updates = updateTemplateSchema.parse(req.body);
       const template = await storage.updateTemplate(req.params.id, updates);
       if (!template) {
@@ -457,19 +466,20 @@ export async function registerRoutes(
 
   app.delete("/api/templates/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
       const template = await storage.getTemplate(req.params.id);
       if (!template) {
         return res.status(404).json({ error: "Template not found" });
       }
+      if (template.accountId && template.accountId !== active.accountId) {
+        return res.status(404).json({ error: "Template not found" });
+      }
 
-      const userId = req.user?.claims?.sub;
-      const accounts = userId ? await storage.getAccountsByUser(userId) : await storage.getAccounts();
-      const activeAccount = accounts.find(a => a.status === "connected") || accounts[0];
-
-      if (activeAccount?.accessToken && activeAccount?.businessAccountId && template.metaTemplateId) {
+      if (active.account?.accessToken && active.account?.businessAccountId && template.metaTemplateId) {
         const metaResult = await whatsappApi.deleteTemplate(
-          activeAccount.businessAccountId,
-          activeAccount.accessToken,
+          active.account.businessAccountId,
+          active.account.accessToken,
           template.name
         );
         if (!metaResult.success) {
@@ -569,10 +579,15 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/campaigns/:id", async (req, res) => {
+  app.get("/api/campaigns/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
       const campaign = await storage.getCampaign(req.params.id);
       if (!campaign) {
+        return res.status(404).json({ error: "Campaign not found" });
+      }
+      if (campaign.accountId && campaign.accountId !== active.accountId) {
         return res.status(404).json({ error: "Campaign not found" });
       }
       res.json(campaign);
@@ -585,10 +600,11 @@ export async function registerRoutes(
     try {
       const data = insertCampaignSchema.parse(req.body);
       const active = await getActiveAccount(req);
-      const campaign = await storage.createCampaign({ ...data, accountId: active?.accountId || null });
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const campaign = await storage.createCampaign({ ...data, accountId: active.accountId });
       
       await storage.addActivity({
-        accountId: active?.accountId || null,
+        accountId: active.accountId,
         type: "campaign_started",
         title: "Campaign Created",
         description: `${campaign.name} - ${campaign.recipients?.length || 0} recipients`,
@@ -605,8 +621,15 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/campaigns/:id", async (req, res) => {
+  app.patch("/api/campaigns/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const existing = await storage.getCampaign(req.params.id);
+      if (!existing) return res.status(404).json({ error: "Campaign not found" });
+      if (existing.accountId && existing.accountId !== active.accountId) {
+        return res.status(404).json({ error: "Campaign not found" });
+      }
       const updates = updateCampaignSchema.parse(req.body);
       const campaign = await storage.updateCampaign(req.params.id, updates);
       if (!campaign) {
@@ -650,8 +673,13 @@ export async function registerRoutes(
 
   app.post("/api/campaigns/:id/execute", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
       const campaign = await storage.getCampaign(req.params.id);
       if (!campaign) {
+        return res.status(404).json({ error: "Campaign not found" });
+      }
+      if (campaign.accountId && campaign.accountId !== active.accountId) {
         return res.status(404).json({ error: "Campaign not found" });
       }
 
@@ -664,9 +692,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Template must be approved by WhatsApp before sending messages" });
       }
 
-      const userId = req.user?.claims?.sub;
-      const accounts = userId ? await storage.getAccountsByUser(userId) : await storage.getAccounts();
-      const activeAccount = accounts.find(a => a.status === "connected") || accounts[0];
+      const activeAccount = active.account;
 
       if (!activeAccount?.accessToken || !activeAccount?.phoneNumberId) {
         return res.status(400).json({ error: "No connected WhatsApp account with valid credentials" });
@@ -754,8 +780,15 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/campaigns/:id", async (req, res) => {
+  app.delete("/api/campaigns/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const existing = await storage.getCampaign(req.params.id);
+      if (!existing) return res.status(404).json({ error: "Campaign not found" });
+      if (existing.accountId && existing.accountId !== active.accountId) {
+        return res.status(404).json({ error: "Campaign not found" });
+      }
       const deleted = await storage.deleteCampaign(req.params.id);
       if (!deleted) {
         return res.status(404).json({ error: "Campaign not found" });
@@ -778,10 +811,15 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/messages/:id", async (req, res) => {
+  app.get("/api/messages/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
       const message = await storage.getMessage(req.params.id);
       if (!message) {
+        return res.status(404).json({ error: "Message not found" });
+      }
+      if (message.accountId && message.accountId !== active.accountId) {
         return res.status(404).json({ error: "Message not found" });
       }
       res.json(message);
@@ -790,8 +828,15 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/campaigns/:id/messages", async (req, res) => {
+  app.get("/api/campaigns/:id/messages", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const campaign = await storage.getCampaign(req.params.id);
+      if (!campaign) return res.status(404).json({ error: "Campaign not found" });
+      if (campaign.accountId && campaign.accountId !== active.accountId) {
+        return res.status(404).json({ error: "Campaign not found" });
+      }
       const messages = await storage.getMessagesByCampaign(req.params.id);
       res.json(messages);
     } catch (error) {
@@ -799,10 +844,12 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/messages", async (req, res) => {
+  app.post("/api/messages", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
       const data = insertMessageSchema.parse(req.body);
-      const message = await storage.createMessage(data);
+      const message = await storage.createMessage({ ...data, accountId: active.accountId });
       res.status(201).json(message);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -812,15 +859,21 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/messages/:id", async (req, res) => {
+  app.patch("/api/messages/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const existing = await storage.getMessage(req.params.id);
+      if (!existing) return res.status(404).json({ error: "Message not found" });
+      if (existing.accountId && existing.accountId !== active.accountId) {
+        return res.status(404).json({ error: "Message not found" });
+      }
       const updates = updateMessageSchema.parse(req.body);
       const message = await storage.updateMessage(req.params.id, updates);
       if (!message) {
         return res.status(404).json({ error: "Message not found" });
       }
       
-      // Broadcast real-time update
       broadcast("message-status-update", { message });
       
       res.json(message);
@@ -1672,10 +1725,15 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/conversations/:id", async (req, res) => {
+  app.get("/api/conversations/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
       const conversation = await storage.getConversation(req.params.id);
       if (!conversation) {
+        return res.status(404).json({ error: "Conversation not found" });
+      }
+      if (conversation.accountId && conversation.accountId !== active.accountId) {
         return res.status(404).json({ error: "Conversation not found" });
       }
       res.json(conversation);
@@ -1684,8 +1742,17 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/conversations/:id/messages", async (req, res) => {
+  app.get("/api/conversations/:id/messages", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const conversation = await storage.getConversation(req.params.id);
+      if (!conversation) {
+        return res.status(404).json({ error: "Conversation not found" });
+      }
+      if (conversation.accountId && conversation.accountId !== active.accountId) {
+        return res.status(404).json({ error: "Conversation not found" });
+      }
       const messages = await storage.getConversationMessages(req.params.id);
       res.json(messages);
     } catch (error) {
@@ -1764,8 +1831,15 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/conversations/:id", async (req, res) => {
+  app.patch("/api/conversations/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const existing = await storage.getConversation(req.params.id);
+      if (!existing) return res.status(404).json({ error: "Conversation not found" });
+      if (existing.accountId && existing.accountId !== active.accountId) {
+        return res.status(404).json({ error: "Conversation not found" });
+      }
       const conversation = await storage.updateConversation(req.params.id, req.body);
       if (!conversation) {
         return res.status(404).json({ error: "Conversation not found" });
@@ -1788,10 +1862,15 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/notifications/:id", async (req, res) => {
+  app.get("/api/notifications/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
       const notification = await storage.getNotification(req.params.id);
       if (!notification) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
+      if (notification.accountId && notification.accountId !== active.accountId) {
         return res.status(404).json({ error: "Notification not found" });
       }
       res.json(notification);
