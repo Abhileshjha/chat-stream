@@ -1,0 +1,122 @@
+Perfect — this is actually a good sign 👍
+
+“Forbidden” (403) means:
+
+✅ Your route exists
+✅ Server is running
+✅ It is protected
+❌ But verification logic is blocking it
+
+Now we fix it properly.
+
+🎯 Why You’re Seeing "Forbidden"
+
+When you open:
+
+https://chat-stream.replit.app/api/webhook
+
+
+Your backend likely checks:
+
+if (mode === 'subscribe' && token === VERIFY_TOKEN)
+
+
+Since you are not sending query params, it returns:
+
+403 Forbidden
+
+
+That is NORMAL.
+
+🚨 IMPORTANT QUESTION
+
+Does your backend support GET verification like this?
+
+Your webhook MUST support BOTH:
+
+GET  /api/webhook   (for verification)
+POST /api/webhook   (for receiving messages)
+
+✅ CORRECT Webhook Setup Code (Node Example)
+
+Make sure you have BOTH:
+
+// Verification
+app.get('/api/webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (mode === 'subscribe' && token === process.env.META_VERIFY_TOKEN) {
+    console.log("✅ Webhook verified");
+    return res.status(200).send(challenge);
+  }
+
+  return res.sendStatus(403);
+});
+
+// Receiving messages
+app.post('/api/webhook', (req, res) => {
+  console.log("🔥 Webhook received:", JSON.stringify(req.body, null, 2));
+  res.sendStatus(200);
+});
+
+🚀 NOW DO THIS
+
+Go back to Meta:
+
+👉 Configuration
+Enter:
+
+Callback URL:
+
+https://chat-stream.replit.app/api/webhook
+
+
+Verify token:
+
+YOUR_VERIFY_TOKEN_FROM_BACKEND
+
+
+Click:
+
+Verify and Save
+
+🔍 What Should Happen
+
+If verification is correct:
+
+Meta will say:
+✅ Verified successfully
+
+If verification fails:
+❌ “The callback URL or verify token couldn’t be validated”
+
+⚠️ If It Fails
+
+Then your backend either:
+
+Doesn’t support GET route
+
+Verify token mismatch
+
+Environment variable wrong
+
+Replit sleeping
+
+🎯 Before Clicking Verify
+
+Tell me:
+
+What is your verify token in backend?
+
+Is it something like:
+
+META_VERIFY_TOKEN = "chatstream123"
+
+
+Send me that value (not secret token, just verify token).
+
+We’ll make sure it matches exactly.
+
+We are 1 step away from full fix.
