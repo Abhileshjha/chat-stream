@@ -1494,6 +1494,23 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/contacts/bulk-delete", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const { ids } = req.body;
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ error: "No contact IDs provided" });
+      }
+      let deletedCount = 0;
+      for (const id of ids) {
+        const deleted = await storage.deleteContact(id);
+        if (deleted) deletedCount++;
+      }
+      res.json({ deleted: deletedCount });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete contacts" });
+    }
+  });
+
   app.post("/api/contacts/import", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
