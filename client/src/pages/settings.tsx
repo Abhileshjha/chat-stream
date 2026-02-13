@@ -574,7 +574,32 @@ export default function Settings() {
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Add this URL in your Meta app webhook configuration
+              Add this URL in your Meta App Dashboard under WhatsApp &gt; Configuration &gt; Webhook URL
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              data-testid="button-subscribe-webhooks"
+              onClick={async () => {
+                try {
+                  const res = await apiRequest("POST", "/api/webhook/subscribe");
+                  if (!res.ok) {
+                    const errData = await res.json();
+                    toast({ title: "Subscription Failed", description: errData.error || errData.details || "Failed to subscribe", variant: "destructive" });
+                    return;
+                  }
+                  const data = await res.json();
+                  toast({ title: "Webhook Subscribed", description: data.message });
+                } catch (err: any) {
+                  toast({ title: "Subscription Failed", description: err.message || "Could not subscribe to webhook events. Make sure your webhook URL is configured in Meta App Dashboard first.", variant: "destructive" });
+                }
+              }}
+            >
+              Subscribe to Webhook Events
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              Click to register your app to receive incoming WhatsApp messages
             </p>
           </div>
 

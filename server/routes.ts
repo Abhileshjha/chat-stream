@@ -961,13 +961,19 @@ export async function registerRoutes(
 
   // ============== Webhooks ==============
   // Meta webhook verification
-  app.get("/api/webhook", (req, res) => {
+  app.get("/api/webhook", async (req, res) => {
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
     const challenge = req.query["hub.challenge"];
 
-    // In production, verify token matches configured verify token
     if (mode === "subscribe") {
+      const settings = await storage.getSettings();
+      const configuredToken = settings?.webhookVerifyToken;
+      if (configuredToken && token !== configuredToken) {
+        console.log(`[Webhook] Verify token mismatch: received "${token}", expected "${configuredToken}"`);
+        return res.sendStatus(403);
+      }
+      console.log("[Webhook] Verification successful");
       res.status(200).send(challenge);
     } else {
       res.sendStatus(403);
@@ -1379,6 +1385,14 @@ export async function registerRoutes(
         const wabas = business.owned_whatsapp_business_accounts?.data || [];
         for (const waba of wabas) {
           const phoneNumbers = waba.phone_numbers?.data || [];
+
+          try {
+            const subResult = await whatsappApi.subscribeAppToWaba(waba.id, accessToken);
+            console.log(`[Webhook] Subscribed app to WABA ${waba.id}:`, subResult.success ? "OK" : subResult.error?.message);
+          } catch (subErr: any) {
+            console.error(`[Webhook] Failed to subscribe to WABA ${waba.id}:`, subErr.message);
+          }
+
           for (const phone of phoneNumbers) {
             // Create account for each phone number
             const existingAccounts = await storage.getAccountsByUser(userId);
@@ -1594,6 +1608,14 @@ export async function registerRoutes(
         const wabas = business.owned_whatsapp_business_accounts?.data || [];
         for (const waba of wabas) {
           const phoneNumbers = waba.phone_numbers?.data || [];
+
+          try {
+            const subResult = await whatsappApi.subscribeAppToWaba(waba.id, accessToken);
+            console.log(`[Webhook] Subscribed app to WABA ${waba.id} (OAuth):`, subResult.success ? "OK" : subResult.error?.message);
+          } catch (subErr: any) {
+            console.error(`[Webhook] Failed to subscribe to WABA ${waba.id}:`, subErr.message);
+          }
+
           for (const phone of phoneNumbers) {
             // Create account for each phone number
             const existingAccounts = await storage.getAccountsByUser(userId);
@@ -2171,6 +2193,36 @@ export async function registerRoutes(
       broadcast("activity-added", { activity });
     } catch (error) {
       console.error("Notification send error:", error);
+    }
+  });
+
+  // ============== Subscribe to Webhook Events ==============
+  app.post("/api/webhook/subscribe", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+
+      const account = await storage.getAccount(active.accountId);
+      if (!account) return res.status(404).json({ error: "Account not found" });
+
+      if (!account.businessAccountId || !account.accessToken) {
+        return res.status(400).json({ error: "Account missing Business Account ID or access token" });
+      }
+
+      const result = await whatsappApi.subscribeAppToWaba(account.businessAccountId, account.accessToken);
+      if (result.success) {
+        console.log(`[Webhook] Manually subscribed app to WABA ${account.businessAccountId}`);
+        res.json({ success: true, message: "Successfully subscribed to webhook events. Incoming messages will now appear in your inbox." });
+      } else {
+        console.error(`[Webhook] Subscribe failed:`, result.error?.message);
+        res.status(400).json({ 
+          error: result.error?.message || "Failed to subscribe to webhook events",
+          details: "Make sure your webhook URL is configured in your Meta App Dashboard"
+        });
+      }
+    } catch (error: any) {
+      console.error("Webhook subscribe error:", error);
+      res.status(500).json({ error: "Failed to subscribe to webhook events" });
     }
   });
 

@@ -443,6 +443,21 @@ const whatsappApi = {
   sendTextMessage,
   uploadMedia,
   uploadSessionMedia,
+  subscribeAppToWaba,
 };
+
+export async function subscribeAppToWaba(
+  wabaId: string,
+  accessToken: string
+): Promise<MetaApiResponse> {
+  const url = `${META_API_BASE}/${wabaId}/subscribed_apps`;
+  return metaApiRequest(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+  });
+}
 
 export default whatsappApi;
