@@ -217,8 +217,16 @@ export default function Inbox() {
   };
 
   const isWindowOpen = (conv: Conversation | undefined) => {
-    if (!conv?.windowEndsAt) return false;
-    return new Date(conv.windowEndsAt) > new Date();
+    if (!conv) return false;
+    if (conv.windowEndsAt) {
+      return new Date(conv.windowEndsAt) > new Date();
+    }
+    if (conv.lastMessageAt) {
+      const lastMsg = new Date(conv.lastMessageAt);
+      const hoursSinceLastMsg = (Date.now() - lastMsg.getTime()) / (1000 * 60 * 60);
+      return hoursSinceLastMsg < 24;
+    }
+    return false;
   };
 
   const formatTime = (date: Date | string | null | undefined) => {

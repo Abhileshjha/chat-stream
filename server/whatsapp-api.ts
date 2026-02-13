@@ -460,4 +460,41 @@ export async function subscribeAppToWaba(
   });
 }
 
+export async function registerWebhookWithMeta(
+  appId: string,
+  appSecret: string,
+  callbackUrl: string,
+  verifyToken: string
+): Promise<MetaApiResponse> {
+  const appAccessToken = `${appId}|${appSecret}`;
+  const url = `${META_API_BASE}/${appId}/subscriptions`;
+  
+  const params = new URLSearchParams({
+    object: "whatsapp_business_account",
+    callback_url: callbackUrl,
+    verify_token: verifyToken,
+    fields: "messages,message_template_status_update",
+    access_token: appAccessToken,
+  });
+
+  console.log(`[Meta Webhook] Registering webhook URL: ${callbackUrl} for app ${appId}`);
+
+  return metaApiRequest(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: params.toString(),
+  });
+}
+
+export async function getWebhookSubscriptions(
+  appId: string,
+  appSecret: string
+): Promise<MetaApiResponse> {
+  const appAccessToken = `${appId}|${appSecret}`;
+  const url = `${META_API_BASE}/${appId}/subscriptions?access_token=${appAccessToken}`;
+  return metaApiRequest(url);
+}
+
 export default whatsappApi;

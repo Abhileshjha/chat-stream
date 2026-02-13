@@ -578,29 +578,34 @@ export default function Settings() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Button
-              data-testid="button-subscribe-webhooks"
-              onClick={async () => {
-                try {
-                  const res = await apiRequest("POST", "/api/webhook/subscribe");
-                  if (!res.ok) {
-                    const errData = await res.json();
-                    toast({ title: "Subscription Failed", description: errData.error || errData.details || "Failed to subscribe", variant: "destructive" });
-                    return;
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Button
+                data-testid="button-subscribe-webhooks"
+                onClick={async () => {
+                  try {
+                    const res = await apiRequest("POST", "/api/webhook/subscribe");
+                    const data = await res.json();
+                    if (!res.ok) {
+                      toast({ title: "Setup Issue", description: data.error || "Failed to configure webhooks", variant: "destructive" });
+                      return;
+                    }
+                    if (data.partialFailure) {
+                      toast({ title: "Partially Configured", description: data.message, variant: "destructive" });
+                    } else {
+                      toast({ title: "Webhook Configured", description: data.message });
+                    }
+                  } catch (err: any) {
+                    toast({ title: "Setup Failed", description: err.message || "Could not configure webhook", variant: "destructive" });
                   }
-                  const data = await res.json();
-                  toast({ title: "Webhook Subscribed", description: data.message });
-                } catch (err: any) {
-                  toast({ title: "Subscription Failed", description: err.message || "Could not subscribe to webhook events. Make sure your webhook URL is configured in Meta App Dashboard first.", variant: "destructive" });
-                }
-              }}
-            >
-              Subscribe to Webhook Events
-            </Button>
-            <p className="text-xs text-muted-foreground">
-              Click to register your app to receive incoming WhatsApp messages
-            </p>
+                }}
+              >
+                Configure Webhooks Automatically
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Registers your webhook URL with Meta and subscribes to incoming messages
+              </p>
+            </div>
           </div>
 
           <Separator />

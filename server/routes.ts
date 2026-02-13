@@ -2210,20 +2210,115 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Account missing Business Account ID or access token" });
       }
 
-      const result = await whatsappApi.subscribeAppToWaba(account.businessAccountId, account.accessToken);
-      if (result.success) {
-        console.log(`[Webhook] Manually subscribed app to WABA ${account.businessAccountId}`);
-        res.json({ success: true, message: "Successfully subscribed to webhook events. Incoming messages will now appear in your inbox." });
+      const appId = process.env.FACEBOOK_APP_ID;
+      const appSecret = process.env.FACEBOOK_APP_SECRET;
+      
+      const results: string[] = [];
+      let hasError = false;
+
+      // Step 1: Register webhook URL with Meta App (requires app ID and secret)
+      if (appId && appSecret) {
+        const host = req.get("host") || req.headers["x-forwarded-host"];
+        const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
+        const webhookUrl = `${protocol}://${host}/api/webhook`;
+        const verifyToken = `whatsapp_verify_${appId}`;
+
+        // Store verify token in settings so webhook verification works
+        let settings = await storage.getSettings();
+        if (!settings) {
+          settings = await storage.saveSettings({
+            webhookVerifyToken: verifyToken,
+            apiVersion: "v21.0",
+            accessToken: "",
+            phoneNumberId: "",
+            businessAccountId: "",
+          });
+        } else if (settings.webhookVerifyToken !== verifyToken) {
+          const { id: _id, ...rest } = settings;
+          await storage.saveSettings({ ...rest, webhookVerifyToken: verifyToken });
+        }
+
+        console.log(`[Webhook] Registering webhook URL: ${webhookUrl}`);
+        const registerResult = await whatsappApi.registerWebhookWithMeta(appId, appSecret, webhookUrl, verifyToken);
+        if (registerResult.success) {
+          results.push("Webhook URL registered with Meta");
+          console.log(`[Webhook] Successfully registered webhook URL: ${webhookUrl}`);
+        } else {
+          results.push(`Webhook URL registration failed: ${registerResult.error?.message}`);
+          console.error(`[Webhook] URL registration failed:`, registerResult.error);
+          hasError = true;
+        }
       } else {
-        console.error(`[Webhook] Subscribe failed:`, result.error?.message);
-        res.status(400).json({ 
-          error: result.error?.message || "Failed to subscribe to webhook events",
-          details: "Make sure your webhook URL is configured in your Meta App Dashboard"
+        results.push("Facebook App ID/Secret not configured - cannot auto-register webhook URL");
+        hasError = true;
+      }
+
+      // Step 2: Subscribe app to WABA events
+      const wabaResult = await whatsappApi.subscribeAppToWaba(account.businessAccountId, account.accessToken);
+      if (wabaResult.success) {
+        results.push("App subscribed to WABA events");
+        console.log(`[Webhook] Subscribed app to WABA ${account.businessAccountId}`);
+      } else {
+        results.push(`WABA subscription failed: ${wabaResult.error?.message}`);
+        console.error(`[Webhook] WABA subscribe failed:`, wabaResult.error);
+        hasError = true;
+      }
+
+      const allFailed = results.every(r => r.toLowerCase().includes("failed") || r.toLowerCase().includes("not configured"));
+      if (allFailed) {
+        res.status(400).json({ error: results.join(". "), details: results });
+      } else {
+        res.json({ 
+          success: !allFailed, 
+          message: results.join(". "), 
+          details: results,
+          partialFailure: hasError,
         });
       }
     } catch (error: any) {
       console.error("Webhook subscribe error:", error);
       res.status(500).json({ error: "Failed to subscribe to webhook events" });
+    }
+  });
+
+  // Webhook status/diagnostics
+  app.get("/api/webhook/status", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const appId = process.env.FACEBOOK_APP_ID;
+      const appSecret = process.env.FACEBOOK_APP_SECRET;
+
+      if (!appId || !appSecret) {
+        return res.json({ configured: false, message: "Facebook App ID/Secret not configured" });
+      }
+
+      const subsResult = await whatsappApi.getWebhookSubscriptions(appId, appSecret);
+      const settings = await storage.getSettings();
+      
+      const host = req.get("host") || req.headers["x-forwarded-host"];
+      const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
+      const expectedUrl = `${protocol}://${host}/api/webhook`;
+
+      let webhookRegistered = false;
+      let registeredUrl = "";
+      if (subsResult.success && subsResult.data?.data) {
+        const whatsappSub = subsResult.data.data.find((s: any) => s.object === "whatsapp_business_account");
+        if (whatsappSub) {
+          webhookRegistered = true;
+          registeredUrl = whatsappSub.callback_url || "";
+        }
+      }
+
+      res.json({
+        configured: true,
+        webhookRegistered,
+        registeredUrl,
+        expectedUrl,
+        urlMatch: registeredUrl === expectedUrl,
+        verifyTokenConfigured: !!settings?.webhookVerifyToken,
+        subscriptions: subsResult.data?.data || [],
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to check webhook status" });
     }
   });
 
