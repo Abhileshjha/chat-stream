@@ -65,12 +65,29 @@ export default function Templates() {
     },
   });
 
+  const syncMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", "/api/templates/sync");
+    },
+    onSuccess: async (response: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/templates"] });
+      const data = await response.json();
+      toast({
+        title: "Templates Synced",
+        description: `Synced ${data.synced || 0} templates from WhatsApp.`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Sync Failed",
+        description: error.message || "Failed to sync templates from WhatsApp. Make sure your account is connected.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleRefresh = () => {
-    refetch();
-    toast({
-      title: "Syncing Templates",
-      description: "Fetching latest template statuses from Meta...",
-    });
+    syncMutation.mutate();
   };
 
   const filteredTemplates = templates.filter((template) => {
@@ -100,10 +117,10 @@ export default function Templates() {
             variant="outline" 
             size="default"
             onClick={handleRefresh}
-            disabled={isRefetching}
+            disabled={syncMutation.isPending}
             data-testid="button-refresh-templates"
           >
-            <RefreshCw className={`h-4 w-4 mr-2 ${isRefetching ? "animate-spin" : ""}`} />
+            <RefreshCw className={`h-4 w-4 mr-2 ${syncMutation.isPending ? "animate-spin" : ""}`} />
             Sync
           </Button>
           <Button asChild data-testid="button-create-template">

@@ -9,6 +9,7 @@ import { isAuthenticated } from "./replit_integrations/auth/replitAuth";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import * as whatsappApi from "./whatsapp-api";
 
 // Configure multer for file uploads
 const uploadDir = path.join(process.cwd(), "uploads");
@@ -319,24 +320,65 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/templates", async (req, res) => {
+  app.post("/api/templates", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
       const data = insertTemplateSchema.parse(req.body);
-      const template = await storage.createTemplate(data);
-      
-      // Add activity
+      const userId = req.user?.claims?.sub;
+
+      const accounts = userId ? await storage.getAccountsByUser(userId) : await storage.getAccounts();
+      const activeAccount = accounts.find(a => a.status === "connected") || accounts[0];
+
+      let metaTemplateId: string | null = null;
+      let templateStatus = "PENDING";
+
+      if (activeAccount?.accessToken && activeAccount?.businessAccountId) {
+        const metaResult = await whatsappApi.createTemplate(
+          activeAccount.businessAccountId,
+          activeAccount.accessToken,
+          data.name,
+          data.category,
+          data.language || "en",
+          (data.components || []) as any[]
+        );
+
+        if (metaResult.success && metaResult.data?.id) {
+          metaTemplateId = metaResult.data.id;
+          templateStatus = metaResult.data.status || "PENDING";
+          console.log("Template submitted to Meta API successfully:", metaResult.data);
+        } else {
+          console.error("Meta API template creation failed:", metaResult.error);
+          return res.status(400).json({
+            error: "Failed to submit template to WhatsApp",
+            details: metaResult.error?.message || "Unknown error from Meta API",
+          });
+        }
+      } else {
+        return res.status(400).json({
+          error: "No connected WhatsApp account found. Please connect your WhatsApp Business account in Settings first.",
+        });
+      }
+
+      const normalizedName = data.name.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+      const template = await storage.createTemplate({
+        ...data,
+        name: normalizedName,
+        metaTemplateId,
+        status: templateStatus,
+      });
+
       await storage.addActivity({
-        type: "template_approved",
-        title: "Template Created",
-        description: `${template.name} submitted for approval`,
+        type: "template_submitted",
+        title: "Template Submitted",
+        description: `${template.name} submitted to WhatsApp for approval`,
         timestamp: new Date(),
       });
-      
+
       res.status(201).json(template);
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Invalid template data", details: error.errors });
       }
+      console.error("Template creation error:", error);
       res.status(500).json({ error: "Failed to create template" });
     }
   });
@@ -361,15 +403,104 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/templates/:id", async (req, res) => {
+  app.delete("/api/templates/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const template = await storage.getTemplate(req.params.id);
+      if (!template) {
+        return res.status(404).json({ error: "Template not found" });
+      }
+
+      const userId = req.user?.claims?.sub;
+      const accounts = userId ? await storage.getAccountsByUser(userId) : await storage.getAccounts();
+      const activeAccount = accounts.find(a => a.status === "connected") || accounts[0];
+
+      if (activeAccount?.accessToken && activeAccount?.businessAccountId && template.metaTemplateId) {
+        const metaResult = await whatsappApi.deleteTemplate(
+          activeAccount.businessAccountId,
+          activeAccount.accessToken,
+          template.name
+        );
+        if (!metaResult.success) {
+          console.error("Meta API template deletion warning:", metaResult.error);
+        }
+      }
+
       const deleted = await storage.deleteTemplate(req.params.id);
       if (!deleted) {
         return res.status(404).json({ error: "Template not found" });
       }
       res.status(204).send();
     } catch (error) {
+      console.error("Template deletion error:", error);
       res.status(500).json({ error: "Failed to delete template" });
+    }
+  });
+
+  app.post("/api/templates/sync", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const accounts = userId ? await storage.getAccountsByUser(userId) : await storage.getAccounts();
+      const activeAccount = accounts.find(a => a.status === "connected") || accounts[0];
+
+      if (!activeAccount?.accessToken || !activeAccount?.businessAccountId) {
+        return res.status(400).json({ error: "No connected WhatsApp account found" });
+      }
+
+      const metaResult = await whatsappApi.getTemplates(
+        activeAccount.businessAccountId,
+        activeAccount.accessToken
+      );
+
+      if (!metaResult.success) {
+        return res.status(400).json({
+          error: "Failed to fetch templates from WhatsApp",
+          details: metaResult.error?.message,
+        });
+      }
+
+      const metaTemplates = metaResult.data?.data || [];
+      let synced = 0;
+
+      const localTemplates = await storage.getTemplates();
+      const templatesByMetaId = new Map(localTemplates.filter(t => t.metaTemplateId).map(t => [t.metaTemplateId, t]));
+      const templatesByName = new Map(localTemplates.map(t => [t.name, t]));
+
+      for (const mt of metaTemplates) {
+        const existing = templatesByMetaId.get(mt.id) || templatesByName.get(mt.name);
+
+        if (existing) {
+          await storage.updateTemplate(existing.id, {
+            status: mt.status,
+            qualityScore: mt.quality_score?.score || "UNKNOWN",
+            rejectionReason: mt.rejected_reason || null,
+            lastSyncedAt: new Date(),
+          });
+        } else {
+          const components = (mt.components || []).map((c: any) => ({
+            type: c.type,
+            format: c.format,
+            text: c.text,
+            buttons: c.buttons,
+          }));
+
+          await storage.createTemplate({
+            metaTemplateId: mt.id,
+            name: mt.name,
+            category: mt.category,
+            language: mt.language,
+            status: mt.status,
+            qualityScore: mt.quality_score?.score || "UNKNOWN",
+            components,
+            lastSyncedAt: new Date(),
+          });
+        }
+        synced++;
+      }
+
+      res.json({ synced, total: metaTemplates.length });
+    } catch (error) {
+      console.error("Template sync error:", error);
+      res.status(500).json({ error: "Failed to sync templates" });
     }
   });
 
@@ -453,6 +584,108 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid update data", details: error.errors });
       }
       res.status(500).json({ error: "Failed to update campaign" });
+    }
+  });
+
+  app.post("/api/campaigns/:id/execute", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const campaign = await storage.getCampaign(req.params.id);
+      if (!campaign) {
+        return res.status(404).json({ error: "Campaign not found" });
+      }
+
+      const template = await storage.getTemplate(campaign.templateId);
+      if (!template) {
+        return res.status(400).json({ error: "Campaign template not found" });
+      }
+
+      if (template.status !== "APPROVED") {
+        return res.status(400).json({ error: "Template must be approved by WhatsApp before sending messages" });
+      }
+
+      const userId = req.user?.claims?.sub;
+      const accounts = userId ? await storage.getAccountsByUser(userId) : await storage.getAccounts();
+      const activeAccount = accounts.find(a => a.status === "connected") || accounts[0];
+
+      if (!activeAccount?.accessToken || !activeAccount?.phoneNumberId) {
+        return res.status(400).json({ error: "No connected WhatsApp account with valid credentials" });
+      }
+
+      const recipients = campaign.recipients || [];
+      if (recipients.length === 0) {
+        return res.status(400).json({ error: "No recipients specified for this campaign" });
+      }
+
+      await storage.updateCampaign(campaign.id, {
+        status: "running",
+        startedAt: new Date(),
+      });
+      broadcast("campaign-updated", { campaign: { ...campaign, status: "running" } });
+
+      res.json({ message: `Campaign started. Sending to ${recipients.length} recipients.` });
+
+      let sentCount = 0;
+      let failedCount = 0;
+
+      for (const recipientPhone of recipients) {
+        try {
+          const result = await whatsappApi.sendTemplateMessage(
+            activeAccount.phoneNumberId,
+            activeAccount.accessToken,
+            recipientPhone,
+            template.name,
+            template.language || "en"
+          );
+
+          if (result.success && result.data?.messages?.[0]) {
+            const waMessageId = result.data.messages[0].id;
+            await storage.createMessage({
+              campaignId: campaign.id,
+              templateId: template.id,
+              recipientPhone,
+              whatsappMessageId: waMessageId,
+              status: "sent",
+              sentAt: new Date(),
+            });
+            sentCount++;
+          } else {
+            await storage.createMessage({
+              campaignId: campaign.id,
+              templateId: template.id,
+              recipientPhone,
+              status: "failed",
+              errorCode: String(result.error?.code || ""),
+              errorDescription: result.error?.message || "Unknown error",
+            });
+            failedCount++;
+          }
+
+          broadcast("campaign-updated", {
+            campaign: { id: campaign.id, sentCount, failedCount },
+          });
+
+          await new Promise(resolve => setTimeout(resolve, 100));
+        } catch (err: any) {
+          console.error(`Failed to send to ${recipientPhone}:`, err.message);
+          failedCount++;
+        }
+      }
+
+      await storage.updateCampaign(campaign.id, {
+        status: "completed",
+        completedAt: new Date(),
+      });
+
+      const activity = await storage.addActivity({
+        type: "campaign_completed",
+        title: "Campaign Completed",
+        description: `${campaign.name}: ${sentCount} sent, ${failedCount} failed`,
+        timestamp: new Date(),
+      });
+      broadcast("campaign-updated", { campaign: { ...campaign, status: "completed" } });
+      broadcast("activity-added", { activity });
+    } catch (error) {
+      console.error("Campaign execution error:", error);
     }
   });
 
@@ -1307,8 +1540,37 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/conversations/:id/messages", async (req, res) => {
+  app.post("/api/conversations/:id/messages", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const conversation = await storage.getConversation(req.params.id);
+      if (!conversation) {
+        return res.status(404).json({ error: "Conversation not found" });
+      }
+
+      const userId = req.user?.claims?.sub;
+      const accounts = userId ? await storage.getAccountsByUser(userId) : await storage.getAccounts();
+      const activeAccount = accounts.find(a => a.status === "connected") || accounts[0];
+
+      if (req.body.direction === "outgoing" && activeAccount?.accessToken && activeAccount?.phoneNumberId && conversation.contactPhone) {
+        const metaResult = await whatsappApi.sendTextMessage(
+          activeAccount.phoneNumberId,
+          activeAccount.accessToken,
+          conversation.contactPhone,
+          req.body.content
+        );
+
+        if (!metaResult.success) {
+          console.error("Failed to send WhatsApp message:", metaResult.error);
+          return res.status(400).json({
+            error: "Failed to send message via WhatsApp",
+            details: metaResult.error?.message,
+          });
+        }
+
+        const waMessageId = metaResult.data?.messages?.[0]?.id;
+        req.body.whatsappMessageId = waMessageId;
+      }
+
       const message = await storage.addConversationMessage({
         ...req.body,
         conversationId: req.params.id,
@@ -1316,6 +1578,7 @@ export async function registerRoutes(
       broadcast("conversation-message", { message });
       res.status(201).json(message);
     } catch (error) {
+      console.error("Send message error:", error);
       res.status(500).json({ error: "Failed to send message" });
     }
   });

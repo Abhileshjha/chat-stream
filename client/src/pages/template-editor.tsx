@@ -169,10 +169,17 @@ export default function TemplateEditor() {
       queryClient.invalidateQueries({ queryKey: ["/api/templates"] });
       navigate("/templates");
     },
-    onError: () => {
+    onError: async (error: any) => {
+      let errorMsg = "Failed to save template. Please try again.";
+      try {
+        if (error?.message) {
+          const parsed = JSON.parse(error.message);
+          errorMsg = parsed.details || parsed.error || errorMsg;
+        }
+      } catch {}
       toast({
-        title: "Error",
-        description: "Failed to save template. Please try again.",
+        title: "Template Submission Failed",
+        description: errorMsg,
         variant: "destructive",
       });
     },
