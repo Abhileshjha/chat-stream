@@ -28,7 +28,7 @@ The backend is an Express.js server running on Node.js with TypeScript:
 - **API Design**: RESTful endpoints under `/api/*` prefix for all data operations
 - **WebSocket**: Real-time updates via WebSocket server at `/ws` path using the `ws` package
 - **Server Structure**: Single entry point (`server/index.ts`) with routes registered in `server/routes.ts`
-- **Storage Layer**: Abstract `IStorage` interface in `server/storage.ts` allowing swappable storage implementations
+- **Storage Layer**: `DatabaseStorage` class in `server/storage.ts` implementing `IStorage` interface with PostgreSQL-backed CRUD via Drizzle ORM for all entities
 - **Static Serving**: Production builds served from `dist/public`, with Vite dev server middleware in development
 - **Build Process**: Custom build script using esbuild for server bundling and Vite for client bundling
 - **Validation**: Zod schemas for all PATCH/PUT endpoints ensuring type-safe updates
@@ -52,7 +52,7 @@ The platform uses WebSocket for real-time updates:
 - **ORM**: Drizzle ORM with PostgreSQL dialect
 - **Schema**: Defined in `shared/schema.ts` with Zod validation schemas generated via `drizzle-zod`
 - **Migrations**: Drizzle Kit configured to output migrations to `./migrations` directory
-- **Key Entities**: Users, Templates (with approval statuses), Campaigns (with execution states), Messages (with delivery tracking), CampaignMetrics, ApiSettings, WhatsAppAccounts, Contacts, ContactLists, ContactTags, Conversations, ConversationMessages, Notifications
+- **Key Entities (all PostgreSQL-backed)**: Users, Templates (with approval statuses), Campaigns (with execution states), Messages (with delivery tracking), CampaignMetrics, ApiSettings, WhatsAppAccounts, Contacts, ContactLists, ContactTags, Conversations, ConversationMessages, Notifications, Activities, ActiveAccounts
 
 ### Multi-Account Support
 

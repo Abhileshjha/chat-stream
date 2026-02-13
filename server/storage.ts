@@ -1,39 +1,37 @@
 import { 
-  type Template, type InsertTemplate,
-  type Campaign, type InsertCampaign,
-  type Message, type InsertMessage,
-  type CampaignMetrics, type InsertCampaignMetrics,
-  type DashboardMetrics, type ActivityItem, type ApiSettings,
-  type WhatsAppAccount, type InsertWhatsAppAccount,
-  type Contact, type InsertContact,
-  type ContactList, type InsertContactList,
-  type ContactTag, type InsertContactTag,
-  type Conversation, type ConversationMessage, type InsertConversationMessage,
-  type Notification, type InsertNotification,
-  type MediaAsset,
-  whatsappAccounts
+  type Template, type InsertTemplate, templates,
+  type Campaign, type InsertCampaign, campaigns,
+  type Message, type InsertMessage, messages,
+  type CampaignMetrics, type InsertCampaignMetrics, campaignMetrics,
+  type DashboardMetrics,
+  type ActivityItem, activities,
+  type ApiSettings, apiSettings,
+  type WhatsAppAccount, type InsertWhatsAppAccount, whatsappAccounts,
+  type Contact, type InsertContact, contacts,
+  type ContactList, type InsertContactList, contactLists,
+  type ContactTag, type InsertContactTag, contactTags,
+  type Conversation, type InsertConversation, conversations,
+  type ConversationMessage, type InsertConversationMessage, conversationMessages,
+  type Notification, type InsertNotification, notifications,
+  activeAccounts,
+  type QualityScore,
 } from "@shared/schema";
 import { db } from "@db";
-import { eq } from "drizzle-orm";
-import { randomUUID } from "crypto";
+import { eq, desc, and, sql as dsql } from "drizzle-orm";
 
 export interface IStorage {
-
-  // Templates
   getTemplates(): Promise<Template[]>;
   getTemplate(id: string): Promise<Template | undefined>;
   createTemplate(template: InsertTemplate): Promise<Template>;
   updateTemplate(id: string, updates: Partial<Template>): Promise<Template | undefined>;
   deleteTemplate(id: string): Promise<boolean>;
 
-  // Campaigns
   getCampaigns(): Promise<Campaign[]>;
   getCampaign(id: string): Promise<Campaign | undefined>;
   createCampaign(campaign: InsertCampaign): Promise<Campaign>;
   updateCampaign(id: string, updates: Partial<Campaign>): Promise<Campaign | undefined>;
   deleteCampaign(id: string): Promise<boolean>;
 
-  // Messages
   getMessages(): Promise<Message[]>;
   getMessage(id: string): Promise<Message | undefined>;
   getMessagesByWhatsappId(whatsappId: string): Promise<Message | undefined>;
@@ -42,23 +40,18 @@ export interface IStorage {
   updateMessage(id: string, updates: Partial<Message>): Promise<Message | undefined>;
   deleteMessage(id: string): Promise<boolean>;
 
-  // Campaign Metrics
   getCampaignMetrics(campaignId: string): Promise<CampaignMetrics | undefined>;
   upsertCampaignMetrics(metrics: InsertCampaignMetrics): Promise<CampaignMetrics>;
 
-  // Dashboard
   getDashboardMetrics(): Promise<DashboardMetrics>;
   getRecentActivities(): Promise<ActivityItem[]>;
   addActivity(activity: Omit<ActivityItem, "id">): Promise<ActivityItem>;
 
-  // Settings
   getSettings(): Promise<ApiSettings | undefined>;
-  saveSettings(settings: ApiSettings): Promise<ApiSettings>;
+  saveSettings(settings: Omit<ApiSettings, "id">): Promise<ApiSettings>;
 
-  // Analytics
   getAnalyticsData(timeRange: string): Promise<AnalyticsData>;
 
-  // WhatsApp Accounts
   getAccountsByUser(userId: string): Promise<WhatsAppAccount[]>;
   getAccounts(): Promise<WhatsAppAccount[]>;
   getAccount(id: string): Promise<WhatsAppAccount | undefined>;
@@ -68,16 +61,14 @@ export interface IStorage {
   setActiveAccount(userId: string, accountId: string): Promise<void>;
   getActiveAccountId(userId: string): Promise<string | undefined>;
 
-  // Contacts
-  getContacts(): Promise<Contact[]>;
+  getContacts(accountId: string): Promise<Contact[]>;
   getContact(id: string): Promise<Contact | undefined>;
   createContact(contact: InsertContact): Promise<Contact>;
   updateContact(id: string, updates: Partial<Contact>): Promise<Contact | undefined>;
   deleteContact(id: string): Promise<boolean>;
-  importContacts(contacts: InsertContact[], listId?: string): Promise<number>;
+  importContacts(contactsData: InsertContact[], listId?: string): Promise<number>;
 
-  // Contact Lists
-  getLists(): Promise<ContactList[]>;
+  getLists(accountId: string): Promise<ContactList[]>;
   getList(id: string): Promise<ContactList | undefined>;
   createList(list: InsertContactList): Promise<ContactList>;
   updateList(id: string, updates: Partial<ContactList>): Promise<ContactList | undefined>;
@@ -85,37 +76,32 @@ export interface IStorage {
   deleteContactList(id: string): Promise<boolean>;
   getContactListsByAccount(accountId: string): Promise<ContactList[]>;
 
-  // Contact Tags
-  getTags(): Promise<ContactTag[]>;
+  getTags(accountId: string): Promise<ContactTag[]>;
   getTag(id: string): Promise<ContactTag | undefined>;
   createTag(tag: InsertContactTag): Promise<ContactTag>;
   deleteTag(id: string): Promise<boolean>;
   deleteContactTag(id: string): Promise<boolean>;
   getContactTagsByAccount(accountId: string): Promise<ContactTag[]>;
 
-  // Conversations
-  getConversations(): Promise<Conversation[]>;
+  getConversations(accountId: string): Promise<Conversation[]>;
   getConversation(id: string): Promise<Conversation | undefined>;
-  getConversationByPhone(phone: string): Promise<Conversation | undefined>;
-  createConversation(phone: string, name?: string): Promise<Conversation>;
+  getConversationByPhone(phone: string, accountId: string): Promise<Conversation | undefined>;
+  createConversation(phone: string, name: string | undefined, accountId: string): Promise<Conversation>;
   updateConversation(id: string, updates: Partial<Conversation>): Promise<Conversation | undefined>;
   getConversationMessages(conversationId: string): Promise<ConversationMessage[]>;
   addConversationMessage(message: InsertConversationMessage): Promise<ConversationMessage>;
   getConversationsByAccount(accountId: string): Promise<Conversation[]>;
   deleteConversation(id: string): Promise<boolean>;
 
-  // Notifications/Broadcasts
-  getNotifications(): Promise<Notification[]>;
+  getNotifications(accountId: string): Promise<Notification[]>;
   getNotification(id: string): Promise<Notification | undefined>;
   createNotification(notification: InsertNotification): Promise<Notification>;
   updateNotification(id: string, updates: Partial<Notification>): Promise<Notification | undefined>;
   deleteNotification(id: string): Promise<boolean>;
   getNotificationsByAccount(accountId: string): Promise<Notification[]>;
 
-  // Contacts by account
   getContactsByAccount(accountId: string): Promise<Contact[]>;
 
-  // API Settings
   getApiSettings(): Promise<ApiSettings | undefined>;
   deleteApiSettings(): Promise<boolean>;
 }
@@ -137,524 +123,130 @@ export interface AnalyticsData {
   };
 }
 
-export class MemStorage implements IStorage {
-  private templates: Map<string, Template>;
-  private campaigns: Map<string, Campaign>;
-  private messages: Map<string, Message>;
-  private campaignMetrics: Map<string, CampaignMetrics>;
-  private activities: ActivityItem[];
-  private settings: ApiSettings | undefined;
-  private activeAccountByUser: Map<string, string>;
-  private activeAccountId: string | undefined;
-  private contacts: Map<string, Contact>;
-  private contactLists: Map<string, ContactList>;
-  private contactTags: Map<string, ContactTag>;
-  private conversations: Map<string, Conversation>;
-  private conversationMessages: Map<string, ConversationMessage[]>;
-  private notifications: Map<string, Notification>;
-
-  constructor() {
-    this.templates = new Map();
-    this.campaigns = new Map();
-    this.messages = new Map();
-    this.campaignMetrics = new Map();
-    this.activities = [];
-    this.settings = undefined;
-    this.activeAccountByUser = new Map();
-    this.contacts = new Map();
-    this.contactLists = new Map();
-    this.contactTags = new Map();
-    this.conversations = new Map();
-    this.conversationMessages = new Map();
-    this.notifications = new Map();
-    
-    // No sample data - production mode
-  }
-
-  private seedData() {
-    // Seed templates
-    const templateData: InsertTemplate[] = [
-      {
-        name: "order_confirmation",
-        category: "UTILITY",
-        language: "en",
-        status: "APPROVED",
-        qualityScore: "GREEN",
-        metaTemplateId: "tpl_001",
-        components: [
-          { type: "HEADER", text: "Order Confirmed" },
-          { type: "BODY", text: "Hi {{1}}, your order #{{2}} has been confirmed and will be shipped within 2-3 business days." },
-          { type: "FOOTER", text: "Thank you for your purchase!" }
-        ],
-        lastSyncedAt: new Date(),
-      },
-      {
-        name: "shipping_notification",
-        category: "UTILITY",
-        language: "en",
-        status: "APPROVED",
-        qualityScore: "GREEN",
-        metaTemplateId: "tpl_002",
-        components: [
-          { type: "HEADER", text: "Order Shipped" },
-          { type: "BODY", text: "Great news! Your order #{{1}} is on its way. Track it here: {{2}}" },
-        ],
-        lastSyncedAt: new Date(),
-      },
-      {
-        name: "summer_sale",
-        category: "MARKETING",
-        language: "en",
-        status: "APPROVED",
-        qualityScore: "YELLOW",
-        metaTemplateId: "tpl_003",
-        components: [
-          { type: "BODY", text: "Summer Sale is here! Get up to 50% off on selected items. Shop now at {{1}}" },
-          { type: "FOOTER", text: "Reply STOP to unsubscribe" }
-        ],
-        lastSyncedAt: new Date(),
-      },
-      {
-        name: "login_otp",
-        category: "AUTHENTICATION",
-        language: "en",
-        status: "APPROVED",
-        qualityScore: "GREEN",
-        metaTemplateId: "tpl_004",
-        components: [
-          { type: "BODY", text: "Your verification code is {{1}}. This code expires in 10 minutes." },
-        ],
-        lastSyncedAt: new Date(),
-      },
-      {
-        name: "welcome_message",
-        category: "MARKETING",
-        language: "en",
-        status: "PENDING",
-        metaTemplateId: "tpl_005",
-        components: [
-          { type: "HEADER", text: "Welcome!" },
-          { type: "BODY", text: "Hi {{1}}, welcome to our service! We're excited to have you on board." },
-        ],
-      },
-      {
-        name: "appointment_reminder",
-        category: "UTILITY",
-        language: "en",
-        status: "REJECTED",
-        qualityScore: "RED",
-        rejectionReason: "Template content is unclear. Please specify the type of appointment.",
-        metaTemplateId: "tpl_006",
-        components: [
-          { type: "BODY", text: "Reminder: You have an appointment on {{1}} at {{2}}." },
-        ],
-      },
-    ];
-
-    templateData.forEach((t) => {
-      const id = randomUUID();
-      this.templates.set(id, {
-        ...t,
-        id,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as Template);
-    });
-
-    // Seed campaigns
-    const templateIds = Array.from(this.templates.keys());
-    const approvedTemplates = Array.from(this.templates.values())
-      .filter(t => t.status === "APPROVED")
-      .map(t => t.id);
-
-    if (approvedTemplates.length > 0) {
-      const campaignData: InsertCampaign[] = [
-        {
-          name: "Summer Sale Campaign",
-          description: "Promote our summer sale to all customers",
-          templateId: approvedTemplates[0],
-          status: "running",
-          startedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
-          recipients: ["+1234567890", "+1234567891", "+1234567892", "+1234567893", "+1234567894"],
-        },
-        {
-          name: "Order Confirmations",
-          description: "Automated order confirmation messages",
-          templateId: approvedTemplates[0],
-          status: "completed",
-          startedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
-          completedAt: new Date(Date.now() - 20 * 60 * 60 * 1000),
-          recipients: ["+1234567800", "+1234567801"],
-        },
-        {
-          name: "Holiday Special",
-          description: "Holiday promotion campaign",
-          templateId: approvedTemplates.length > 1 ? approvedTemplates[1] : approvedTemplates[0],
-          status: "draft",
-          recipients: ["+1234567700", "+1234567701", "+1234567702"],
-        },
-      ];
-
-      campaignData.forEach((c) => {
-        const id = randomUUID();
-        this.campaigns.set(id, {
-          ...c,
-          id,
-          scheduledAt: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        } as Campaign);
-      });
-    }
-
-    // Seed messages
-    const campaignIds = Array.from(this.campaigns.keys());
-    if (campaignIds.length > 0 && approvedTemplates.length > 0) {
-      const messageStatuses = ["sent", "delivered", "read", "failed"] as const;
-      const phones = ["+1234567890", "+1234567891", "+1234567892", "+1234567893", "+1234567894"];
-      
-      for (let i = 0; i < 50; i++) {
-        const status = messageStatuses[Math.floor(Math.random() * messageStatuses.length)];
-        const sentAt = new Date(Date.now() - Math.random() * 24 * 60 * 60 * 1000);
-        const deliveredAt = status !== "sent" && status !== "failed" 
-          ? new Date(sentAt.getTime() + Math.random() * 60000) 
-          : null;
-        const readAt = status === "read" 
-          ? new Date((deliveredAt?.getTime() || sentAt.getTime()) + Math.random() * 300000) 
-          : null;
-
-        const id = randomUUID();
-        this.messages.set(id, {
-          id,
-          whatsappMessageId: `wamid.${randomUUID().replace(/-/g, "").substring(0, 20)}`,
-          campaignId: campaignIds[Math.floor(Math.random() * campaignIds.length)],
-          templateId: approvedTemplates[Math.floor(Math.random() * approvedTemplates.length)],
-          recipientPhone: phones[Math.floor(Math.random() * phones.length)],
-          status,
-          queuedAt: new Date(sentAt.getTime() - 1000),
-          sentAt,
-          deliveredAt,
-          readAt,
-          errorCode: status === "failed" ? "130472" : null,
-          errorDescription: status === "failed" ? "User phone number not registered on WhatsApp" : null,
-          cost: "0.0055",
-          metadata: null,
-        } as Message);
-      }
-    }
-
-    // Seed activities
-    this.activities = [
-      {
-        id: randomUUID(),
-        type: "message_delivered",
-        title: "Message Delivered",
-        description: "Summer Sale campaign - +1234567890",
-        timestamp: new Date(Date.now() - 2 * 60 * 1000),
-      },
-      {
-        id: randomUUID(),
-        type: "template_approved",
-        title: "Template Approved",
-        description: "order_confirmation template is now active",
-        timestamp: new Date(Date.now() - 15 * 60 * 1000),
-      },
-      {
-        id: randomUUID(),
-        type: "campaign_started",
-        title: "Campaign Started",
-        description: "Holiday Special - 3,800 recipients",
-        timestamp: new Date(Date.now() - 45 * 60 * 1000),
-      },
-      {
-        id: randomUUID(),
-        type: "message_failed",
-        title: "Message Failed",
-        description: "Invalid phone number - +9876543210",
-        timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000),
-      },
-      {
-        id: randomUUID(),
-        type: "message_read",
-        title: "Message Read",
-        description: "Welcome series - +1122334455",
-        timestamp: new Date(Date.now() - 3 * 60 * 60 * 1000),
-      },
-    ];
-
-    // WhatsApp accounts are now stored in database
-
-    // Seed contact lists
-    const listIds: string[] = [];
-    const listData = [
-      { name: "Default", description: "Default contact list" },
-      { name: "17-01-04", description: "Contacts from January 2026" },
-      { name: "list 2", description: "Second contact list" },
-      { name: "all ivr data", description: "IVR contacts" },
-    ];
-    listData.forEach((list, i) => {
-      const id = randomUUID();
-      listIds.push(id);
-      this.contactLists.set(id, {
-        id,
-        accountId: acc1Id,
-        name: list.name,
-        description: list.description,
-        contactCount: [0, 3391, 2299, 2649][i],
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-    });
-
-    // Seed contact tags
-    const tagData = [
-      { name: "VIP", color: "#22c55e" },
-      { name: "New Customer", color: "#3b82f6" },
-      { name: "Inactive", color: "#ef4444" },
-    ];
-    tagData.forEach((tag) => {
-      const id = randomUUID();
-      this.contactTags.set(id, {
-        id,
-        accountId: acc1Id,
-        name: tag.name,
-        color: tag.color,
-        contactCount: Math.floor(Math.random() * 500),
-        createdAt: new Date(),
-      });
-    });
-
-    // Seed some contacts
-    const contactData = [
-      { phone: "+918840843567", name: undefined },
-      { phone: "+919310967063", name: undefined },
-      { phone: "+918826446429", name: undefined },
-      { phone: "+918410201403", name: undefined },
-      { phone: "+919971853500", name: undefined },
-      { phone: "+919267938981", name: undefined },
-      { phone: "+919911413381", name: "Manish" },
-      { phone: "+918826446429", name: "Ahammad Rezauddin" },
-    ];
-    contactData.forEach((c) => {
-      const id = randomUUID();
-      this.contacts.set(id, {
-        id,
-        accountId: acc1Id,
-        phone: c.phone,
-        name: c.name,
-        status: "subscribed",
-        listIds: listIds.length > 0 ? [listIds[0]] : [],
-        tagIds: [],
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-    });
-
-    // Seed conversations
-    const convData = [
-      { phone: "+918840843567", lastMessage: "Get Brochure", unread: 1 },
-      { phone: "+919310967063", lastMessage: "Thank you for your message. We...", unread: 2 },
-      { phone: "+918826446429", lastMessage: "Get Brochure", unread: 1 },
-      { phone: "+918410201403", lastMessage: "Get Brochure", unread: 1 },
-      { phone: "+919971853500", lastMessage: "Get Brochure", unread: 1 },
-    ];
-    convData.forEach((conv) => {
-      const id = randomUUID();
-      const contact = Array.from(this.contacts.values()).find(c => c.phone === conv.phone);
-      this.conversations.set(id, {
-        id,
-        accountId: acc1Id,
-        contactId: contact?.id || "",
-        contactPhone: conv.phone,
-        contactName: contact?.name,
-        lastMessage: conv.lastMessage,
-        lastMessageAt: new Date(Date.now() - Math.random() * 3600000),
-        unreadCount: conv.unread,
-        status: "active",
-        windowEndsAt: new Date(Date.now() + 20 * 60 * 60 * 1000),
-        createdAt: new Date(),
-      });
-      this.conversationMessages.set(id, []);
-    });
-  }
+export class DatabaseStorage implements IStorage {
 
   // Templates
   async getTemplates(): Promise<Template[]> {
-    return Array.from(this.templates.values()).sort(
-      (a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime()
-    );
+    return db.select().from(templates).orderBy(desc(templates.createdAt));
   }
 
   async getTemplate(id: string): Promise<Template | undefined> {
-    return this.templates.get(id);
+    const rows = await db.select().from(templates).where(eq(templates.id, id));
+    return rows[0];
   }
 
   async createTemplate(template: InsertTemplate): Promise<Template> {
-    const id = randomUUID();
-    const now = new Date();
-    const newTemplate: Template = {
-      ...template,
-      id,
-      metaTemplateId: template.metaTemplateId || null,
-      qualityScore: template.qualityScore || "UNKNOWN",
-      rejectionReason: template.rejectionReason || null,
-      components: template.components || null,
-      lastSyncedAt: template.lastSyncedAt || null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.templates.set(id, newTemplate);
-    return newTemplate;
+    const rows = await db.insert(templates).values(template as any).returning();
+    return rows[0];
   }
 
   async updateTemplate(id: string, updates: Partial<Template>): Promise<Template | undefined> {
-    const template = this.templates.get(id);
-    if (!template) return undefined;
-    
-    const updated = { ...template, ...updates, updatedAt: new Date() };
-    this.templates.set(id, updated);
-    return updated;
+    const { id: _id, ...rest } = updates as any;
+    const rows = await db.update(templates).set({ ...rest, updatedAt: new Date() }).where(eq(templates.id, id)).returning();
+    return rows[0];
   }
 
   async deleteTemplate(id: string): Promise<boolean> {
-    return this.templates.delete(id);
+    const result = await db.delete(templates).where(eq(templates.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   // Campaigns
   async getCampaigns(): Promise<Campaign[]> {
-    return Array.from(this.campaigns.values()).sort(
-      (a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime()
-    );
+    return db.select().from(campaigns).orderBy(desc(campaigns.createdAt));
   }
 
   async getCampaign(id: string): Promise<Campaign | undefined> {
-    return this.campaigns.get(id);
+    const rows = await db.select().from(campaigns).where(eq(campaigns.id, id));
+    return rows[0];
   }
 
   async createCampaign(campaign: InsertCampaign): Promise<Campaign> {
-    const id = randomUUID();
-    const now = new Date();
-    const newCampaign: Campaign = {
-      ...campaign,
-      id,
-      description: campaign.description || null,
-      scheduledAt: campaign.scheduledAt || null,
-      startedAt: campaign.startedAt || null,
-      completedAt: campaign.completedAt || null,
-      recipients: campaign.recipients || null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.campaigns.set(id, newCampaign);
-    return newCampaign;
+    const rows = await db.insert(campaigns).values(campaign as any).returning();
+    return rows[0];
   }
 
   async updateCampaign(id: string, updates: Partial<Campaign>): Promise<Campaign | undefined> {
-    const campaign = this.campaigns.get(id);
-    if (!campaign) return undefined;
-    
-    const updated = { ...campaign, ...updates, updatedAt: new Date() };
-    this.campaigns.set(id, updated);
-    return updated;
+    const { id: _id, ...rest } = updates as any;
+    const rows = await db.update(campaigns).set({ ...rest, updatedAt: new Date() }).where(eq(campaigns.id, id)).returning();
+    return rows[0];
   }
 
   async deleteCampaign(id: string): Promise<boolean> {
-    return this.campaigns.delete(id);
+    const result = await db.delete(campaigns).where(eq(campaigns.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   // Messages
   async getMessages(): Promise<Message[]> {
-    return Array.from(this.messages.values()).sort(
-      (a, b) => new Date(b.queuedAt!).getTime() - new Date(a.queuedAt!).getTime()
-    );
+    return db.select().from(messages).orderBy(desc(messages.queuedAt));
   }
 
   async getMessage(id: string): Promise<Message | undefined> {
-    return this.messages.get(id);
+    const rows = await db.select().from(messages).where(eq(messages.id, id));
+    return rows[0];
   }
 
   async getMessagesByWhatsappId(whatsappId: string): Promise<Message | undefined> {
-    return Array.from(this.messages.values()).find(
-      (m) => m.whatsappMessageId === whatsappId
-    );
+    const rows = await db.select().from(messages).where(eq(messages.whatsappMessageId, whatsappId));
+    return rows[0];
   }
 
   async getMessagesByCampaign(campaignId: string): Promise<Message[]> {
-    return Array.from(this.messages.values()).filter(
-      (m) => m.campaignId === campaignId
-    );
+    return db.select().from(messages).where(eq(messages.campaignId, campaignId));
   }
 
   async createMessage(message: InsertMessage): Promise<Message> {
-    const id = randomUUID();
-    const newMessage: Message = {
-      ...message,
-      id,
-      whatsappMessageId: message.whatsappMessageId || null,
-      campaignId: message.campaignId || null,
-      templateId: message.templateId || null,
-      sentAt: message.sentAt || null,
-      deliveredAt: message.deliveredAt || null,
-      readAt: message.readAt || null,
-      errorCode: message.errorCode || null,
-      errorDescription: message.errorDescription || null,
-      cost: message.cost || null,
-      metadata: message.metadata || null,
-      queuedAt: new Date(),
-    };
-    this.messages.set(id, newMessage);
-    return newMessage;
+    const rows = await db.insert(messages).values(message).returning();
+    return rows[0];
   }
 
   async updateMessage(id: string, updates: Partial<Message>): Promise<Message | undefined> {
-    const message = this.messages.get(id);
-    if (!message) return undefined;
-    
-    const updated = { ...message, ...updates };
-    this.messages.set(id, updated);
-    return updated;
+    const { id: _id, ...rest } = updates as any;
+    const rows = await db.update(messages).set(rest).where(eq(messages.id, id)).returning();
+    return rows[0];
   }
 
   async deleteMessage(id: string): Promise<boolean> {
-    return this.messages.delete(id);
+    const result = await db.delete(messages).where(eq(messages.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   // Campaign Metrics
   async getCampaignMetrics(campaignId: string): Promise<CampaignMetrics | undefined> {
-    return this.campaignMetrics.get(campaignId);
+    const rows = await db.select().from(campaignMetrics).where(eq(campaignMetrics.campaignId, campaignId));
+    return rows[0];
   }
 
   async upsertCampaignMetrics(metrics: InsertCampaignMetrics): Promise<CampaignMetrics> {
-    const existing = this.campaignMetrics.get(metrics.campaignId);
-    const updated: CampaignMetrics = {
-      ...existing,
-      ...metrics,
-      lastUpdatedAt: new Date(),
-    };
-    this.campaignMetrics.set(metrics.campaignId, updated);
-    return updated;
+    const rows = await db.insert(campaignMetrics)
+      .values({ ...metrics, lastUpdatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: campaignMetrics.campaignId,
+        set: { ...metrics, lastUpdatedAt: new Date() },
+      })
+      .returning();
+    return rows[0];
   }
 
   // Dashboard
   async getDashboardMetrics(): Promise<DashboardMetrics> {
-    const messages = Array.from(this.messages.values());
-    const templates = Array.from(this.templates.values());
-    const campaigns = Array.from(this.campaigns.values());
+    const allMessages = await db.select().from(messages);
+    const allTemplates = await db.select().from(templates);
+    const allCampaigns = await db.select().from(campaigns);
+    const allAccounts = await db.select().from(whatsappAccounts);
 
-    const sentCount = messages.filter((m) => m.status !== "queued").length;
-    const deliveredCount = messages.filter((m) => m.status === "delivered" || m.status === "read").length;
-    const readCount = messages.filter((m) => m.status === "read").length;
-    const failedCount = messages.filter((m) => m.status === "failed").length;
+    const sentCount = allMessages.filter(m => m.status !== "queued").length;
+    const deliveredCount = allMessages.filter(m => m.status === "delivered" || m.status === "read").length;
+    const readCount = allMessages.filter(m => m.status === "read").length;
+    const failedCount = allMessages.filter(m => m.status === "failed").length;
+    const totalCost = allMessages.reduce((sum, m) => sum + parseFloat(m.cost || "0"), 0);
 
-    const totalCost = messages.reduce((sum, m) => sum + parseFloat(m.cost || "0"), 0);
-
-    // Get all accounts for general stats
-    const allAccounts = await this.getAccounts();
     const totalMessagingLimit = allAccounts.reduce((sum, a) => sum + (a.messagingLimit || 0), 0);
     const totalMessagingUsed = allAccounts.reduce((sum, a) => sum + (a.messagingUsed || 0), 0);
 
     return {
-      totalMessages: messages.length,
+      totalMessages: allMessages.length,
       sentCount,
       deliveredCount,
       readCount,
@@ -662,65 +254,71 @@ export class MemStorage implements IStorage {
       deliveryRate: sentCount > 0 ? (deliveredCount / sentCount) * 100 : 0,
       readRate: deliveredCount > 0 ? (readCount / deliveredCount) * 100 : 0,
       totalCost,
-      activeCampaigns: campaigns.filter((c) => c.status === "running").length,
-      approvedTemplates: templates.filter((t) => t.status === "APPROVED").length,
-      pendingTemplates: templates.filter((t) => t.status === "PENDING").length,
+      activeCampaigns: allCampaigns.filter(c => c.status === "running").length,
+      approvedTemplates: allTemplates.filter(t => t.status === "APPROVED").length,
+      pendingTemplates: allTemplates.filter(t => t.status === "PENDING").length,
       messagingLimit: totalMessagingLimit || 100000,
-      messagingUsed: totalMessagingUsed || messages.length,
-      qualityRating: allAccounts[0]?.qualityRating as "GREEN" | "YELLOW" | "RED" | "UNKNOWN" || "GREEN",
+      messagingUsed: totalMessagingUsed || allMessages.length,
+      qualityRating: (allAccounts[0]?.qualityRating as QualityScore) || "GREEN",
       apiStatus: allAccounts.length > 0 ? "connected" : "disconnected",
     };
   }
 
   async getRecentActivities(): Promise<ActivityItem[]> {
-    return this.activities.slice(0, 20);
+    return db.select().from(activities).orderBy(desc(activities.timestamp)).limit(20);
   }
 
   async addActivity(activity: Omit<ActivityItem, "id">): Promise<ActivityItem> {
-    const newActivity: ActivityItem = {
-      ...activity,
-      id: randomUUID(),
-    };
-    this.activities.unshift(newActivity);
-    // Keep only last 100 activities
-    if (this.activities.length > 100) {
-      this.activities = this.activities.slice(0, 100);
-    }
-    return newActivity;
+    const rows = await db.insert(activities).values(activity).returning();
+    return rows[0];
   }
 
   // Settings
   async getSettings(): Promise<ApiSettings | undefined> {
-    return this.settings;
+    const rows = await db.select().from(apiSettings).limit(1);
+    return rows[0];
   }
 
-  async saveSettings(settings: ApiSettings): Promise<ApiSettings> {
-    this.settings = settings;
-    return settings;
+  async saveSettings(settings: Omit<ApiSettings, "id">): Promise<ApiSettings> {
+    const existing = await this.getSettings();
+    if (existing) {
+      const rows = await db.update(apiSettings).set(settings).where(eq(apiSettings.id, existing.id)).returning();
+      return rows[0];
+    }
+    const rows = await db.insert(apiSettings).values(settings).returning();
+    return rows[0];
+  }
+
+  async getApiSettings(): Promise<ApiSettings | undefined> {
+    return this.getSettings();
+  }
+
+  async deleteApiSettings(): Promise<boolean> {
+    const existing = await this.getSettings();
+    if (!existing) return false;
+    const result = await db.delete(apiSettings).where(eq(apiSettings.id, existing.id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   // Analytics
   async getAnalyticsData(timeRange: string): Promise<AnalyticsData> {
-    const messages = Array.from(this.messages.values());
-    const templates = Array.from(this.templates.values());
-    
-    // Calculate time window based on range
+    const allMessages = await db.select().from(messages);
+    const allTemplates = await db.select().from(templates);
+
     const now = new Date();
     const daysMap: Record<string, number> = { "24h": 1, "7d": 7, "30d": 30, "90d": 90 };
     const days = daysMap[timeRange] || 7;
-    
-    // Generate daily data based on actual messages (grouped by date)
+
     const dailyMap = new Map<string, { sent: number; delivered: number; read: number; failed: number }>();
-    
     for (let i = days - 1; i >= 0; i--) {
       const date = new Date(now);
       date.setDate(date.getDate() - i);
       const dateStr = date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
       dailyMap.set(dateStr, { sent: 0, delivered: 0, read: 0, failed: 0 });
     }
-    
-    // Aggregate messages into daily buckets (using queuedAt as the date)
-    messages.forEach((msg) => {
+
+    allMessages.forEach(msg => {
+      if (!msg.queuedAt) return;
       const msgDate = new Date(msg.queuedAt);
       const daysDiff = Math.floor((now.getTime() - msgDate.getTime()) / (1000 * 60 * 60 * 24));
       if (daysDiff < days) {
@@ -734,94 +332,69 @@ export class MemStorage implements IStorage {
         }
       }
     });
-    
-    const dailyData = Array.from(dailyMap.entries()).map(([date, data]) => ({
-      date,
-      ...data,
-    }));
-    
-    // Generate hourly distribution
+
+    const dailyData = Array.from(dailyMap.entries()).map(([date, data]) => ({ date, ...data }));
+
     const hourlyMap = new Map<string, number>();
     for (let h = 0; h < 24; h += 2) {
       hourlyMap.set(`${h.toString().padStart(2, "0")}:00`, 0);
     }
-    
-    messages.forEach((msg) => {
+    allMessages.forEach(msg => {
+      if (!msg.queuedAt) return;
       const hour = new Date(msg.queuedAt).getHours();
       const hourKey = `${(Math.floor(hour / 2) * 2).toString().padStart(2, "0")}:00`;
       hourlyMap.set(hourKey, (hourlyMap.get(hourKey) || 0) + 1);
     });
-    
-    const hourlyData = Array.from(hourlyMap.entries()).map(([hour, messages]) => ({
-      hour,
-      messages,
-    }));
-    
-    // Category distribution based on templates
+    const hourlyData = Array.from(hourlyMap.entries()).map(([hour, msgs]) => ({ hour, messages: msgs }));
+
     const categoryCount = new Map<string, number>();
-    templates.forEach((t) => {
+    allTemplates.forEach(t => {
       categoryCount.set(t.category, (categoryCount.get(t.category) || 0) + 1);
     });
-    
     const categoryColors: Record<string, string> = {
       MARKETING: "hsl(var(--chart-1))",
       UTILITY: "hsl(var(--chart-2))",
       AUTHENTICATION: "hsl(var(--chart-4))",
     };
-    
     const categoryData = Array.from(categoryCount.entries()).map(([name, value]) => ({
       name,
       value,
       color: categoryColors[name] || "hsl(var(--chart-3))",
     }));
-    
-    // Error distribution
+
     const errorMap = new Map<string, { description: string; count: number }>();
-    messages.forEach((msg) => {
+    allMessages.forEach(msg => {
       if (msg.status === "failed" && msg.errorCode) {
         const existing = errorMap.get(msg.errorCode);
-        if (existing) {
-          existing.count++;
-        } else {
-          errorMap.set(msg.errorCode, {
-            description: msg.errorDescription || "Unknown error",
-            count: 1,
-          });
-        }
+        if (existing) existing.count++;
+        else errorMap.set(msg.errorCode, { description: msg.errorDescription || "Unknown error", count: 1 });
       }
     });
-    
     const errorData = Array.from(errorMap.entries())
       .map(([code, { description, count }]) => ({ code, description, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
-    
-    // Cost data per day
+
     const costMap = new Map<string, number>();
-    dailyMap.forEach((_, date) => {
-      costMap.set(date, 0);
-    });
-    
-    messages.forEach((msg) => {
-      const msgDate = new Date(msg.queuedAt);
-      const dateStr = msgDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    dailyMap.forEach((_, date) => costMap.set(date, 0));
+    allMessages.forEach(msg => {
+      if (!msg.queuedAt) return;
+      const dateStr = new Date(msg.queuedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
       if (costMap.has(dateStr)) {
         costMap.set(dateStr, (costMap.get(dateStr) || 0) + parseFloat(msg.cost || "0"));
       }
     });
-    
     const costData = Array.from(costMap.entries()).map(([date, cost]) => ({
       date,
       cost: Math.round(cost * 100) / 100,
     }));
-    
-    // Calculate summary
-    const totalMessages = messages.length;
-    const totalDelivered = messages.filter((m) => m.status === "delivered" || m.status === "read").length;
-    const totalRead = messages.filter((m) => m.status === "read").length;
-    const totalFailed = messages.filter((m) => m.status === "failed").length;
-    const totalCost = messages.reduce((sum, m) => sum + parseFloat(m.cost || "0"), 0);
-    
+
+    const totalMessages = allMessages.length;
+    const totalDelivered = allMessages.filter(m => m.status === "delivered" || m.status === "read").length;
+    const totalRead = allMessages.filter(m => m.status === "read").length;
+    const totalFailed = allMessages.filter(m => m.status === "failed").length;
+    const totalCost = allMessages.reduce((sum, m) => sum + parseFloat(m.cost || "0"), 0);
+
     return {
       dailyData,
       hourlyData,
@@ -840,39 +413,35 @@ export class MemStorage implements IStorage {
     };
   }
 
-  // WhatsApp Accounts (database-backed)
+  // WhatsApp Accounts
   async getAccountsByUser(userId: string): Promise<WhatsAppAccount[]> {
-    const results = await db.select().from(whatsappAccounts).where(eq(whatsappAccounts.userId, userId));
-    return results as WhatsAppAccount[];
+    return db.select().from(whatsappAccounts).where(eq(whatsappAccounts.userId, userId));
   }
 
   async getAccounts(): Promise<WhatsAppAccount[]> {
-    const results = await db.select().from(whatsappAccounts);
-    return results as WhatsAppAccount[];
+    return db.select().from(whatsappAccounts);
   }
 
   async getAccount(id: string): Promise<WhatsAppAccount | undefined> {
-    const results = await db.select().from(whatsappAccounts).where(eq(whatsappAccounts.id, id));
-    return results[0] as WhatsAppAccount | undefined;
+    const rows = await db.select().from(whatsappAccounts).where(eq(whatsappAccounts.id, id));
+    return rows[0];
   }
 
   async createAccount(account: InsertWhatsAppAccount): Promise<WhatsAppAccount> {
-    const results = await db.insert(whatsappAccounts).values({
+    const rows = await db.insert(whatsappAccounts).values({
       ...account,
       status: "connected",
       qualityRating: "UNKNOWN",
       messagingLimit: 1000,
       messagingUsed: 0,
     }).returning();
-    return results[0] as WhatsAppAccount;
+    return rows[0];
   }
 
   async updateAccount(id: string, updates: Partial<WhatsAppAccount>): Promise<WhatsAppAccount | undefined> {
-    const results = await db.update(whatsappAccounts)
-      .set(updates)
-      .where(eq(whatsappAccounts.id, id))
-      .returning();
-    return results[0] as WhatsAppAccount | undefined;
+    const { id: _id, ...rest } = updates as any;
+    const rows = await db.update(whatsappAccounts).set(rest).where(eq(whatsappAccounts.id, id)).returning();
+    return rows[0];
   }
 
   async deleteAccount(id: string): Promise<boolean> {
@@ -881,312 +450,255 @@ export class MemStorage implements IStorage {
   }
 
   async setActiveAccount(userId: string, accountId: string): Promise<void> {
-    this.activeAccountByUser.set(userId, accountId);
+    await db.insert(activeAccounts)
+      .values({ userId, accountId })
+      .onConflictDoUpdate({
+        target: activeAccounts.userId,
+        set: { accountId },
+      });
   }
 
   async getActiveAccountId(userId: string): Promise<string | undefined> {
-    return this.activeAccountByUser.get(userId);
+    const rows = await db.select().from(activeAccounts).where(eq(activeAccounts.userId, userId));
+    if (rows[0]) return rows[0].accountId;
+    const userAccounts = await this.getAccountsByUser(userId);
+    if (userAccounts.length > 0) {
+      const first = userAccounts.find(a => a.status === "connected") || userAccounts[0];
+      await this.setActiveAccount(userId, first.id);
+      return first.id;
+    }
+    return undefined;
   }
 
   // Contacts
-  async getContacts(): Promise<Contact[]> {
-    const accountId = this.activeAccountId;
-    return Array.from(this.contacts.values()).filter(c => c.accountId === accountId);
+  async getContacts(accountId: string): Promise<Contact[]> {
+    return db.select().from(contacts).where(eq(contacts.accountId, accountId)).orderBy(desc(contacts.createdAt));
   }
 
   async getContact(id: string): Promise<Contact | undefined> {
-    return this.contacts.get(id);
+    const rows = await db.select().from(contacts).where(eq(contacts.id, id));
+    return rows[0];
   }
 
   async createContact(contact: InsertContact): Promise<Contact> {
-    const id = randomUUID();
-    const accountId = this.activeAccountId || "";
-    const newContact: Contact = {
-      ...contact,
-      id,
-      accountId,
-      status: contact.status || "subscribed",
-      listIds: contact.listIds || [],
-      tagIds: contact.tagIds || [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    this.contacts.set(id, newContact);
-    return newContact;
+    const rows = await db.insert(contacts).values(contact as any).returning();
+    return rows[0];
   }
 
   async updateContact(id: string, updates: Partial<Contact>): Promise<Contact | undefined> {
-    const contact = this.contacts.get(id);
-    if (!contact || contact.accountId !== this.activeAccountId) return undefined;
-    const updated = { ...contact, ...updates, updatedAt: new Date() };
-    this.contacts.set(id, updated);
-    return updated;
+    const { id: _id, ...rest } = updates as any;
+    const rows = await db.update(contacts).set({ ...rest, updatedAt: new Date() }).where(eq(contacts.id, id)).returning();
+    return rows[0];
   }
 
   async deleteContact(id: string): Promise<boolean> {
-    const contact = this.contacts.get(id);
-    if (!contact || contact.accountId !== this.activeAccountId) return false;
-    return this.contacts.delete(id);
+    const result = await db.delete(contacts).where(eq(contacts.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
-  async importContacts(contacts: InsertContact[], listId?: string): Promise<number> {
-    const accountId = this.activeAccountId;
+  async importContacts(contactsData: InsertContact[], listId?: string): Promise<number> {
     let imported = 0;
-    for (const contact of contacts) {
-      const existing = Array.from(this.contacts.values()).find(c => c.phone === contact.phone && c.accountId === accountId);
-      if (!existing) {
-        await this.createContact({
+    for (const contact of contactsData) {
+      const existing = await db.select().from(contacts)
+        .where(and(eq(contacts.phone, contact.phone), eq(contacts.accountId, contact.accountId!)));
+      if (existing.length === 0) {
+        const insertData = {
           ...contact,
-          listIds: listId ? [listId] : contact.listIds || [],
-        });
+          listIds: listId ? [listId] : (contact.listIds || []),
+        };
+        await db.insert(contacts).values(insertData as any);
         imported++;
       }
     }
-    if (listId) {
-      const list = this.contactLists.get(listId);
-      if (list) {
-        list.contactCount += imported;
-        this.contactLists.set(listId, list);
-      }
+    if (listId && imported > 0) {
+      await db.update(contactLists)
+        .set({ contactCount: dsql`${contactLists.contactCount} + ${imported}` })
+        .where(eq(contactLists.id, listId));
     }
     return imported;
   }
 
   // Contact Lists
-  async getLists(): Promise<ContactList[]> {
-    const accountId = this.activeAccountId;
-    return Array.from(this.contactLists.values()).filter(l => l.accountId === accountId);
+  async getLists(accountId: string): Promise<ContactList[]> {
+    return db.select().from(contactLists).where(eq(contactLists.accountId, accountId)).orderBy(desc(contactLists.createdAt));
   }
 
   async getList(id: string): Promise<ContactList | undefined> {
-    return this.contactLists.get(id);
+    const rows = await db.select().from(contactLists).where(eq(contactLists.id, id));
+    return rows[0];
   }
 
   async createList(list: InsertContactList): Promise<ContactList> {
-    const id = randomUUID();
-    const accountId = this.activeAccountId || "";
-    const newList: ContactList = {
-      ...list,
-      id,
-      accountId,
-      contactCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    this.contactLists.set(id, newList);
-    return newList;
+    const rows = await db.insert(contactLists).values(list).returning();
+    return rows[0];
   }
 
   async updateList(id: string, updates: Partial<ContactList>): Promise<ContactList | undefined> {
-    const list = this.contactLists.get(id);
-    if (!list || list.accountId !== this.activeAccountId) return undefined;
-    const updated = { ...list, ...updates, updatedAt: new Date() };
-    this.contactLists.set(id, updated);
-    return updated;
+    const { id: _id, ...rest } = updates as any;
+    const rows = await db.update(contactLists).set({ ...rest, updatedAt: new Date() }).where(eq(contactLists.id, id)).returning();
+    return rows[0];
   }
 
   async deleteList(id: string): Promise<boolean> {
-    const list = this.contactLists.get(id);
-    if (!list || list.accountId !== this.activeAccountId) return false;
-    return this.contactLists.delete(id);
+    const result = await db.delete(contactLists).where(eq(contactLists.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async deleteContactList(id: string): Promise<boolean> {
+    return this.deleteList(id);
+  }
+
+  async getContactListsByAccount(accountId: string): Promise<ContactList[]> {
+    return this.getLists(accountId);
   }
 
   // Contact Tags
-  async getTags(): Promise<ContactTag[]> {
-    const accountId = this.activeAccountId;
-    return Array.from(this.contactTags.values()).filter(t => t.accountId === accountId);
+  async getTags(accountId: string): Promise<ContactTag[]> {
+    return db.select().from(contactTags).where(eq(contactTags.accountId, accountId)).orderBy(desc(contactTags.createdAt));
   }
 
   async getTag(id: string): Promise<ContactTag | undefined> {
-    return this.contactTags.get(id);
+    const rows = await db.select().from(contactTags).where(eq(contactTags.id, id));
+    return rows[0];
   }
 
   async createTag(tag: InsertContactTag): Promise<ContactTag> {
-    const id = randomUUID();
-    const accountId = this.activeAccountId || "";
-    const newTag: ContactTag = {
-      ...tag,
-      id,
-      accountId,
-      contactCount: 0,
-      createdAt: new Date(),
-    };
-    this.contactTags.set(id, newTag);
-    return newTag;
+    const rows = await db.insert(contactTags).values(tag).returning();
+    return rows[0];
   }
 
   async deleteTag(id: string): Promise<boolean> {
-    const tag = this.contactTags.get(id);
-    if (!tag || tag.accountId !== this.activeAccountId) return false;
-    return this.contactTags.delete(id);
+    const result = await db.delete(contactTags).where(eq(contactTags.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async deleteContactTag(id: string): Promise<boolean> {
+    return this.deleteTag(id);
+  }
+
+  async getContactTagsByAccount(accountId: string): Promise<ContactTag[]> {
+    return this.getTags(accountId);
   }
 
   // Conversations
-  async getConversations(): Promise<Conversation[]> {
-    const accountId = this.activeAccountId;
-    return Array.from(this.conversations.values())
-      .filter(c => c.accountId === accountId)
-      .sort((a, b) => new Date(b.lastMessageAt || b.createdAt).getTime() - new Date(a.lastMessageAt || a.createdAt).getTime());
+  async getConversations(accountId: string): Promise<Conversation[]> {
+    return db.select().from(conversations)
+      .where(eq(conversations.accountId, accountId))
+      .orderBy(desc(conversations.lastMessageAt));
   }
 
   async getConversation(id: string): Promise<Conversation | undefined> {
-    return this.conversations.get(id);
+    const rows = await db.select().from(conversations).where(eq(conversations.id, id));
+    return rows[0];
   }
 
-  async getConversationByPhone(phone: string): Promise<Conversation | undefined> {
-    const accountId = this.activeAccountId;
-    return Array.from(this.conversations.values()).find(c => c.contactPhone === phone && c.accountId === accountId);
+  async getConversationByPhone(phone: string, accountId: string): Promise<Conversation | undefined> {
+    const rows = await db.select().from(conversations)
+      .where(and(eq(conversations.contactPhone, phone), eq(conversations.accountId, accountId)));
+    return rows[0];
   }
 
-  async createConversation(phone: string, name?: string): Promise<Conversation> {
-    const id = randomUUID();
-    const accountId = this.activeAccountId || "";
-    const contact = Array.from(this.contacts.values()).find(c => c.phone === phone);
-    const newConv: Conversation = {
-      id,
+  async createConversation(phone: string, name: string | undefined, accountId: string): Promise<Conversation> {
+    const contactRows = await db.select().from(contacts)
+      .where(and(eq(contacts.phone, phone), eq(contacts.accountId, accountId)));
+    const contact = contactRows[0];
+
+    const rows = await db.insert(conversations).values({
       accountId,
       contactId: contact?.id || "",
       contactPhone: phone,
-      contactName: name || contact?.name,
+      contactName: name || contact?.name || undefined,
       unreadCount: 0,
       status: "open",
-      createdAt: new Date(),
-    };
-    this.conversations.set(id, newConv);
-    this.conversationMessages.set(id, []);
-    return newConv;
+    }).returning();
+    return rows[0];
   }
 
   async updateConversation(id: string, updates: Partial<Conversation>): Promise<Conversation | undefined> {
-    const conv = this.conversations.get(id);
-    if (!conv || conv.accountId !== this.activeAccountId) return undefined;
-    const updated = { ...conv, ...updates };
-    this.conversations.set(id, updated);
-    return updated;
+    const { id: _id, ...rest } = updates as any;
+    const rows = await db.update(conversations).set(rest).where(eq(conversations.id, id)).returning();
+    return rows[0];
   }
 
   async getConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
-    return this.conversationMessages.get(conversationId) || [];
+    return db.select().from(conversationMessages)
+      .where(eq(conversationMessages.conversationId, conversationId))
+      .orderBy(conversationMessages.sentAt);
   }
 
   async addConversationMessage(message: InsertConversationMessage): Promise<ConversationMessage> {
-    const id = randomUUID();
-    const newMessage: ConversationMessage = {
-      ...message,
-      id,
-      sentAt: new Date(),
-    };
-    const messages = this.conversationMessages.get(message.conversationId) || [];
-    messages.push(newMessage);
-    this.conversationMessages.set(message.conversationId, messages);
-    
-    // Update conversation
-    const conv = this.conversations.get(message.conversationId);
-    if (conv) {
-      conv.lastMessage = message.content;
-      conv.lastMessageAt = new Date();
-      if (message.direction === "inbound") {
-        conv.unreadCount++;
-      }
-      this.conversations.set(message.conversationId, conv);
-    }
-    return newMessage;
+    const rows = await db.insert(conversationMessages).values(message).returning();
+    const newMsg = rows[0];
+
+    await db.update(conversations).set({
+      lastMessage: message.content,
+      lastMessageAt: new Date(),
+      ...(message.direction === "inbound" ? { unreadCount: dsql`${conversations.unreadCount} + 1` } : {}),
+    }).where(eq(conversations.id, message.conversationId));
+
+    return newMsg;
   }
 
-  // Notifications/Broadcasts
-  async getNotifications(): Promise<Notification[]> {
-    const accountId = this.activeAccountId;
-    return Array.from(this.notifications.values())
-      .filter(n => n.accountId === accountId)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  async getConversationsByAccount(accountId: string): Promise<Conversation[]> {
+    return this.getConversations(accountId);
+  }
+
+  async deleteConversation(id: string): Promise<boolean> {
+    await db.delete(conversationMessages).where(eq(conversationMessages.conversationId, id));
+    const result = await db.delete(conversations).where(eq(conversations.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Notifications
+  async getNotifications(accountId: string): Promise<Notification[]> {
+    return db.select().from(notifications)
+      .where(eq(notifications.accountId, accountId))
+      .orderBy(desc(notifications.createdAt));
   }
 
   async getNotification(id: string): Promise<Notification | undefined> {
-    return this.notifications.get(id);
+    const rows = await db.select().from(notifications).where(eq(notifications.id, id));
+    return rows[0];
   }
 
   async createNotification(notification: InsertNotification): Promise<Notification> {
-    const id = randomUUID();
-    const accountId = this.activeAccountId || "";
-    const totalRecipients = notification.listIds.reduce((sum, listId) => {
-      const list = this.contactLists.get(listId);
-      return sum + (list?.contactCount || 0);
-    }, 0);
-    
-    const newNotification: Notification = {
+    let totalRecipients = 0;
+    if (notification.listIds && Array.isArray(notification.listIds)) {
+      for (const listId of notification.listIds) {
+        const list = await this.getList(listId);
+        totalRecipients += list?.contactCount || 0;
+      }
+    }
+    const rows = await db.insert(notifications).values({
       ...notification,
-      id,
-      accountId,
       status: notification.scheduledAt ? "scheduled" : "draft",
       totalRecipients,
       sentCount: 0,
       deliveredCount: 0,
       readCount: 0,
       failedCount: 0,
-      createdAt: new Date(),
-    };
-    this.notifications.set(id, newNotification);
-    return newNotification;
+    } as any).returning();
+    return rows[0];
   }
 
   async updateNotification(id: string, updates: Partial<Notification>): Promise<Notification | undefined> {
-    const notification = this.notifications.get(id);
-    if (!notification || notification.accountId !== this.activeAccountId) return undefined;
-    const updated = { ...notification, ...updates };
-    this.notifications.set(id, updated);
-    return updated;
+    const { id: _id, ...rest } = updates as any;
+    const rows = await db.update(notifications).set(rest).where(eq(notifications.id, id)).returning();
+    return rows[0];
   }
 
   async deleteNotification(id: string): Promise<boolean> {
-    const notification = this.notifications.get(id);
-    if (!notification || notification.accountId !== this.activeAccountId) return false;
-    return this.notifications.delete(id);
+    const result = await db.delete(notifications).where(eq(notifications.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   async getNotificationsByAccount(accountId: string): Promise<Notification[]> {
-    return Array.from(this.notifications.values()).filter(n => n.accountId === accountId);
+    return this.getNotifications(accountId);
   }
 
   async getContactsByAccount(accountId: string): Promise<Contact[]> {
-    return Array.from(this.contacts.values()).filter(c => c.accountId === accountId);
-  }
-
-  async getContactListsByAccount(accountId: string): Promise<ContactList[]> {
-    return Array.from(this.contactLists.values()).filter(l => l.accountId === accountId);
-  }
-
-  async deleteContactList(id: string): Promise<boolean> {
-    return this.contactLists.delete(id);
-  }
-
-  async getContactTagsByAccount(accountId: string): Promise<ContactTag[]> {
-    return Array.from(this.contactTags.values()).filter(t => t.accountId === accountId);
-  }
-
-  async deleteContactTag(id: string): Promise<boolean> {
-    return this.contactTags.delete(id);
-  }
-
-  async getConversationsByAccount(accountId: string): Promise<Conversation[]> {
-    return Array.from(this.conversations.values()).filter(c => c.accountId === accountId);
-  }
-
-  async deleteConversation(id: string): Promise<boolean> {
-    this.conversationMessages.delete(id);
-    return this.conversations.delete(id);
-  }
-
-  async getApiSettings(): Promise<ApiSettings | undefined> {
-    return this.settings;
-  }
-
-  async deleteApiSettings(): Promise<boolean> {
-    if (this.settings) {
-      this.settings = undefined;
-      return true;
-    }
-    return false;
+    return this.getContacts(accountId);
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();

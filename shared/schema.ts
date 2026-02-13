@@ -153,24 +153,6 @@ export interface DashboardMetrics {
   apiStatus: "connected" | "disconnected" | "error";
 }
 
-// Activity feed item type
-export interface ActivityItem {
-  id: string;
-  type: "message_sent" | "message_delivered" | "message_read" | "message_failed" | "template_approved" | "template_rejected" | "campaign_started" | "campaign_completed";
-  title: string;
-  description: string;
-  timestamp: Date;
-  metadata?: Record<string, unknown>;
-}
-
-// API Settings type
-export interface ApiSettings {
-  accessToken: string;
-  phoneNumberId: string;
-  businessAccountId: string;
-  webhookVerifyToken: string;
-  apiVersion: string;
-}
 
 // WhatsApp Account/Number table
 export const whatsappAccounts = pgTable("whatsapp_accounts", {
@@ -197,98 +179,112 @@ export type InsertWhatsAppAccount = z.infer<typeof insertWhatsAppAccountSchema>;
 export type WhatsAppAccount = typeof whatsappAccounts.$inferSelect;
 
 // Contact Lists
-export interface ContactList {
-  id: string;
-  accountId: string;
-  name: string;
-  description?: string;
-  contactCount: number;
-  createdAt: Date;
-  updatedAt: Date;
-}
+export const contactLists = pgTable("contact_lists", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  contactCount: integer("contact_count").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
 
-export interface InsertContactList {
-  name: string;
-  description?: string;
-}
+export const insertContactListSchema = createInsertSchema(contactLists).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertContactList = z.infer<typeof insertContactListSchema>;
+export type ContactList = typeof contactLists.$inferSelect;
 
 // Contact Tags
-export interface ContactTag {
-  id: string;
-  accountId: string;
-  name: string;
-  color: string;
-  contactCount: number;
-  createdAt: Date;
-}
+export const contactTags = pgTable("contact_tags", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  color: varchar("color", { length: 20 }).notNull(),
+  contactCount: integer("contact_count").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
 
-export interface InsertContactTag {
-  name: string;
-  color: string;
-}
+export const insertContactTagSchema = createInsertSchema(contactTags).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertContactTag = z.infer<typeof insertContactTagSchema>;
+export type ContactTag = typeof contactTags.$inferSelect;
 
 // Contacts
-export interface Contact {
-  id: string;
-  accountId: string;
-  phone: string;
-  name?: string;
-  email?: string;
-  status: "subscribed" | "unsubscribed";
-  listIds: string[];
-  tagIds: string[];
-  customFields?: Record<string, string>;
-  createdAt: Date;
-  updatedAt: Date;
-}
+export const contacts = pgTable("contacts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  phone: varchar("phone", { length: 20 }).notNull(),
+  name: varchar("name", { length: 255 }),
+  email: varchar("email", { length: 255 }),
+  status: varchar("status", { length: 20 }).notNull().default("subscribed"),
+  listIds: jsonb("list_ids").$type<string[]>().default([]),
+  tagIds: jsonb("tag_ids").$type<string[]>().default([]),
+  customFields: jsonb("custom_fields").$type<Record<string, string>>(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
 
-export interface InsertContact {
-  phone: string;
-  name?: string;
-  email?: string;
-  status?: "subscribed" | "unsubscribed";
-  listIds?: string[];
-  tagIds?: string[];
-  customFields?: Record<string, string>;
-}
+export const insertContactSchema = createInsertSchema(contacts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
 
-// Conversation
-export interface Conversation {
-  id: string;
-  accountId: string;
-  contactId: string;
-  contactPhone: string;
-  contactName?: string;
-  lastMessage?: string;
-  lastMessageAt?: Date;
-  unreadCount: number;
-  status: "open" | "active" | "closed";
-  windowEndsAt?: Date;
-  createdAt: Date;
-}
+export type InsertContact = z.infer<typeof insertContactSchema>;
+export type Contact = typeof contacts.$inferSelect;
 
-export interface ConversationMessage {
-  id: string;
-  conversationId: string;
-  direction: "inbound" | "outbound";
-  type: "text" | "image" | "video" | "document" | "template";
-  content: string;
-  mediaUrl?: string;
-  templateName?: string;
-  status?: MessageStatus;
-  sentAt: Date;
-  deliveredAt?: Date;
-  readAt?: Date;
-}
+// Conversations
+export const conversations = pgTable("conversations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  contactId: varchar("contact_id").notNull().default(""),
+  contactPhone: varchar("contact_phone", { length: 20 }).notNull(),
+  contactName: varchar("contact_name", { length: 255 }),
+  lastMessage: text("last_message"),
+  lastMessageAt: timestamp("last_message_at"),
+  unreadCount: integer("unread_count").default(0),
+  status: varchar("status", { length: 20 }).notNull().default("open"),
+  windowEndsAt: timestamp("window_ends_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
 
-export interface InsertConversationMessage {
-  conversationId: string;
-  direction: "inbound" | "outbound";
-  type: "text" | "image" | "video" | "document" | "template";
-  content: string;
-  mediaUrl?: string;
-  templateName?: string;
-}
+export const insertConversationSchema = createInsertSchema(conversations).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertConversation = z.infer<typeof insertConversationSchema>;
+export type Conversation = typeof conversations.$inferSelect;
+
+// Conversation Messages
+export const conversationMessages = pgTable("conversation_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id").notNull(),
+  direction: varchar("direction", { length: 10 }).notNull(),
+  type: varchar("type", { length: 20 }).notNull().default("text"),
+  content: text("content").notNull(),
+  mediaUrl: text("media_url"),
+  templateName: varchar("template_name", { length: 255 }),
+  status: varchar("status", { length: 20 }),
+  sentAt: timestamp("sent_at").defaultNow(),
+  deliveredAt: timestamp("delivered_at"),
+  readAt: timestamp("read_at"),
+});
+
+export const insertConversationMessageSchema = createInsertSchema(conversationMessages).omit({
+  id: true,
+  sentAt: true,
+});
+
+export type InsertConversationMessage = z.infer<typeof insertConversationMessageSchema>;
+export type ConversationMessage = typeof conversationMessages.$inferSelect;
 
 // Enhanced Template with header media and buttons
 export interface TemplateButton {
@@ -311,37 +307,65 @@ export interface EnhancedTemplateData {
   buttons?: TemplateButton[];
 }
 
-// Notification/Broadcast
-export interface Notification {
-  id: string;
-  accountId: string;
-  name: string;
-  status: "draft" | "scheduled" | "sending" | "completed" | "failed";
-  templateId: string;
-  listIds: string[];
-  excludeTags?: string[];
-  includeTags?: string[];
-  scheduledAt?: Date;
-  sentAt?: Date;
-  completedAt?: Date;
-  totalRecipients: number;
-  sentCount: number;
-  deliveredCount: number;
-  readCount: number;
-  failedCount: number;
-  templateVariables?: Record<string, string>;
-  createdAt: Date;
-}
+// Notifications/Broadcasts
+export const notifications = pgTable("notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  status: varchar("status", { length: 20 }).notNull().default("draft"),
+  templateId: varchar("template_id").notNull(),
+  listIds: jsonb("list_ids").$type<string[]>().default([]),
+  excludeTags: jsonb("exclude_tags").$type<string[]>(),
+  includeTags: jsonb("include_tags").$type<string[]>(),
+  scheduledAt: timestamp("scheduled_at"),
+  sentAt: timestamp("sent_at"),
+  completedAt: timestamp("completed_at"),
+  totalRecipients: integer("total_recipients").default(0),
+  sentCount: integer("sent_count").default(0),
+  deliveredCount: integer("delivered_count").default(0),
+  readCount: integer("read_count").default(0),
+  failedCount: integer("failed_count").default(0),
+  templateVariables: jsonb("template_variables").$type<Record<string, string>>(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
 
-export interface InsertNotification {
-  name: string;
-  templateId: string;
-  listIds: string[];
-  excludeTags?: string[];
-  includeTags?: string[];
-  scheduledAt?: string;
-  templateVariables?: Record<string, string>;
-}
+export const insertNotificationSchema = createInsertSchema(notifications).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type Notification = typeof notifications.$inferSelect;
+
+// Activities
+export const activities = pgTable("activities", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  type: varchar("type", { length: 50 }).notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description").notNull(),
+  timestamp: timestamp("timestamp").defaultNow(),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+});
+
+export type ActivityItem = typeof activities.$inferSelect;
+
+// API Settings
+export const apiSettings = pgTable("api_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accessToken: text("access_token").notNull(),
+  phoneNumberId: varchar("phone_number_id", { length: 100 }).notNull(),
+  businessAccountId: varchar("business_account_id", { length: 100 }).notNull(),
+  webhookVerifyToken: text("webhook_verify_token").notNull(),
+  apiVersion: varchar("api_version", { length: 20 }).notNull().default("v18.0"),
+});
+
+export type ApiSettings = typeof apiSettings.$inferSelect;
+
+// Active Account Mapping (persisted per user)
+export const activeAccounts = pgTable("active_accounts", {
+  userId: varchar("user_id").primaryKey(),
+  accountId: varchar("account_id").notNull(),
+});
 
 // Content Library Media
 export interface MediaAsset {

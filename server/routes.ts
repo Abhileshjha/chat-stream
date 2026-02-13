@@ -2,7 +2,7 @@ import type { Express, RequestHandler } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
-import { insertTemplateSchema, insertCampaignSchema, insertMessageSchema } from "@shared/schema";
+import { insertTemplateSchema, insertCampaignSchema, insertMessageSchema, type WhatsAppAccount } from "@shared/schema";
 import { z } from "zod";
 import { authStorage } from "./replit_integrations/auth/storage";
 import { isAuthenticated } from "./replit_integrations/auth/replitAuth";
@@ -86,6 +86,15 @@ function broadcast(event: string, data: any) {
       client.send(message);
     }
   });
+}
+
+async function getActiveAccount(req: any): Promise<{ userId: string; accountId: string; account: WhatsAppAccount | undefined } | null> {
+  const userId = req.user?.claims?.sub;
+  if (!userId) return null;
+  const accountId = await storage.getActiveAccountId(userId);
+  if (!accountId) return null;
+  const account = await storage.getAccount(accountId);
+  return { userId, accountId, account: account || undefined };
 }
 
 // Schema for update operations
@@ -371,6 +380,7 @@ export async function registerRoutes(
         title: "Template Submitted",
         description: `${template.name} submitted to WhatsApp for approval`,
         timestamp: new Date(),
+        metadata: null,
       });
 
       res.status(201).json(template);
@@ -537,6 +547,7 @@ export async function registerRoutes(
         title: "Campaign Created",
         description: `${campaign.name} - ${campaign.recipients?.length || 0} recipients`,
         timestamp: new Date(),
+        metadata: null,
       });
       
       res.status(201).json(campaign);
@@ -566,6 +577,7 @@ export async function registerRoutes(
           title: "Campaign Started",
           description: `${campaign.name} - ${campaign.recipients?.length || 0} recipients`,
           timestamp: new Date(),
+          metadata: null,
         });
         broadcast("activity-added", { activity });
       } else if (updates.status === "completed") {
@@ -574,6 +586,7 @@ export async function registerRoutes(
           title: "Campaign Completed",
           description: `${campaign.name} finished successfully`,
           timestamp: new Date(),
+          metadata: null,
         });
         broadcast("activity-added", { activity });
       }
@@ -681,6 +694,7 @@ export async function registerRoutes(
         title: "Campaign Completed",
         description: `${campaign.name}: ${sentCount} sent, ${failedCount} failed`,
         timestamp: new Date(),
+        metadata: null,
       });
       broadcast("campaign-updated", { campaign: { ...campaign, status: "completed" } });
       broadcast("activity-added", { activity });
@@ -869,6 +883,7 @@ export async function registerRoutes(
                     title: `Message ${status.status.charAt(0).toUpperCase() + status.status.slice(1)}`,
                     description: `To ${message.recipientPhone}`,
                     timestamp: new Date(),
+                    metadata: null,
                   });
                 }
               }
@@ -896,6 +911,7 @@ export async function registerRoutes(
                   title: `Template ${templateUpdate.event.toLowerCase()}`,
                   description: `${templateUpdate.message_template_name} status updated`,
                   timestamp: new Date(),
+                  metadata: null,
                 });
               }
             }
@@ -1395,18 +1411,22 @@ export async function registerRoutes(
   });
 
   // ============== Contacts ==============
-  app.get("/api/contacts", async (req, res) => {
+  app.get("/api/contacts", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
-      const contacts = await storage.getContacts();
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const contacts = await storage.getContacts(active.accountId);
       res.json(contacts);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch contacts" });
     }
   });
 
-  app.post("/api/contacts", async (req, res) => {
+  app.post("/api/contacts", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
-      const contact = await storage.createContact(req.body);
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const contact = await storage.createContact({ ...req.body, accountId: active.accountId });
       res.status(201).json(contact);
     } catch (error) {
       res.status(500).json({ error: "Failed to create contact" });
@@ -1437,10 +1457,13 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/contacts/import", async (req, res) => {
+  app.post("/api/contacts/import", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
       const { contacts, listId } = req.body;
-      const imported = await storage.importContacts(contacts, listId);
+      const contactsWithAccount = (contacts || []).map((c: any) => ({ ...c, accountId: active.accountId }));
+      const imported = await storage.importContacts(contactsWithAccount, listId);
       res.json({ imported });
     } catch (error) {
       res.status(500).json({ error: "Failed to import contacts" });
@@ -1448,18 +1471,22 @@ export async function registerRoutes(
   });
 
   // ============== Contact Lists ==============
-  app.get("/api/lists", async (req, res) => {
+  app.get("/api/lists", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
-      const lists = await storage.getLists();
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const lists = await storage.getLists(active.accountId);
       res.json(lists);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch lists" });
     }
   });
 
-  app.post("/api/lists", async (req, res) => {
+  app.post("/api/lists", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
-      const list = await storage.createList(req.body);
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const list = await storage.createList({ ...req.body, accountId: active.accountId });
       res.status(201).json(list);
     } catch (error) {
       res.status(500).json({ error: "Failed to create list" });
@@ -1479,18 +1506,22 @@ export async function registerRoutes(
   });
 
   // ============== Contact Tags ==============
-  app.get("/api/tags", async (req, res) => {
+  app.get("/api/tags", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
-      const tags = await storage.getTags();
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const tags = await storage.getTags(active.accountId);
       res.json(tags);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch tags" });
     }
   });
 
-  app.post("/api/tags", async (req, res) => {
+  app.post("/api/tags", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
-      const tag = await storage.createTag(req.body);
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const tag = await storage.createTag({ ...req.body, accountId: active.accountId });
       res.status(201).json(tag);
     } catch (error) {
       res.status(500).json({ error: "Failed to create tag" });
@@ -1510,9 +1541,11 @@ export async function registerRoutes(
   });
 
   // ============== Conversations ==============
-  app.get("/api/conversations", async (req, res) => {
+  app.get("/api/conversations", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
-      const conversations = await storage.getConversations();
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const conversations = await storage.getConversations(active.accountId);
       res.json(conversations);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch conversations" });
@@ -1596,9 +1629,11 @@ export async function registerRoutes(
   });
 
   // ============== Notifications/Broadcasts ==============
-  app.get("/api/notifications", async (req, res) => {
+  app.get("/api/notifications", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
-      const notifications = await storage.getNotifications();
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const notifications = await storage.getNotifications(active.accountId);
       res.json(notifications);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch notifications" });
@@ -1617,9 +1652,11 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/notifications", async (req, res) => {
+  app.post("/api/notifications", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
-      const notification = await storage.createNotification(req.body);
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const notification = await storage.createNotification({ ...req.body, accountId: active.accountId });
       broadcast("notification-created", { notification });
       res.status(201).json(notification);
     } catch (error) {
@@ -1671,7 +1708,7 @@ export async function registerRoutes(
 
       // Delete all user-associated data
       // 1. Get all accounts belonging to this user and delete associated data
-      const accounts = await storage.getAccounts();
+      const accounts = await storage.getAccountsByUser(userId);
       for (const account of accounts) {
         // Delete contacts for this account
         const contacts = await storage.getContactsByAccount(account.id);
