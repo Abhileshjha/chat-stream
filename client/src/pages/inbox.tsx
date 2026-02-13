@@ -70,10 +70,27 @@ export default function Inbox() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
+  const [hasBackfilled, setHasBackfilled] = useState(false);
+
   const { data: conversations = [], isLoading } = useQuery<Conversation[]>({
     queryKey: ["/api/conversations"],
     refetchInterval: 10000,
   });
+
+  const backfillMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/conversations/backfill"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
+      setHasBackfilled(true);
+    },
+    onError: () => {},
+  });
+
+  useEffect(() => {
+    if (!isLoading && conversations.length === 0 && !hasBackfilled && !backfillMutation.isPending) {
+      backfillMutation.mutate();
+    }
+  }, [isLoading, conversations.length, hasBackfilled, backfillMutation.isPending]);
 
   const { data: messages = [] } = useQuery<ConversationMessage[]>({
     queryKey: ["/api/conversations", selectedConversation, "messages"],

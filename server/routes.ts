@@ -737,6 +737,29 @@ export async function registerRoutes(
               sentAt: new Date(),
             });
             sentCount++;
+
+            try {
+              let conv = await storage.getConversationByPhone(recipientPhone, activeAccount.id);
+              const outboundMsg = `[Template: ${template.name}]`;
+              if (!conv) {
+                conv = await storage.createConversation(recipientPhone, undefined, activeAccount.id);
+              }
+              await storage.updateConversation(conv.id, {
+                lastMessage: outboundMsg,
+                lastMessageAt: new Date(),
+                status: "open",
+              });
+              await storage.addConversationMessage({
+                conversationId: conv.id,
+                content: outboundMsg,
+                direction: "outbound",
+                type: "template",
+                status: "sent",
+              });
+              broadcast("conversation-updated", { conversationId: conv.id });
+            } catch (convErr: any) {
+              console.error(`Failed to create conversation for ${recipientPhone}:`, convErr.message);
+            }
           } else {
             await storage.createMessage({
               accountId: activeAccount.id,
@@ -2080,6 +2103,29 @@ export async function registerRoutes(
               sentAt: new Date(),
             });
             sentCount++;
+
+            try {
+              let conv = await storage.getConversationByPhone(recipientPhone, activeAccount.id);
+              const outboundMsg = `[Template: ${template.name}]`;
+              if (!conv) {
+                conv = await storage.createConversation(recipientPhone, undefined, activeAccount.id);
+              }
+              await storage.updateConversation(conv.id, {
+                lastMessage: outboundMsg,
+                lastMessageAt: new Date(),
+                status: "open",
+              });
+              await storage.addConversationMessage({
+                conversationId: conv.id,
+                content: outboundMsg,
+                direction: "outbound",
+                type: "template",
+                status: "sent",
+              });
+              broadcast("conversation-updated", { conversationId: conv.id });
+            } catch (convErr: any) {
+              console.error(`Failed to create conversation for ${recipientPhone}:`, convErr.message);
+            }
           } else {
             console.error(`Message send failed to ${recipientPhone}:`, result.error?.message || "Unknown error", `(code: ${result.error?.code})`);
             await storage.createMessage({
@@ -2125,6 +2171,63 @@ export async function registerRoutes(
       broadcast("activity-added", { activity });
     } catch (error) {
       console.error("Notification send error:", error);
+    }
+  });
+
+  // ============== Backfill Conversations from Sent Messages ==============
+  app.post("/api/conversations/backfill", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+
+      const messages = await storage.getMessages(active.accountId);
+      const sentMessages = messages.filter(m => m.status === "sent" && m.recipientPhone);
+
+      const phoneMap: Record<string, typeof sentMessages> = {};
+      for (const msg of sentMessages) {
+        const phone = msg.recipientPhone;
+        if (!phoneMap[phone]) phoneMap[phone] = [];
+        phoneMap[phone].push(msg);
+      }
+
+      let created = 0;
+      let updated = 0;
+      for (const phone of Object.keys(phoneMap)) {
+        const msgs = phoneMap[phone];
+        const lastMsg = msgs.sort((a: any, b: any) => (b.sentAt?.getTime() || 0) - (a.sentAt?.getTime() || 0))[0];
+        const template = lastMsg.templateId ? await storage.getTemplate(lastMsg.templateId) : null;
+        const outboundMsg = template ? `[Template: ${template.name}]` : "[Message sent]";
+
+        let conv = await storage.getConversationByPhone(phone, active.accountId);
+        if (!conv) {
+          conv = await storage.createConversation(phone, undefined, active.accountId);
+          await storage.updateConversation(conv.id, {
+            lastMessage: outboundMsg,
+            lastMessageAt: lastMsg.sentAt || new Date(),
+            status: "open",
+          });
+          await storage.addConversationMessage({
+            conversationId: conv.id,
+            content: outboundMsg,
+            direction: "outbound",
+            type: "template",
+            status: "sent",
+          });
+          created++;
+        } else if (!conv.lastMessage || !conv.lastMessageAt) {
+          await storage.updateConversation(conv.id, {
+            lastMessage: conv.lastMessage || outboundMsg,
+            lastMessageAt: conv.lastMessageAt || lastMsg.sentAt || new Date(),
+            status: conv.status || "open",
+          });
+          updated++;
+        }
+      }
+
+      res.json({ message: `Backfilled ${created} conversations from ${sentMessages.length} sent messages` });
+    } catch (error) {
+      console.error("Backfill error:", error);
+      res.status(500).json({ error: "Failed to backfill conversations" });
     }
   });
 
