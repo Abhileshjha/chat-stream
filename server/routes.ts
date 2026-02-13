@@ -501,20 +501,22 @@ export async function registerRoutes(
 
   app.post("/api/templates/sync", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
-      const userId = req.user?.claims?.sub;
-      const accounts = userId ? await storage.getAccountsByUser(userId) : await storage.getAccounts();
-      const activeAccount = accounts.find(a => a.status === "connected") || accounts[0];
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
 
-      if (!activeAccount?.accessToken || !activeAccount?.businessAccountId) {
+      const account = await storage.getAccount(active.accountId);
+      if (!account?.accessToken || !account?.businessAccountId) {
         return res.status(400).json({ error: "No connected WhatsApp account found" });
       }
 
+      console.log(`[Sync] Fetching templates from Meta for WABA ${account.businessAccountId}...`);
       const metaResult = await whatsappApi.getTemplates(
-        activeAccount.businessAccountId,
-        activeAccount.accessToken
+        account.businessAccountId,
+        account.accessToken
       );
 
       if (!metaResult.success) {
+        console.error(`[Sync] Failed to fetch templates:`, metaResult.error);
         return res.status(400).json({
           error: "Failed to fetch templates from WhatsApp",
           details: metaResult.error?.message,
@@ -522,9 +524,11 @@ export async function registerRoutes(
       }
 
       const metaTemplates = metaResult.data?.data || [];
+      console.log(`[Sync] Got ${metaTemplates.length} templates from Meta: ${metaTemplates.map((t: any) => `${t.name}(${t.status})`).join(", ")}`);
       let synced = 0;
+      let created = 0;
 
-      const localTemplates = await storage.getTemplates(activeAccount.id);
+      const localTemplates = await storage.getTemplates(account.id);
       const templatesByMetaId = new Map(localTemplates.filter(t => t.metaTemplateId).map(t => [t.metaTemplateId, t]));
       const templatesByName = new Map(localTemplates.map(t => [t.name, t]));
 
@@ -532,36 +536,43 @@ export async function registerRoutes(
         const existing = templatesByMetaId.get(mt.id) || templatesByName.get(mt.name);
 
         if (existing) {
-          await storage.updateTemplate(existing.id, {
+          const updateData: any = {
             status: mt.status,
-            qualityScore: mt.quality_score?.score || "UNKNOWN",
+            qualityScore: mt.quality_score?.score || mt.quality_score || "UNKNOWN",
             rejectionReason: mt.rejected_reason || null,
             lastSyncedAt: new Date(),
-          });
+          };
+          if (!existing.metaTemplateId && mt.id) {
+            updateData.metaTemplateId = mt.id;
+          }
+          await storage.updateTemplate(existing.id, updateData);
+          synced++;
         } else {
           const components = (mt.components || []).map((c: any) => ({
             type: c.type,
             format: c.format,
             text: c.text,
             buttons: c.buttons,
+            example: c.example,
           }));
 
           await storage.createTemplate({
-            accountId: activeAccount.id,
+            accountId: account.id,
             metaTemplateId: mt.id,
             name: mt.name,
             category: mt.category,
             language: mt.language,
             status: mt.status,
-            qualityScore: mt.quality_score?.score || "UNKNOWN",
+            qualityScore: mt.quality_score?.score || mt.quality_score || "UNKNOWN",
             components,
             lastSyncedAt: new Date(),
           });
+          created++;
         }
-        synced++;
       }
 
-      res.json({ synced, total: metaTemplates.length });
+      console.log(`[Sync] Complete: ${synced} updated, ${created} created from ${metaTemplates.length} Meta templates`);
+      res.json({ synced: synced + created, total: metaTemplates.length, updated: synced, created });
     } catch (error) {
       console.error("Template sync error:", error);
       res.status(500).json({ error: "Failed to sync templates" });
