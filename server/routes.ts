@@ -1743,6 +1743,136 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/notifications/:id/send", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const notification = await storage.getNotification(req.params.id);
+      if (!notification) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
+
+      const template = await storage.getTemplate(notification.templateId);
+      if (!template) {
+        return res.status(400).json({ error: "Notification template not found" });
+      }
+
+      if (template.status !== "APPROVED") {
+        return res.status(400).json({ error: "Template must be approved by WhatsApp before sending messages" });
+      }
+
+      const userId = req.user?.claims?.sub;
+      const accounts = userId ? await storage.getAccountsByUser(userId) : await storage.getAccounts();
+      const activeAccount = accounts.find(a => a.id === notification.accountId && a.status === "connected")
+        || accounts.find(a => a.status === "connected")
+        || accounts[0];
+
+      if (!activeAccount?.accessToken || !activeAccount?.phoneNumberId) {
+        return res.status(400).json({ error: "No connected WhatsApp account with valid credentials" });
+      }
+
+      const listIds = notification.listIds || [];
+      if (listIds.length === 0) {
+        return res.status(400).json({ error: "No recipient lists selected for this notification" });
+      }
+
+      const notificationAccountId = notification.accountId || activeAccount.id;
+      const allContacts = await storage.getContacts(notificationAccountId);
+      const recipientPhones: string[] = [];
+      const seen = new Set<string>();
+      for (const contact of allContacts) {
+        const contactListIds = (contact.listIds as string[]) || [];
+        if (contactListIds.some(lid => listIds.includes(lid))) {
+          if (contact.phone && contact.status === "subscribed" && !seen.has(contact.phone)) {
+            recipientPhones.push(contact.phone);
+            seen.add(contact.phone);
+          }
+        }
+      }
+
+      if (recipientPhones.length === 0) {
+        return res.status(400).json({ error: "No subscribed contacts found in the selected lists" });
+      }
+
+      await storage.updateNotification(notification.id, {
+        status: "sending",
+        sentAt: new Date(),
+        totalRecipients: recipientPhones.length,
+      });
+      broadcast("notification-updated", { notification: { ...notification, status: "sending" } });
+
+      res.json({ message: `Notification sending started. Sending to ${recipientPhones.length} recipients.` });
+
+      let sentCount = 0;
+      let failedCount = 0;
+
+      const phoneArray = Array.from(recipientPhones);
+      for (const recipientPhone of phoneArray) {
+        try {
+          const result = await whatsappApi.sendTemplateMessage(
+            activeAccount.phoneNumberId,
+            activeAccount.accessToken,
+            recipientPhone,
+            template.name,
+            template.language || "en"
+          );
+
+          if (result.success && result.data?.messages?.[0]) {
+            const waMessageId = result.data.messages[0].id;
+            await storage.createMessage({
+              accountId: activeAccount.id,
+              templateId: template.id,
+              recipientPhone,
+              whatsappMessageId: waMessageId,
+              status: "sent",
+              sentAt: new Date(),
+            });
+            sentCount++;
+          } else {
+            await storage.createMessage({
+              accountId: activeAccount.id,
+              templateId: template.id,
+              recipientPhone,
+              status: "failed",
+              errorCode: String(result.error?.code || ""),
+              errorDescription: result.error?.message || "Unknown error",
+            });
+            failedCount++;
+          }
+
+          broadcast("notification-updated", {
+            notification: { id: notification.id, sentCount, failedCount, totalRecipients: phoneArray.length },
+          });
+
+          await new Promise(resolve => setTimeout(resolve, 100));
+        } catch (err: any) {
+          console.error(`Failed to send to ${recipientPhone}:`, err.message);
+          failedCount++;
+        }
+      }
+
+      const finalStatus = sentCount === 0 && failedCount > 0 ? "failed" : "completed";
+      await storage.updateNotification(notification.id, {
+        status: finalStatus,
+        completedAt: new Date(),
+        sentCount,
+        failedCount,
+        deliveredCount: sentCount,
+      });
+
+      const activity = await storage.addActivity({
+        accountId: activeAccount.id,
+        type: "notification_completed",
+        title: finalStatus === "failed" ? "Notification Failed" : "Notification Completed",
+        description: `${notification.name}: ${sentCount} sent, ${failedCount} failed out of ${recipientPhones.length}`,
+        timestamp: new Date(),
+        metadata: null,
+      });
+      broadcast("notification-updated", { notification: { ...notification, status: finalStatus, sentCount, failedCount } });
+      broadcast("activity-added", { activity });
+    } catch (error) {
+      console.error("Notification send error:", error);
+    }
+  });
+
   // ============== User Account Deletion (GDPR) ==============
   
   app.delete("/api/user/delete-account", isAuthenticated, async (req: any, res) => {

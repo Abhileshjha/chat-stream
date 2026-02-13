@@ -62,11 +62,12 @@ export default function NotificationEditor() {
 
   const saveMutation = useMutation({
     mutationFn: async (sendNow: boolean) => {
-      const data = {
+      const data: any = {
         name,
         templateId: selectedTemplateId,
         listIds: selectedListIds,
         scheduledAt: sendNow ? undefined : scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
+        status: scheduledAt && !sendNow ? "scheduled" : "draft",
       };
 
       if (isEdit && params?.id) {
@@ -94,25 +95,43 @@ export default function NotificationEditor() {
   const sendMutation = useMutation({
     mutationFn: async () => {
       setIsSending(true);
-      const data = {
+      const data: any = {
         name,
         templateId: selectedTemplateId,
         listIds: selectedListIds,
       };
-      return apiRequest("POST", "/api/notifications", data);
+
+      let notificationId: string;
+
+      if (isEdit && params?.id) {
+        await apiRequest("PATCH", `/api/notifications/${params.id}`, data);
+        notificationId = params.id;
+      } else {
+        const res = await apiRequest("POST", "/api/notifications", data);
+        const created = await res.json();
+        notificationId = created.id;
+      }
+
+      return apiRequest("POST", `/api/notifications/${notificationId}/send`);
     },
     onSuccess: () => {
       toast({
-        title: "Notification sent",
+        title: "Notification sending",
         description: "Your notification is being sent to recipients.",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
       navigate("/notifications");
     },
-    onError: () => {
+    onError: async (error: any) => {
+      let message = "Failed to send notification. Please try again.";
+      try {
+        if (error?.message) {
+          message = error.message;
+        }
+      } catch {}
       toast({
         title: "Error",
-        description: "Failed to send notification. Please try again.",
+        description: message,
         variant: "destructive",
       });
       setIsSending(false);
@@ -129,7 +148,7 @@ export default function NotificationEditor() {
 
   const totalRecipients = lists
     .filter((l) => selectedListIds.includes(l.id))
-    .reduce((sum, l) => sum + l.contactCount, 0);
+    .reduce((sum, l) => sum + (l.contactCount ?? 0), 0);
 
   return (
     <div className="space-y-6">
@@ -263,7 +282,7 @@ export default function NotificationEditor() {
                         <Label htmlFor={list.id} className="font-normal flex-1 cursor-pointer">
                           {list.name}
                         </Label>
-                        <Badge variant="secondary">{list.contactCount}</Badge>
+                        <Badge variant="secondary">{list.contactCount ?? 0}</Badge>
                       </div>
                     ))
                   )}
@@ -313,7 +332,7 @@ export default function NotificationEditor() {
                 <div className="rounded-lg border p-4 bg-muted/50">
                   <h4 className="font-medium mb-2">Template Preview</h4>
                   <div className="bg-background rounded-lg p-3 shadow-sm border max-w-sm">
-                    {selectedTemplate.components?.map((component, i) => (
+                    {(selectedTemplate.components as any[])?.map((component: any, i: number) => (
                       <div key={i} className="text-sm">
                         {component.type === "HEADER" && component.text && (
                           <p className="font-semibold mb-1">{component.text}</p>
@@ -368,7 +387,7 @@ export default function NotificationEditor() {
                 data-testid="button-send-now"
               >
                 <Send className="h-4 w-4 mr-2" />
-                {sendMutation.isPending ? "Sending..." : "Save & Send"}
+                {sendMutation.isPending ? "Sending..." : "Save & Send Now"}
               </Button>
 
               <Button

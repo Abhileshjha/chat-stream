@@ -52,11 +52,14 @@ export default function Notifications() {
 
   const sendNotificationMutation = useMutation({
     mutationFn: async (id: string) => {
-      return apiRequest("PATCH", `/api/notifications/${id}`, { status: "sending" });
+      return apiRequest("POST", `/api/notifications/${id}/send`);
     },
     onSuccess: () => {
       toast({ title: "Notification is being sent" });
       queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
+    },
+    onError: () => {
+      toast({ title: "Failed to send notification", variant: "destructive" });
     },
   });
 
@@ -240,7 +243,7 @@ export default function Notifications() {
                         <div className="mt-4 flex items-center gap-4 text-sm text-muted-foreground">
                           <div className="flex items-center gap-1">
                             <Users className="h-4 w-4" />
-                            <span>{notification.totalRecipients.toLocaleString()} recipients</span>
+                            <span>{(notification.totalRecipients ?? 0).toLocaleString()} recipients</span>
                           </div>
                           {notification.scheduledAt && (
                             <div className="flex items-center gap-1">
@@ -252,7 +255,7 @@ export default function Notifications() {
                             <div className="flex items-center gap-3">
                               <span className="text-green-600">{notification.deliveredCount} delivered</span>
                               <span className="text-blue-600">{notification.readCount} read</span>
-                              {notification.failedCount > 0 && (
+                              {(notification.failedCount ?? 0) > 0 && (
                                 <span className="text-red-600">{notification.failedCount} failed</span>
                               )}
                             </div>
