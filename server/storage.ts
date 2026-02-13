@@ -20,19 +20,19 @@ import { db } from "@db";
 import { eq, desc, and, sql as dsql } from "drizzle-orm";
 
 export interface IStorage {
-  getTemplates(): Promise<Template[]>;
+  getTemplates(accountId?: string): Promise<Template[]>;
   getTemplate(id: string): Promise<Template | undefined>;
   createTemplate(template: InsertTemplate): Promise<Template>;
   updateTemplate(id: string, updates: Partial<Template>): Promise<Template | undefined>;
   deleteTemplate(id: string): Promise<boolean>;
 
-  getCampaigns(): Promise<Campaign[]>;
+  getCampaigns(accountId?: string): Promise<Campaign[]>;
   getCampaign(id: string): Promise<Campaign | undefined>;
   createCampaign(campaign: InsertCampaign): Promise<Campaign>;
   updateCampaign(id: string, updates: Partial<Campaign>): Promise<Campaign | undefined>;
   deleteCampaign(id: string): Promise<boolean>;
 
-  getMessages(): Promise<Message[]>;
+  getMessages(accountId?: string): Promise<Message[]>;
   getMessage(id: string): Promise<Message | undefined>;
   getMessagesByWhatsappId(whatsappId: string): Promise<Message | undefined>;
   getMessagesByCampaign(campaignId: string): Promise<Message[]>;
@@ -43,14 +43,14 @@ export interface IStorage {
   getCampaignMetrics(campaignId: string): Promise<CampaignMetrics | undefined>;
   upsertCampaignMetrics(metrics: InsertCampaignMetrics): Promise<CampaignMetrics>;
 
-  getDashboardMetrics(): Promise<DashboardMetrics>;
-  getRecentActivities(): Promise<ActivityItem[]>;
+  getDashboardMetrics(accountId?: string): Promise<DashboardMetrics>;
+  getRecentActivities(accountId?: string): Promise<ActivityItem[]>;
   addActivity(activity: Omit<ActivityItem, "id">): Promise<ActivityItem>;
 
   getSettings(): Promise<ApiSettings | undefined>;
   saveSettings(settings: Omit<ApiSettings, "id">): Promise<ApiSettings>;
 
-  getAnalyticsData(timeRange: string): Promise<AnalyticsData>;
+  getAnalyticsData(timeRange: string, accountId?: string): Promise<AnalyticsData>;
 
   getAccountsByUser(userId: string): Promise<WhatsAppAccount[]>;
   getAccounts(): Promise<WhatsAppAccount[]>;
@@ -126,7 +126,10 @@ export interface AnalyticsData {
 export class DatabaseStorage implements IStorage {
 
   // Templates
-  async getTemplates(): Promise<Template[]> {
+  async getTemplates(accountId?: string): Promise<Template[]> {
+    if (accountId) {
+      return db.select().from(templates).where(eq(templates.accountId, accountId)).orderBy(desc(templates.createdAt));
+    }
     return db.select().from(templates).orderBy(desc(templates.createdAt));
   }
 
@@ -152,7 +155,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Campaigns
-  async getCampaigns(): Promise<Campaign[]> {
+  async getCampaigns(accountId?: string): Promise<Campaign[]> {
+    if (accountId) {
+      return db.select().from(campaigns).where(eq(campaigns.accountId, accountId)).orderBy(desc(campaigns.createdAt));
+    }
     return db.select().from(campaigns).orderBy(desc(campaigns.createdAt));
   }
 
@@ -178,7 +184,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Messages
-  async getMessages(): Promise<Message[]> {
+  async getMessages(accountId?: string): Promise<Message[]> {
+    if (accountId) {
+      return db.select().from(messages).where(eq(messages.accountId, accountId)).orderBy(desc(messages.queuedAt));
+    }
     return db.select().from(messages).orderBy(desc(messages.queuedAt));
   }
 
@@ -230,11 +239,19 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Dashboard
-  async getDashboardMetrics(): Promise<DashboardMetrics> {
-    const allMessages = await db.select().from(messages);
-    const allTemplates = await db.select().from(templates);
-    const allCampaigns = await db.select().from(campaigns);
-    const allAccounts = await db.select().from(whatsappAccounts);
+  async getDashboardMetrics(accountId?: string): Promise<DashboardMetrics> {
+    const allMessages = accountId
+      ? await db.select().from(messages).where(eq(messages.accountId, accountId))
+      : await db.select().from(messages);
+    const allTemplates = accountId
+      ? await db.select().from(templates).where(eq(templates.accountId, accountId))
+      : await db.select().from(templates);
+    const allCampaigns = accountId
+      ? await db.select().from(campaigns).where(eq(campaigns.accountId, accountId))
+      : await db.select().from(campaigns);
+    const allAccounts = accountId
+      ? await db.select().from(whatsappAccounts).where(eq(whatsappAccounts.id, accountId))
+      : await db.select().from(whatsappAccounts);
 
     const sentCount = allMessages.filter(m => m.status !== "queued").length;
     const deliveredCount = allMessages.filter(m => m.status === "delivered" || m.status === "read").length;
@@ -264,7 +281,10 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async getRecentActivities(): Promise<ActivityItem[]> {
+  async getRecentActivities(accountId?: string): Promise<ActivityItem[]> {
+    if (accountId) {
+      return db.select().from(activities).where(eq(activities.accountId, accountId)).orderBy(desc(activities.timestamp)).limit(20);
+    }
     return db.select().from(activities).orderBy(desc(activities.timestamp)).limit(20);
   }
 
@@ -301,9 +321,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Analytics
-  async getAnalyticsData(timeRange: string): Promise<AnalyticsData> {
-    const allMessages = await db.select().from(messages);
-    const allTemplates = await db.select().from(templates);
+  async getAnalyticsData(timeRange: string, accountId?: string): Promise<AnalyticsData> {
+    const allMessages = accountId
+      ? await db.select().from(messages).where(eq(messages.accountId, accountId))
+      : await db.select().from(messages);
+    const allTemplates = accountId
+      ? await db.select().from(templates).where(eq(templates.accountId, accountId))
+      : await db.select().from(templates);
 
     const now = new Date();
     const daysMap: Record<string, number> = { "24h": 1, "7d": 7, "30d": 30, "90d": 90 };

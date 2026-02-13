@@ -45,6 +45,7 @@ export type TemplateComponent = z.infer<typeof templateComponentSchema>;
 // Templates
 export const templates = pgTable("templates", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id"),
   metaTemplateId: varchar("meta_template_id"),
   name: varchar("name", { length: 512 }).notNull(),
   category: varchar("category", { length: 50 }).notNull(),
@@ -70,6 +71,7 @@ export type Template = typeof templates.$inferSelect;
 // Campaigns
 export const campaigns = pgTable("campaigns", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id"),
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
   templateId: varchar("template_id").notNull(),
@@ -94,6 +96,7 @@ export type Campaign = typeof campaigns.$inferSelect;
 // Messages
 export const messages = pgTable("messages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id"),
   whatsappMessageId: varchar("whatsapp_message_id"),
   campaignId: varchar("campaign_id"),
   templateId: varchar("template_id"),
@@ -120,6 +123,7 @@ export type Message = typeof messages.$inferSelect;
 // Campaign Metrics
 export const campaignMetrics = pgTable("campaign_metrics", {
   campaignId: varchar("campaign_id").primaryKey(),
+  accountId: varchar("account_id"),
   totalMessages: integer("total_messages").default(0),
   sentCount: integer("sent_count").default(0),
   deliveredCount: integer("delivered_count").default(0),
@@ -340,6 +344,7 @@ export type Notification = typeof notifications.$inferSelect;
 // Activities
 export const activities = pgTable("activities", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id"),
   type: varchar("type", { length: 50 }).notNull(),
   title: varchar("title", { length: 255 }).notNull(),
   description: text("description").notNull(),

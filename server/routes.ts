@@ -172,18 +172,20 @@ export async function registerRoutes(
   });
 
   // ============== Dashboard ==============
-  app.get("/api/dashboard/metrics", async (req, res) => {
+  app.get("/api/dashboard/metrics", async (req: any, res) => {
     try {
-      const metrics = await storage.getDashboardMetrics();
+      const active = await getActiveAccount(req);
+      const metrics = await storage.getDashboardMetrics(active?.accountId);
       res.json(metrics);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch dashboard metrics" });
     }
   });
 
-  app.get("/api/dashboard/activities", async (req, res) => {
+  app.get("/api/dashboard/activities", async (req: any, res) => {
     try {
-      const activities = await storage.getRecentActivities();
+      const active = await getActiveAccount(req);
+      const activities = await storage.getRecentActivities(active?.accountId);
       res.json(activities);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch activities" });
@@ -191,10 +193,11 @@ export async function registerRoutes(
   });
 
   // ============== Analytics ==============
-  app.get("/api/analytics", async (req, res) => {
+  app.get("/api/analytics", async (req: any, res) => {
     try {
       const timeRange = req.query.range as string || "7d";
-      const analytics = await storage.getAnalyticsData(timeRange);
+      const active = await getActiveAccount(req);
+      const analytics = await storage.getAnalyticsData(timeRange, active?.accountId);
       res.json(analytics);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch analytics" });
@@ -308,9 +311,10 @@ export async function registerRoutes(
   });
 
   // ============== Templates ==============
-  app.get("/api/templates", async (req, res) => {
+  app.get("/api/templates", async (req: any, res) => {
     try {
-      const templates = await storage.getTemplates();
+      const active = await getActiveAccount(req);
+      const templates = await storage.getTemplates(active?.accountId);
       res.json(templates);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch templates" });
@@ -371,11 +375,13 @@ export async function registerRoutes(
       const template = await storage.createTemplate({
         ...data,
         name: normalizedName,
+        accountId: activeAccount.id,
         metaTemplateId,
         status: templateStatus,
       });
 
       await storage.addActivity({
+        accountId: activeAccount.id,
         type: "template_submitted",
         title: "Template Submitted",
         description: `${template.name} submitted to WhatsApp for approval`,
@@ -471,7 +477,7 @@ export async function registerRoutes(
       const metaTemplates = metaResult.data?.data || [];
       let synced = 0;
 
-      const localTemplates = await storage.getTemplates();
+      const localTemplates = await storage.getTemplates(activeAccount.id);
       const templatesByMetaId = new Map(localTemplates.filter(t => t.metaTemplateId).map(t => [t.metaTemplateId, t]));
       const templatesByName = new Map(localTemplates.map(t => [t.name, t]));
 
@@ -494,6 +500,7 @@ export async function registerRoutes(
           }));
 
           await storage.createTemplate({
+            accountId: activeAccount.id,
             metaTemplateId: mt.id,
             name: mt.name,
             category: mt.category,
@@ -515,9 +522,10 @@ export async function registerRoutes(
   });
 
   // ============== Campaigns ==============
-  app.get("/api/campaigns", async (req, res) => {
+  app.get("/api/campaigns", async (req: any, res) => {
     try {
-      const campaigns = await storage.getCampaigns();
+      const active = await getActiveAccount(req);
+      const campaigns = await storage.getCampaigns(active?.accountId);
       res.json(campaigns);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch campaigns" });
@@ -536,13 +544,14 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/campaigns", async (req, res) => {
+  app.post("/api/campaigns", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
       const data = insertCampaignSchema.parse(req.body);
-      const campaign = await storage.createCampaign(data);
+      const active = await getActiveAccount(req);
+      const campaign = await storage.createCampaign({ ...data, accountId: active?.accountId || null });
       
-      // Add activity
       await storage.addActivity({
+        accountId: active?.accountId || null,
         type: "campaign_started",
         title: "Campaign Created",
         description: `${campaign.name} - ${campaign.recipients?.length || 0} recipients`,
@@ -573,6 +582,7 @@ export async function registerRoutes(
       // Add activity for status changes
       if (updates.status === "running") {
         const activity = await storage.addActivity({
+          accountId: campaign.accountId || null,
           type: "campaign_started",
           title: "Campaign Started",
           description: `${campaign.name} - ${campaign.recipients?.length || 0} recipients`,
@@ -582,6 +592,7 @@ export async function registerRoutes(
         broadcast("activity-added", { activity });
       } else if (updates.status === "completed") {
         const activity = await storage.addActivity({
+          accountId: campaign.accountId || null,
           type: "campaign_completed",
           title: "Campaign Completed",
           description: `${campaign.name} finished successfully`,
@@ -653,6 +664,7 @@ export async function registerRoutes(
           if (result.success && result.data?.messages?.[0]) {
             const waMessageId = result.data.messages[0].id;
             await storage.createMessage({
+              accountId: activeAccount.id,
               campaignId: campaign.id,
               templateId: template.id,
               recipientPhone,
@@ -663,6 +675,7 @@ export async function registerRoutes(
             sentCount++;
           } else {
             await storage.createMessage({
+              accountId: activeAccount.id,
               campaignId: campaign.id,
               templateId: template.id,
               recipientPhone,
@@ -690,6 +703,7 @@ export async function registerRoutes(
       });
 
       const activity = await storage.addActivity({
+        accountId: activeAccount.id,
         type: "campaign_completed",
         title: "Campaign Completed",
         description: `${campaign.name}: ${sentCount} sent, ${failedCount} failed`,
@@ -716,9 +730,10 @@ export async function registerRoutes(
   });
 
   // ============== Messages ==============
-  app.get("/api/messages", async (req, res) => {
+  app.get("/api/messages", async (req: any, res) => {
     try {
-      const messages = await storage.getMessages();
+      const active = await getActiveAccount(req);
+      const messages = await storage.getMessages(active?.accountId);
       res.json(messages);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch messages" });
@@ -879,6 +894,7 @@ export async function registerRoutes(
                       : "message_failed";
                   
                   await storage.addActivity({
+                    accountId: message.accountId || null,
                     type: activityType,
                     title: `Message ${status.status.charAt(0).toUpperCase() + status.status.slice(1)}`,
                     description: `To ${message.recipientPhone}`,
@@ -907,6 +923,7 @@ export async function registerRoutes(
                   : "template_rejected";
                 
                 await storage.addActivity({
+                  accountId: template.accountId || null,
                   type: activityType,
                   title: `Template ${templateUpdate.event.toLowerCase()}`,
                   description: `${templateUpdate.message_template_name} status updated`,
