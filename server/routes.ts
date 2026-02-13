@@ -356,6 +356,7 @@ export async function registerRoutes(
 
   app.post("/api/templates", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const saveAsDraft = req.body.saveAsDraft === true;
       const data = insertTemplateSchema.parse(req.body);
       const active = await getActiveAccount(req);
       if (!active) return res.status(401).json({ error: "No active account" });
@@ -374,7 +375,7 @@ export async function registerRoutes(
       let templateStatus = "DRAFT";
       let metaError: string | null = null;
 
-      if (activeAccount?.accessToken && activeAccount?.businessAccountId) {
+      if (!saveAsDraft && activeAccount?.accessToken && activeAccount?.businessAccountId) {
         const facebookAppId = process.env.FACEBOOK_APP_ID || undefined;
 
         const metaResult = await whatsappApi.createTemplate(
@@ -396,7 +397,7 @@ export async function registerRoutes(
           metaError = metaResult.error?.message || "Unknown error from Meta API";
           templateStatus = "DRAFT";
         }
-      } else {
+      } else if (!saveAsDraft) {
         metaError = "No connected WhatsApp account. Template saved as draft.";
       }
 
@@ -954,6 +955,7 @@ export async function registerRoutes(
   app.post("/api/webhook", async (req, res) => {
     try {
       const body = req.body;
+      console.log("[Webhook] Received:", JSON.stringify(body).substring(0, 500));
       
       if (body.object === "whatsapp_business_account") {
         for (const entry of body.entry || []) {
@@ -967,23 +969,58 @@ export async function registerRoutes(
                 const from = incoming.from;
                 const contactInfo = contacts.find((c: any) => c.wa_id === from);
                 const contactName = contactInfo?.profile?.name || from;
+                console.log(`[Webhook] Incoming ${incoming.type} message from ${from} (${contactName}), phoneNumberId: ${phoneNumberId}`);
 
                 const accounts = await storage.getAccounts();
                 const account = accounts.find(a => a.phoneNumberId === phoneNumberId);
                 const accountId = account?.id || null;
+                console.log(`[Webhook] Matched account: ${account?.name || "none"} (id: ${accountId})`);
+
+                let msgContent = "";
+                if (incoming.type === "text") {
+                  msgContent = incoming.text?.body || "";
+                } else if (incoming.type === "interactive") {
+                  const interactive = incoming.interactive;
+                  if (interactive?.type === "button_reply") {
+                    msgContent = interactive.button_reply?.title || interactive.button_reply?.id || "[Button Click]";
+                  } else if (interactive?.type === "list_reply") {
+                    msgContent = interactive.list_reply?.title || interactive.list_reply?.id || "[List Selection]";
+                  } else {
+                    msgContent = interactive?.body?.text || `[${interactive?.type || "interactive"}]`;
+                  }
+                } else if (incoming.type === "button") {
+                  msgContent = incoming.button?.text || incoming.button?.payload || "[Quick Reply]";
+                } else if (incoming.type === "image") {
+                  msgContent = incoming.image?.caption || "[Image]";
+                } else if (incoming.type === "video") {
+                  msgContent = incoming.video?.caption || "[Video]";
+                } else if (incoming.type === "document") {
+                  msgContent = incoming.document?.caption || incoming.document?.filename || "[Document]";
+                } else if (incoming.type === "audio") {
+                  msgContent = "[Audio]";
+                } else if (incoming.type === "location") {
+                  msgContent = `[Location: ${incoming.location?.latitude}, ${incoming.location?.longitude}]`;
+                } else if (incoming.type === "sticker") {
+                  msgContent = "[Sticker]";
+                } else if (incoming.type === "contacts") {
+                  msgContent = "[Contact Card]";
+                } else {
+                  msgContent = incoming.text?.body || incoming.caption || `[${incoming.type}]`;
+                }
+                if (!msgContent) msgContent = "[Unsupported message]";
 
                 let conversation = await storage.getConversationByPhone(from, accountId || "");
                 if (!conversation) {
                   conversation = await storage.createConversation(from, contactName, accountId || "");
                   await storage.updateConversation(conversation.id, {
-                    lastMessage: incoming.text?.body || incoming.type,
+                    lastMessage: msgContent,
                     lastMessageAt: new Date(),
                     unreadCount: 1,
                     windowEndsAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
                   });
                 } else {
                   await storage.updateConversation(conversation.id, {
-                    lastMessage: incoming.text?.body || incoming.type,
+                    lastMessage: msgContent,
                     lastMessageAt: new Date(),
                     unreadCount: (conversation.unreadCount ?? 0) + 1,
                     windowEndsAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -992,7 +1029,8 @@ export async function registerRoutes(
                   });
                 }
 
-                const msgContent = incoming.text?.body || incoming.caption || `[${incoming.type}]`;
+                console.log(`[Webhook] Conversation ${conversation.id} updated with message: ${msgContent}`);
+
                 await storage.addConversationMessage({
                   conversationId: conversation.id,
                   content: msgContent,

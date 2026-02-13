@@ -65,6 +65,33 @@ export default function Templates() {
     },
   });
 
+  const duplicateMutation = useMutation({
+    mutationFn: async (template: Template) => {
+      const duplicateData = {
+        name: `${template.name}_copy_${Date.now().toString(36)}`,
+        category: template.category,
+        language: template.language,
+        components: template.components,
+        saveAsDraft: true,
+      };
+      return apiRequest("POST", "/api/templates", duplicateData);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/templates"] });
+      toast({
+        title: "Template Duplicated",
+        description: "A copy of the template has been created as a draft.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Duplication Failed",
+        description: error.message || "Failed to duplicate template.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const syncMutation = useMutation({
     mutationFn: async () => {
       return apiRequest("POST", "/api/templates/sync");
@@ -258,7 +285,10 @@ export default function Templates() {
                               Edit
                             </Link>
                           </DropdownMenuItem>
-                          <DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => duplicateMutation.mutate(template)}
+                            data-testid={`button-duplicate-template-${template.id}`}
+                          >
                             <Copy className="h-4 w-4 mr-2" />
                             Duplicate
                           </DropdownMenuItem>
