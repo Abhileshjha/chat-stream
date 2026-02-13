@@ -330,6 +330,7 @@ export const notifications = pgTable("notifications", {
   readCount: integer("read_count").default(0),
   failedCount: integer("failed_count").default(0),
   templateVariables: jsonb("template_variables").$type<Record<string, string>>(),
+  headerMediaUrl: text("header_media_url"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

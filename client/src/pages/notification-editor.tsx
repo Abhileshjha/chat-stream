@@ -31,6 +31,7 @@ export default function NotificationEditor() {
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [selectedListIds, setSelectedListIds] = useState<string[]>([]);
   const [scheduledAt, setScheduledAt] = useState("");
+  const [headerMediaUrl, setHeaderMediaUrl] = useState("");
   const [isSending, setIsSending] = useState(false);
 
   const { data: templates = [] } = useQuery<Template[]>({
@@ -51,6 +52,7 @@ export default function NotificationEditor() {
       setName(notification.name);
       setSelectedTemplateId(notification.templateId || "");
       setSelectedListIds(notification.listIds || []);
+      setHeaderMediaUrl(notification.headerMediaUrl || "");
       if (notification.scheduledAt) {
         setScheduledAt(new Date(notification.scheduledAt).toISOString().slice(0, 16));
       }
@@ -60,12 +62,17 @@ export default function NotificationEditor() {
   const approvedTemplates = templates.filter((t) => t.status === "APPROVED");
   const selectedTemplate = templates.find((t) => t.id === selectedTemplateId);
 
+  const selectedTemplateComponents = (selectedTemplate?.components as any[]) || [];
+  const selectedTemplateHeader = selectedTemplateComponents.find((c: any) => c.type === "HEADER");
+  const needsMediaUrl = selectedTemplateHeader && ["IMAGE", "VIDEO", "DOCUMENT"].includes(selectedTemplateHeader.format || "");
+
   const saveMutation = useMutation({
     mutationFn: async (sendNow: boolean) => {
       const data: any = {
         name,
         templateId: selectedTemplateId,
         listIds: selectedListIds,
+        headerMediaUrl: headerMediaUrl || undefined,
         scheduledAt: sendNow ? undefined : scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
         status: scheduledAt && !sendNow ? "scheduled" : "draft",
       };
@@ -99,6 +106,7 @@ export default function NotificationEditor() {
         name,
         templateId: selectedTemplateId,
         listIds: selectedListIds,
+        headerMediaUrl: headerMediaUrl || undefined,
       };
 
       let notificationId: string;
@@ -334,6 +342,25 @@ export default function NotificationEditor() {
                   <div className="bg-background rounded-lg p-3 shadow-sm border max-w-sm">
                     {(selectedTemplate.components as any[])?.map((component: any, i: number) => (
                       <div key={i} className="text-sm">
+                        {component.type === "HEADER" && component.format === "IMAGE" && (
+                          <div className="bg-muted rounded mb-2 p-4 text-center text-muted-foreground text-xs">
+                            {headerMediaUrl ? (
+                              <img src={headerMediaUrl} alt="Header" className="max-h-32 mx-auto rounded" />
+                            ) : (
+                              "Image header - provide URL below"
+                            )}
+                          </div>
+                        )}
+                        {component.type === "HEADER" && component.format === "VIDEO" && (
+                          <div className="bg-muted rounded mb-2 p-4 text-center text-muted-foreground text-xs">
+                            Video header - provide URL below
+                          </div>
+                        )}
+                        {component.type === "HEADER" && component.format === "DOCUMENT" && (
+                          <div className="bg-muted rounded mb-2 p-4 text-center text-muted-foreground text-xs">
+                            Document header - provide URL below
+                          </div>
+                        )}
                         {component.type === "HEADER" && component.text && (
                           <p className="font-semibold mb-1">{component.text}</p>
                         )}
@@ -346,6 +373,22 @@ export default function NotificationEditor() {
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {needsMediaUrl && (
+                <div>
+                  <Label>Header Media URL</Label>
+                  <Input
+                    value={headerMediaUrl}
+                    onChange={(e) => setHeaderMediaUrl(e.target.value)}
+                    placeholder={`Enter a public URL for the ${selectedTemplateHeader?.format?.toLowerCase() || "media"} header`}
+                    className="mt-1.5"
+                    data-testid="input-header-media-url"
+                  />
+                  <p className="text-sm text-muted-foreground mt-1">
+                    This template requires a {selectedTemplateHeader?.format?.toLowerCase()} in the header. Provide a publicly accessible URL.
+                  </p>
                 </div>
               )}
             </CardContent>
@@ -383,7 +426,7 @@ export default function NotificationEditor() {
               <Button
                 className="w-full"
                 onClick={() => sendMutation.mutate()}
-                disabled={sendMutation.isPending || !name || !selectedTemplateId || selectedListIds.length === 0}
+                disabled={sendMutation.isPending || !name || !selectedTemplateId || selectedListIds.length === 0 || (needsMediaUrl && !headerMediaUrl)}
                 data-testid="button-send-now"
               >
                 <Send className="h-4 w-4 mr-2" />

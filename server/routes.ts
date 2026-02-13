@@ -1792,6 +1792,47 @@ export async function registerRoutes(
         return res.status(400).json({ error: "No subscribed contacts found in the selected lists" });
       }
 
+      const components = (template.components as any[]) || [];
+      const headerComp = components.find((c: any) => c.type === "HEADER");
+      const bodyComp = components.find((c: any) => c.type === "BODY");
+
+      let headerParams: any[] | undefined;
+      if (headerComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format || "")) {
+        const mediaUrl = notification.headerMediaUrl || headerComp.mediaUrl;
+        if (!mediaUrl) {
+          return res.status(400).json({
+            error: `This template requires a ${headerComp.format.toLowerCase()} in the header. Please provide a media URL in the notification editor.`,
+          });
+        }
+        const mediaType = headerComp.format === "IMAGE" ? "image" :
+                         headerComp.format === "VIDEO" ? "video" : "document";
+        headerParams = [{
+          type: mediaType,
+          [mediaType]: { link: mediaUrl },
+        }];
+      } else if (headerComp && headerComp.format === "TEXT" && headerComp.text?.includes("{{")) {
+        const varCount = (headerComp.text.match(/\{\{\d+\}\}/g) || []).length;
+        if (varCount > 0) {
+          const templateVars = notification.templateVariables || {};
+          headerParams = Array(varCount).fill(null).map((_, i) => ({
+            type: "text",
+            text: templateVars[`header_${i + 1}`] || "N/A",
+          }));
+        }
+      }
+
+      let bodyParams: any[] | undefined;
+      if (bodyComp?.text?.includes("{{")) {
+        const varCount = (bodyComp.text.match(/\{\{\d+\}\}/g) || []).length;
+        if (varCount > 0) {
+          const templateVars = notification.templateVariables || {};
+          bodyParams = Array(varCount).fill(null).map((_, i) => ({
+            type: "text",
+            text: templateVars[`body_${i + 1}`] || "N/A",
+          }));
+        }
+      }
+
       await storage.updateNotification(notification.id, {
         status: "sending",
         sentAt: new Date(),
@@ -1812,7 +1853,9 @@ export async function registerRoutes(
             activeAccount.accessToken,
             recipientPhone,
             template.name,
-            template.language || "en"
+            template.language || "en",
+            headerParams,
+            bodyParams
           );
 
           if (result.success && result.data?.messages?.[0]) {
@@ -1827,6 +1870,7 @@ export async function registerRoutes(
             });
             sentCount++;
           } else {
+            console.error(`Message send failed to ${recipientPhone}:`, result.error?.message || "Unknown error", `(code: ${result.error?.code})`);
             await storage.createMessage({
               accountId: activeAccount.id,
               templateId: template.id,
