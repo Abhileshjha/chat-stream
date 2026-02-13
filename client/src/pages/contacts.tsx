@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -32,11 +33,19 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Search,
   Plus,
   MoreVertical,
   Trash2,
   Edit,
+  List,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -48,13 +57,16 @@ import { useForm } from "react-hook-form";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Contact, ContactTag } from "@shared/schema";
+import type { Contact, ContactTag, ContactList } from "@shared/schema";
 
 export default function Contacts() {
   const [searchQuery, setSearchQuery] = useState("");
   const [addContactOpen, setAddContactOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [selectedListId, setSelectedListId] = useState<string>("");
+  const [showNewListInput, setShowNewListInput] = useState(false);
+  const [newListName, setNewListName] = useState("");
   const { toast } = useToast();
 
   const { data: contacts = [], isLoading } = useQuery<Contact[]>({
@@ -65,14 +77,40 @@ export default function Contacts() {
     queryKey: ["/api/tags"],
   });
 
+  const { data: lists = [] } = useQuery<ContactList[]>({
+    queryKey: ["/api/lists"],
+  });
+
+  const createListMutation = useMutation({
+    mutationFn: async (data: { name: string }) => {
+      const res = await apiRequest("POST", "/api/lists", data);
+      return res.json();
+    },
+    onSuccess: (newList: ContactList) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/lists"] });
+      setSelectedListId(newList.id);
+      setShowNewListInput(false);
+      setNewListName("");
+      toast({ title: `List "${newList.name}" created` });
+    },
+    onError: () => {
+      toast({ title: "Failed to create list", variant: "destructive" });
+    },
+  });
+
   const createContactMutation = useMutation({
-    mutationFn: async (data: { phone: string; name?: string }) => {
+    mutationFn: async (data: { phone: string; name?: string; listIds?: string[] }) => {
       return apiRequest("POST", "/api/contacts", data);
     },
     onSuccess: () => {
       toast({ title: "Contact added successfully" });
       setAddContactOpen(false);
+      setSelectedListId("");
+      setShowNewListInput(false);
+      setNewListName("");
+      contactForm.reset();
       queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/lists"] });
     },
     onError: () => {
       toast({ title: "Failed to add contact", variant: "destructive" });
@@ -108,6 +146,16 @@ export default function Contacts() {
     defaultValues: { phone: "", name: "" },
   });
 
+  const handleAddContact = (data: { phone: string; name: string }) => {
+    const listIds = selectedListId ? [selectedListId] : [];
+    createContactMutation.mutate({ ...data, listIds });
+  };
+
+  const handleCreateNewList = () => {
+    if (!newListName.trim()) return;
+    createListMutation.mutate({ name: newListName.trim() });
+  };
+
   const filteredContacts = contacts.filter((c) =>
     c.phone.includes(searchQuery) || c.name?.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -135,6 +183,15 @@ export default function Contacts() {
       newSet.add(id);
     }
     setSelectedIds(newSet);
+  };
+
+  const getListNamesForContact = (contact: Contact) => {
+    const contactListIds = (contact as any).listIds as string[] | null;
+    if (!contactListIds?.length) return null;
+    return contactListIds
+      .map((lid) => lists.find((l) => l.id === lid))
+      .filter(Boolean)
+      .map((l) => l!.name);
   };
 
   return (
@@ -172,7 +229,15 @@ export default function Contacts() {
                 Delete {selectedIds.size} Selected
               </Button>
             )}
-            <Dialog open={addContactOpen} onOpenChange={setAddContactOpen}>
+            <Dialog open={addContactOpen} onOpenChange={(open) => {
+              setAddContactOpen(open);
+              if (!open) {
+                setSelectedListId("");
+                setShowNewListInput(false);
+                setNewListName("");
+                contactForm.reset();
+              }
+            }}>
               <DialogTrigger asChild>
                 <Button data-testid="button-add-contact">
                   <Plus className="h-4 w-4 mr-2" />
@@ -184,7 +249,7 @@ export default function Contacts() {
                   <DialogTitle>Add New Contact</DialogTitle>
                 </DialogHeader>
                 <Form {...contactForm}>
-                  <form onSubmit={contactForm.handleSubmit((data) => createContactMutation.mutate(data))} className="space-y-4">
+                  <form onSubmit={contactForm.handleSubmit(handleAddContact)} className="space-y-4">
                     <FormField
                       control={contactForm.control}
                       name="phone"
@@ -211,6 +276,95 @@ export default function Contacts() {
                         </FormItem>
                       )}
                     />
+
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Add to List (optional)</Label>
+                      {!showNewListInput ? (
+                        <div className="flex items-center gap-2">
+                          <Select
+                            value={selectedListId}
+                            onValueChange={(val) => {
+                              if (val === "__none__") {
+                                setSelectedListId("");
+                              } else {
+                                setSelectedListId(val);
+                              }
+                            }}
+                          >
+                            <SelectTrigger className="flex-1" data-testid="select-contact-list">
+                              <SelectValue placeholder="Select a list" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">No list</SelectItem>
+                              {lists.map((list) => (
+                                <SelectItem key={list.id} value={list.id} data-testid={`select-list-option-${list.id}`}>
+                                  <div className="flex items-center gap-2">
+                                    <List className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                    <span>{list.name}</span>
+                                    <span className="text-muted-foreground text-xs">({list.contactCount || 0})</span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => setShowNewListInput(true)}
+                            data-testid="button-new-list"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Input
+                              placeholder="Enter new list name"
+                              value={newListName}
+                              onChange={(e) => setNewListName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  handleCreateNewList();
+                                }
+                              }}
+                              data-testid="input-new-list-name"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setShowNewListInput(false);
+                                setNewListName("");
+                              }}
+                              data-testid="button-cancel-new-list"
+                            >
+                              Cancel
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={handleCreateNewList}
+                              disabled={!newListName.trim() || createListMutation.isPending}
+                              data-testid="button-create-list"
+                            >
+                              {createListMutation.isPending ? "Creating..." : "Create List"}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      {selectedListId && !showNewListInput && (
+                        <p className="text-xs text-muted-foreground">
+                          Contact will be added to "{lists.find(l => l.id === selectedListId)?.name}"
+                        </p>
+                      )}
+                    </div>
+
                     <Button type="submit" className="w-full" disabled={createContactMutation.isPending} data-testid="button-submit-contact">
                       {createContactMutation.isPending ? "Adding..." : "Add Contact"}
                     </Button>
@@ -236,6 +390,7 @@ export default function Contacts() {
                   <TableHead>Phone</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Lists</TableHead>
                   <TableHead>Tags</TableHead>
                   <TableHead className="w-10"></TableHead>
                 </TableRow>
@@ -243,76 +398,93 @@ export default function Contacts() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center">Loading...</TableCell>
+                    <TableCell colSpan={7} className="text-center">Loading...</TableCell>
                   </TableRow>
                 ) : filteredContacts.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground">
+                    <TableCell colSpan={7} className="text-center text-muted-foreground">
                       No contacts found
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredContacts.map((contact) => (
-                    <TableRow key={contact.id} data-testid={`contact-row-${contact.id}`}>
-                      <TableCell>
-                        <Checkbox
-                          checked={selectedIds.has(contact.id)}
-                          onCheckedChange={() => toggleSelect(contact.id)}
-                          aria-label={`Select ${contact.name || contact.phone}`}
-                          data-testid={`checkbox-contact-${contact.id}`}
-                        />
-                      </TableCell>
-                      <TableCell className="font-mono">{contact.phone}</TableCell>
-                      <TableCell>{contact.name || "-"}</TableCell>
-                      <TableCell>
-                        <Badge variant={contact.status === "subscribed" ? "default" : "secondary"}>
-                          {contact.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {contact.tagIds?.length ? (
-                          <div className="flex gap-1 flex-wrap">
-                            {contact.tagIds.map((tagId) => {
-                              const tag = tags.find((t) => t.id === tagId);
-                              return tag ? (
-                                <Badge
-                                  key={tag.id}
-                                  variant="outline"
-                                  style={{ borderColor: tag.color, color: tag.color }}
-                                >
-                                  {tag.name}
+                  filteredContacts.map((contact) => {
+                    const listNames = getListNamesForContact(contact);
+                    return (
+                      <TableRow key={contact.id} data-testid={`contact-row-${contact.id}`}>
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedIds.has(contact.id)}
+                            onCheckedChange={() => toggleSelect(contact.id)}
+                            aria-label={`Select ${contact.name || contact.phone}`}
+                            data-testid={`checkbox-contact-${contact.id}`}
+                          />
+                        </TableCell>
+                        <TableCell className="font-mono">{contact.phone}</TableCell>
+                        <TableCell>{contact.name || "-"}</TableCell>
+                        <TableCell>
+                          <Badge variant={contact.status === "subscribed" ? "default" : "secondary"}>
+                            {contact.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {listNames?.length ? (
+                            <div className="flex gap-1 flex-wrap">
+                              {listNames.map((name) => (
+                                <Badge key={name} variant="outline" className="text-xs">
+                                  <List className="h-3 w-3 mr-1" />
+                                  {name}
                                 </Badge>
-                              ) : null;
-                            })}
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" data-testid={`button-contact-menu-${contact.id}`}>
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem>
-                              <Edit className="h-4 w-4 mr-2" />
-                              Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="text-destructive"
-                              onClick={() => deleteContactMutation.mutate(contact.id)}
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {contact.tagIds?.length ? (
+                            <div className="flex gap-1 flex-wrap">
+                              {contact.tagIds.map((tagId) => {
+                                const tag = tags.find((t) => t.id === tagId);
+                                return tag ? (
+                                  <Badge
+                                    key={tag.id}
+                                    variant="outline"
+                                    style={{ borderColor: tag.color, color: tag.color }}
+                                  >
+                                    {tag.name}
+                                  </Badge>
+                                ) : null;
+                              })}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" data-testid={`button-contact-menu-${contact.id}`}>
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem>
+                                <Edit className="h-4 w-4 mr-2" />
+                                Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="text-destructive"
+                                onClick={() => deleteContactMutation.mutate(contact.id)}
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
