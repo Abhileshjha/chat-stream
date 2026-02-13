@@ -22,6 +22,7 @@ import { eq, desc, and, sql as dsql } from "drizzle-orm";
 export interface IStorage {
   getTemplates(accountId?: string): Promise<Template[]>;
   getTemplate(id: string): Promise<Template | undefined>;
+  getTemplateByName(name: string, accountId: string): Promise<Template | undefined>;
   createTemplate(template: InsertTemplate): Promise<Template>;
   updateTemplate(id: string, updates: Partial<Template>): Promise<Template | undefined>;
   deleteTemplate(id: string): Promise<boolean>;
@@ -135,6 +136,12 @@ export class DatabaseStorage implements IStorage {
 
   async getTemplate(id: string): Promise<Template | undefined> {
     const rows = await db.select().from(templates).where(eq(templates.id, id));
+    return rows[0];
+  }
+
+  async getTemplateByName(name: string, accountId: string): Promise<Template | undefined> {
+    const rows = await db.select().from(templates)
+      .where(and(eq(templates.name, name), eq(templates.accountId, accountId)));
     return rows[0];
   }
 

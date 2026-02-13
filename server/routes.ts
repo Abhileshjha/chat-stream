@@ -888,6 +888,52 @@ export async function registerRoutes(
         for (const entry of body.entry || []) {
           for (const change of entry.changes || []) {
             if (change.field === "messages") {
+              const incomingMessages = change.value?.messages || [];
+              const contacts = change.value?.contacts || [];
+              const phoneNumberId = change.value?.metadata?.phone_number_id;
+
+              for (const incoming of incomingMessages) {
+                const from = incoming.from;
+                const contactInfo = contacts.find((c: any) => c.wa_id === from);
+                const contactName = contactInfo?.profile?.name || from;
+
+                const accounts = await storage.getAccounts();
+                const account = accounts.find(a => a.phoneNumberId === phoneNumberId);
+                const accountId = account?.id || null;
+
+                let conversation = await storage.getConversationByPhone(from, accountId || "");
+                if (!conversation) {
+                  conversation = await storage.createConversation(from, contactName, accountId || "");
+                  await storage.updateConversation(conversation.id, {
+                    lastMessage: incoming.text?.body || incoming.type,
+                    lastMessageAt: new Date(),
+                    unreadCount: 1,
+                    windowEndsAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+                  });
+                } else {
+                  await storage.updateConversation(conversation.id, {
+                    lastMessage: incoming.text?.body || incoming.type,
+                    lastMessageAt: new Date(),
+                    unreadCount: (conversation.unreadCount ?? 0) + 1,
+                    windowEndsAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+                    contactName: contactName,
+                    status: "open",
+                  });
+                }
+
+                const msgContent = incoming.text?.body || incoming.caption || `[${incoming.type}]`;
+                await storage.addConversationMessage({
+                  conversationId: conversation.id,
+                  content: msgContent,
+                  direction: "inbound",
+                  type: incoming.type === "text" ? "text" : incoming.type,
+                  status: "received",
+                });
+
+                broadcast("conversation-message", { conversationId: conversation.id });
+                broadcast("conversation-updated", { conversationId: conversation.id });
+              }
+
               const statuses = change.value?.statuses || [];
               
               for (const status of statuses) {
@@ -906,7 +952,6 @@ export async function registerRoutes(
                   
                   await storage.updateMessage(message.id, updates);
                   
-                  // Add activity
                   const activityType = status.status === "delivered" 
                     ? "message_delivered" 
                     : status.status === "read" 
@@ -1637,14 +1682,42 @@ export async function registerRoutes(
       const userId = req.user?.claims?.sub;
       const accounts = userId ? await storage.getAccountsByUser(userId) : await storage.getAccounts();
       const activeAccount = accounts.find(a => a.status === "connected") || accounts[0];
+      const isOutbound = req.body.direction === "outbound" || req.body.direction === "outgoing";
 
-      if (req.body.direction === "outgoing" && activeAccount?.accessToken && activeAccount?.phoneNumberId && conversation.contactPhone) {
-        const metaResult = await whatsappApi.sendTextMessage(
-          activeAccount.phoneNumberId,
-          activeAccount.accessToken,
-          conversation.contactPhone,
-          req.body.content
-        );
+      if (isOutbound && activeAccount?.accessToken && activeAccount?.phoneNumberId && conversation.contactPhone) {
+        let metaResult;
+
+        if (req.body.type === "template" && req.body.templateName) {
+          const template = await storage.getTemplateByName(req.body.templateName, activeAccount.id);
+          const lang = template?.language || "en";
+          const components = (template?.components as any[]) || [];
+          const headerComp = components.find((c: any) => c.type === "HEADER");
+
+          let headerParams: any[] | undefined;
+          if (headerComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format || "")) {
+            const mediaUrl = headerComp.mediaUrl;
+            if (mediaUrl) {
+              const mediaType = headerComp.format === "IMAGE" ? "image" : headerComp.format === "VIDEO" ? "video" : "document";
+              headerParams = [{ type: mediaType, [mediaType]: { link: mediaUrl } }];
+            }
+          }
+
+          metaResult = await whatsappApi.sendTemplateMessage(
+            activeAccount.phoneNumberId,
+            activeAccount.accessToken,
+            conversation.contactPhone,
+            req.body.templateName,
+            lang,
+            headerParams
+          );
+        } else {
+          metaResult = await whatsappApi.sendTextMessage(
+            activeAccount.phoneNumberId,
+            activeAccount.accessToken,
+            conversation.contactPhone,
+            req.body.content
+          );
+        }
 
         if (!metaResult.success) {
           console.error("Failed to send WhatsApp message:", metaResult.error);
@@ -1655,7 +1728,7 @@ export async function registerRoutes(
         }
 
         const waMessageId = metaResult.data?.messages?.[0]?.id;
-        req.body.whatsappMessageId = waMessageId;
+        req.body.status = "sent";
       }
 
       const message = await storage.addConversationMessage({
