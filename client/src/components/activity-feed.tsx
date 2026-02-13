@@ -11,7 +11,7 @@ interface ActivityFeedProps {
   maxHeight?: string;
 }
 
-const activityConfig = {
+const activityConfig: Record<string, { icon: typeof Send; color: string; bg: string }> = {
   message_sent: { icon: Send, color: "text-blue-500", bg: "bg-blue-500/10" },
   message_delivered: { icon: CheckCircle, color: "text-green-500", bg: "bg-green-500/10" },
   message_read: { icon: Eye, color: "text-primary", bg: "bg-primary/10" },
@@ -20,7 +20,12 @@ const activityConfig = {
   template_rejected: { icon: FileX, color: "text-red-500", bg: "bg-red-500/10" },
   campaign_started: { icon: Play, color: "text-primary", bg: "bg-primary/10" },
   campaign_completed: { icon: Flag, color: "text-green-500", bg: "bg-green-500/10" },
+  notification_completed: { icon: Send, color: "text-green-500", bg: "bg-green-500/10" },
+  notification_sent: { icon: Send, color: "text-blue-500", bg: "bg-blue-500/10" },
+  notification_failed: { icon: XCircle, color: "text-red-500", bg: "bg-red-500/10" },
 };
+
+const defaultActivityConfig = { icon: Flag, color: "text-muted-foreground", bg: "bg-muted" };
 
 export function ActivityFeed({ activities, className, maxHeight = "h-96" }: ActivityFeedProps) {
   return (
@@ -42,7 +47,7 @@ export function ActivityFeed({ activities, className, maxHeight = "h-96" }: Acti
               </div>
             ) : (
               activities.map((activity) => {
-                const config = activityConfig[activity.type];
+                const config = activityConfig[activity.type] || defaultActivityConfig;
                 const Icon = config.icon;
                 
                 return (
