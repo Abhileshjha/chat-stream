@@ -161,10 +161,22 @@ export function AppSidebar({
 
   const { data: accountsData } = useQuery<{ accounts: WhatsAppAccount[]; activeAccountId: string }>({
     queryKey: ["/api/accounts"],
+    queryFn: async () => {
+      const res = await fetch("/api/accounts", { credentials: "include" });
+      if (!res.ok) return { accounts: [], activeAccountId: "" };
+      return res.json();
+    },
+    retry: false,
   });
 
   const { data: conversations = [] } = useQuery<Conversation[]>({
     queryKey: ["/api/conversations"],
+    queryFn: async () => {
+      const res = await fetch("/api/conversations", { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    retry: false,
   });
 
   const switchAccountMutation = useMutation({
@@ -179,7 +191,7 @@ export function AppSidebar({
 
   const accounts = accountsData?.accounts || [];
   const activeAccount = accounts.find(a => a.id === accountsData?.activeAccountId);
-  const unreadMessages = conversations.reduce((sum, c) => sum + c.unreadCount, 0);
+  const unreadMessages = conversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0);
 
   const getBadgeCount = (key: string) => {
     if (key === "pendingTemplates") return pendingTemplates;

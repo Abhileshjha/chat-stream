@@ -31,6 +31,7 @@ import Contact from "@/pages/contact";
 import Admin from "@/pages/admin";
 import DeleteData from "@/pages/delete-data";
 import { useQuery } from "@tanstack/react-query";
+import { ErrorBoundary } from "@/components/error-boundary";
 import type { Template, Campaign, DashboardMetrics } from "@shared/schema";
 
 function AppRouter() {
@@ -149,14 +150,16 @@ function AppContent() {
 
 function App() {
   return (
-    <ThemeProvider defaultTheme="light" storageKey="whatsapp-broadcast-theme">
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-          <AppContent />
-          <Toaster />
-        </TooltipProvider>
-      </QueryClientProvider>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider defaultTheme="light" storageKey="whatsapp-broadcast-theme">
+        <QueryClientProvider client={queryClient}>
+          <TooltipProvider>
+            <AppContent />
+            <Toaster />
+          </TooltipProvider>
+        </QueryClientProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }
 
