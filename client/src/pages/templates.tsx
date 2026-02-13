@@ -101,6 +101,7 @@ export default function Templates() {
     APPROVED: templates.filter((t) => t.status === "APPROVED").length,
     PENDING: templates.filter((t) => t.status === "PENDING").length,
     REJECTED: templates.filter((t) => t.status === "REJECTED").length,
+    DRAFT: templates.filter((t) => t.status === "DRAFT").length,
   };
 
   return (
@@ -155,6 +156,7 @@ export default function Templates() {
               <SelectItem value="APPROVED">Approved ({statusCounts.APPROVED})</SelectItem>
               <SelectItem value="PENDING">Pending ({statusCounts.PENDING})</SelectItem>
               <SelectItem value="REJECTED">Rejected ({statusCounts.REJECTED})</SelectItem>
+              <SelectItem value="DRAFT">Draft ({statusCounts.DRAFT})</SelectItem>
             </SelectContent>
           </Select>
         </div>

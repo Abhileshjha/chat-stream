@@ -118,6 +118,13 @@ export default function TemplateEditor() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      if (!name.trim()) {
+        throw new Error(JSON.stringify({ error: "Template name is required" }));
+      }
+      if (!bodyText.trim()) {
+        throw new Error(JSON.stringify({ error: "Template body text is required" }));
+      }
+
       const components: any[] = [];
       
       if (headerType === "text" && headerText) {
@@ -159,13 +166,36 @@ export default function TemplateEditor() {
       if (isEdit && params?.id) {
         return apiRequest("PATCH", `/api/templates/${params.id}`, data);
       }
-      return apiRequest("POST", "/api/templates", data);
+      const response = await apiRequest("POST", "/api/templates", data);
+      return response;
     },
-    onSuccess: () => {
-      toast({
-        title: isEdit ? "Template updated" : "Template created",
-        description: isEdit ? "Your template has been updated." : "Your template has been submitted for approval.",
-      });
+    onSuccess: async (response: any) => {
+      let result: any = {};
+      try {
+        if (response instanceof Response) {
+          const cloned = response.clone();
+          result = await cloned.json();
+        } else if (typeof response === "object") {
+          result = response;
+        }
+      } catch {}
+
+      if (result?.metaWarning) {
+        toast({
+          title: "Template Saved as Draft",
+          description: `Saved locally but WhatsApp submission had an issue: ${result.metaWarning}. You can resubmit later.`,
+        });
+      } else if (result?.status === "DRAFT") {
+        toast({
+          title: "Template Saved as Draft",
+          description: "Template saved. Connect a WhatsApp account to submit for approval.",
+        });
+      } else {
+        toast({
+          title: isEdit ? "Template Updated" : "Template Submitted",
+          description: isEdit ? "Your template has been updated." : "Your template has been submitted for WhatsApp approval.",
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/templates"] });
       navigate("/templates");
     },

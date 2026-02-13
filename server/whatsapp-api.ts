@@ -1,6 +1,8 @@
 import type { TemplateComponent } from "@shared/schema";
+import fs from "fs";
+import path from "path";
 
-const META_API_VERSION = "v18.0";
+const META_API_VERSION = "v21.0";
 const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`;
 
 export interface MetaApiError {
@@ -75,7 +77,57 @@ export async function testConnection(
   );
 }
 
-function buildMetaComponents(components: TemplateComponent[]): any[] {
+export async function uploadSessionMedia(
+  appId: string,
+  accessToken: string,
+  fileBuffer: Buffer,
+  mimeType: string,
+  fileName: string
+): Promise<MetaApiResponse> {
+  const fileSize = fileBuffer.length;
+
+  const createSessionRes = await metaApiRequest<{ id: string }>(
+    `${META_API_BASE}/${appId}/uploads?file_length=${fileSize}&file_type=${encodeURIComponent(mimeType)}&file_name=${encodeURIComponent(fileName)}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    }
+  );
+
+  if (!createSessionRes.success || !createSessionRes.data?.id) {
+    console.error("Failed to create upload session:", createSessionRes.error);
+    return createSessionRes;
+  }
+
+  const uploadSessionId = createSessionRes.data.id;
+
+  const uploadRes = await metaApiRequest<{ h: string }>(
+    `${META_API_BASE}/${uploadSessionId}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `OAuth ${accessToken}`,
+        "file_offset": "0",
+        "Content-Type": mimeType,
+      },
+      body: fileBuffer,
+    }
+  );
+
+  if (!uploadRes.success || !uploadRes.data?.h) {
+    console.error("Failed to upload file data:", uploadRes.error);
+    return uploadRes;
+  }
+
+  return {
+    success: true,
+    data: { handle: uploadRes.data.h },
+  };
+}
+
+function buildMetaComponents(components: TemplateComponent[], mediaHandle?: string): any[] {
   const metaComponents: any[] = [];
 
   for (const comp of components) {
@@ -84,33 +136,42 @@ function buildMetaComponents(components: TemplateComponent[]): any[] {
       if (comp.format === "TEXT") {
         header.format = "TEXT";
         header.text = comp.text || "";
-      } else if (comp.format === "IMAGE") {
-        header.format = "IMAGE";
-        if (comp.mediaUrl) {
-          header.example = { header_handle: [comp.mediaUrl] };
+        if (header.text && header.text.includes("{{")) {
+          const varCount = (header.text.match(/\{\{\d+\}\}/g) || []).length;
+          if (varCount > 0) {
+            header.example = {
+              header_text: Array(varCount).fill("Sample"),
+            };
+          }
         }
-      } else if (comp.format === "VIDEO") {
-        header.format = "VIDEO";
-        if (comp.mediaUrl) {
-          header.example = { header_handle: [comp.mediaUrl] };
-        }
-      } else if (comp.format === "DOCUMENT") {
-        header.format = "DOCUMENT";
-        if (comp.mediaUrl) {
-          header.example = { header_handle: [comp.mediaUrl] };
+      } else if (["IMAGE", "VIDEO", "DOCUMENT"].includes(comp.format || "")) {
+        header.format = comp.format;
+        if (mediaHandle) {
+          header.example = { header_handle: [mediaHandle] };
         }
       }
       metaComponents.push(header);
     } else if (comp.type === "BODY") {
-      metaComponents.push({
+      const bodyComp: any = {
         type: "BODY",
         text: comp.text || "",
-      });
+      };
+      if (bodyComp.text && bodyComp.text.includes("{{")) {
+        const varCount = (bodyComp.text.match(/\{\{\d+\}\}/g) || []).length;
+        if (varCount > 0) {
+          bodyComp.example = {
+            body_text: [Array(varCount).fill("Sample")],
+          };
+        }
+      }
+      metaComponents.push(bodyComp);
     } else if (comp.type === "FOOTER") {
-      metaComponents.push({
-        type: "FOOTER",
-        text: comp.text || "",
-      });
+      if (comp.text && comp.text.trim()) {
+        metaComponents.push({
+          type: "FOOTER",
+          text: comp.text,
+        });
+      }
     } else if (comp.type === "BUTTONS" && comp.buttons) {
       metaComponents.push({
         type: "BUTTONS",
@@ -141,9 +202,72 @@ export async function createTemplate(
   name: string,
   category: string,
   language: string,
-  components: TemplateComponent[]
+  components: TemplateComponent[],
+  appId?: string
 ): Promise<MetaApiResponse> {
-  const metaComponents = buildMetaComponents(components);
+  let mediaHandle: string | undefined;
+
+  const headerComp = components.find(c => c.type === "HEADER");
+  if (headerComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format || "")) {
+    if (headerComp.mediaUrl) {
+      const localFilePath = headerComp.mediaUrl.startsWith("/uploads/")
+        ? path.join(process.cwd(), "uploads", path.basename(headerComp.mediaUrl))
+        : null;
+
+      if (localFilePath && fs.existsSync(localFilePath)) {
+        const fileBuffer = fs.readFileSync(localFilePath);
+        const ext = path.extname(localFilePath).toLowerCase();
+        const mimeMap: Record<string, string> = {
+          ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+          ".mp4": "video/mp4", ".3gp": "video/3gpp",
+          ".pdf": "application/pdf", ".doc": "application/msword",
+          ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        };
+        const mimeType = mimeMap[ext] || "application/octet-stream";
+        const effectiveAppId = appId || wabaId;
+
+        console.log(`Uploading media to Meta for template header: ${localFilePath}`);
+        const uploadResult = await uploadSessionMedia(
+          effectiveAppId,
+          accessToken,
+          fileBuffer,
+          mimeType,
+          path.basename(localFilePath)
+        );
+
+        if (uploadResult.success && uploadResult.data?.handle) {
+          mediaHandle = uploadResult.data.handle;
+          console.log("Media uploaded successfully, handle:", mediaHandle);
+        } else {
+          console.error("Media upload to Meta failed:", uploadResult.error);
+          return {
+            success: false,
+            error: {
+              message: `Failed to upload media to Meta: ${uploadResult.error?.message || "Unknown error"}. Please try again or use a different media file.`,
+              type: "MediaUploadError",
+              code: -1,
+            },
+          };
+        }
+      } else {
+        console.warn("Media file not found locally, submitting template without media sample:", headerComp.mediaUrl);
+      }
+    }
+  }
+
+  const metaComponents = buildMetaComponents(components, mediaHandle);
+
+  const hasBody = metaComponents.some(c => c.type === "BODY" && c.text && c.text.trim());
+  if (!hasBody) {
+    return {
+      success: false,
+      error: {
+        message: "Template body text is required. Please add body text before submitting.",
+        type: "ValidationError",
+        code: -1,
+      },
+    };
+  }
 
   const payload = {
     name: name.toLowerCase().replace(/[^a-z0-9_]/g, "_"),
@@ -309,3 +433,16 @@ export async function uploadMedia(
     body: formData,
   });
 }
+
+const whatsappApi = {
+  testConnection,
+  createTemplate,
+  deleteTemplate,
+  getTemplates,
+  sendTemplateMessage,
+  sendTextMessage,
+  uploadMedia,
+  uploadSessionMedia,
+};
+
+export default whatsappApi;

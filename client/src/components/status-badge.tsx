@@ -1,10 +1,10 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { TemplateStatus, MessageStatus, CampaignStatus, QualityScore } from "@shared/schema";
-import { CheckCircle, Clock, XCircle, AlertTriangle, Pause, Send, Eye } from "lucide-react";
+import { CheckCircle, Clock, XCircle, AlertTriangle, Pause, Send, Eye, FileEdit } from "lucide-react";
 
 interface StatusBadgeProps {
-  status: TemplateStatus | MessageStatus | CampaignStatus | QualityScore;
+  status: TemplateStatus | MessageStatus | CampaignStatus | QualityScore | string;
   type?: "template" | "message" | "campaign" | "quality";
   showIcon?: boolean;
   size?: "sm" | "default";
@@ -14,6 +14,7 @@ interface StatusBadgeProps {
 
 const statusConfig = {
   // Template statuses
+  DRAFT: { label: "Draft", color: "bg-muted text-muted-foreground border-muted", icon: FileEdit },
   PENDING: { label: "Pending", color: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20", icon: Clock },
   APPROVED: { label: "Approved", color: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20", icon: CheckCircle },
   REJECTED: { label: "Rejected", color: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20", icon: XCircle },

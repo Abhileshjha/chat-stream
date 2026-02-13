@@ -341,17 +341,30 @@ export async function registerRoutes(
       const accounts = userId ? await storage.getAccountsByUser(userId) : await storage.getAccounts();
       const activeAccount = accounts.find(a => a.status === "connected") || accounts[0];
 
+      const bodyComp = (data.components as any[])?.find((c: any) => c.type === "BODY");
+      if (!bodyComp?.text?.trim()) {
+        return res.status(400).json({
+          error: "Template body text is required",
+          details: "Please add body text before submitting the template.",
+        });
+      }
+
+      const normalizedName = data.name.toLowerCase().replace(/[^a-z0-9_]/g, "_");
       let metaTemplateId: string | null = null;
-      let templateStatus = "PENDING";
+      let templateStatus = "DRAFT";
+      let metaError: string | null = null;
 
       if (activeAccount?.accessToken && activeAccount?.businessAccountId) {
+        const facebookAppId = process.env.FACEBOOK_APP_ID || undefined;
+
         const metaResult = await whatsappApi.createTemplate(
           activeAccount.businessAccountId,
           activeAccount.accessToken,
-          data.name,
+          normalizedName,
           data.category,
           data.language || "en",
-          (data.components || []) as any[]
+          (data.components || []) as any[],
+          facebookAppId
         );
 
         if (metaResult.success && metaResult.data?.id) {
@@ -360,36 +373,43 @@ export async function registerRoutes(
           console.log("Template submitted to Meta API successfully:", metaResult.data);
         } else {
           console.error("Meta API template creation failed:", metaResult.error);
-          return res.status(400).json({
-            error: "Failed to submit template to WhatsApp",
-            details: metaResult.error?.message || "Unknown error from Meta API",
-          });
+          metaError = metaResult.error?.message || "Unknown error from Meta API";
+          templateStatus = "DRAFT";
         }
       } else {
-        return res.status(400).json({
-          error: "No connected WhatsApp account found. Please connect your WhatsApp Business account in Settings first.",
-        });
+        metaError = "No connected WhatsApp account. Template saved as draft.";
       }
 
-      const normalizedName = data.name.toLowerCase().replace(/[^a-z0-9_]/g, "_");
       const template = await storage.createTemplate({
         ...data,
         name: normalizedName,
-        accountId: activeAccount.id,
+        accountId: activeAccount?.id || null,
         metaTemplateId,
         status: templateStatus,
       });
 
-      await storage.addActivity({
-        accountId: activeAccount.id,
-        type: "template_submitted",
-        title: "Template Submitted",
-        description: `${template.name} submitted to WhatsApp for approval`,
-        timestamp: new Date(),
-        metadata: null,
-      });
+      const activityType = metaTemplateId ? "template_submitted" : "template_created";
+      const activityDesc = metaTemplateId
+        ? `${template.name} submitted to WhatsApp for approval`
+        : `${template.name} saved as draft`;
 
-      res.status(201).json(template);
+      if (activeAccount) {
+        await storage.addActivity({
+          accountId: activeAccount.id,
+          type: activityType,
+          title: metaTemplateId ? "Template Submitted" : "Template Saved",
+          description: activityDesc,
+          timestamp: new Date(),
+          metadata: null,
+        });
+      }
+
+      const response: any = { ...template };
+      if (metaError) {
+        response.metaWarning = metaError;
+      }
+
+      res.status(201).json(response);
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Invalid template data", details: error.errors });
