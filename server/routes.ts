@@ -373,13 +373,6 @@ export async function registerRoutes(
         updatedMetrics.qualityRating = syncResults.phoneAnalytics.qualityRating;
         updatedMetrics.messagingLimit = syncResults.phoneAnalytics.messagingLimit;
       }
-      if (metaSent > 0) {
-        updatedMetrics.sentCount = Math.max(updatedMetrics.sentCount, metaSent);
-      }
-      if (metaDelivered > 0) {
-        updatedMetrics.deliveredCount = Math.max(updatedMetrics.deliveredCount, metaDelivered);
-        updatedMetrics.deliveryRate = updatedMetrics.sentCount > 0 ? (updatedMetrics.deliveredCount / updatedMetrics.sentCount) * 100 : 0;
-      }
       if (totalCost > 0) {
         updatedMetrics.totalCost = totalCost;
       }
@@ -2327,8 +2320,20 @@ export async function registerRoutes(
     try {
       const active = await getActiveAccount(req);
       if (!active) return res.status(401).json({ error: "No active account" });
-      const notifications = await storage.getNotifications(active.accountId);
-      res.json(notifications);
+      const notificationList = await storage.getNotifications(active.accountId);
+      const allMessages = await storage.getMessages(active.accountId);
+
+      const enriched = notificationList.map(n => {
+        const msgs = allMessages.filter(m => m.campaignId === n.id);
+        if (msgs.length === 0) return n;
+        const sent = msgs.filter(m => m.status === "sent" || m.status === "delivered" || m.status === "read").length;
+        const delivered = msgs.filter(m => m.status === "delivered" || m.status === "read").length;
+        const read = msgs.filter(m => m.status === "read").length;
+        const failed = msgs.filter(m => m.status === "failed").length;
+        return { ...n, sentCount: sent, deliveredCount: delivered, readCount: read, failedCount: failed };
+      });
+
+      res.json(enriched);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch notifications" });
     }
@@ -2405,6 +2410,15 @@ export async function registerRoutes(
       }
       if (notification.accountId && notification.accountId !== active.accountId) {
         return res.status(404).json({ error: "Notification not found" });
+      }
+      const allMessages = await storage.getMessages(active.accountId);
+      const msgs = allMessages.filter(m => m.campaignId === notification.id);
+      if (msgs.length > 0) {
+        const sent = msgs.filter(m => m.status === "sent" || m.status === "delivered" || m.status === "read").length;
+        const delivered = msgs.filter(m => m.status === "delivered" || m.status === "read").length;
+        const read = msgs.filter(m => m.status === "read").length;
+        const failed = msgs.filter(m => m.status === "failed").length;
+        return res.json({ ...notification, sentCount: sent, deliveredCount: delivered, readCount: read, failedCount: failed });
       }
       res.json(notification);
     } catch (error) {

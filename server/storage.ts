@@ -270,27 +270,18 @@ export class DatabaseStorage implements IStorage {
       ? await db.select().from(whatsappAccounts).where(eq(whatsappAccounts.id, accountId))
       : await db.select().from(whatsappAccounts);
 
-    const localSent = allMessages.filter(m => m.status === "sent" || m.status === "delivered" || m.status === "read").length;
-    const localDelivered = allMessages.filter(m => m.status === "delivered" || m.status === "read").length;
+    const sentCount = allMessages.filter(m => m.status === "sent" || m.status === "delivered" || m.status === "read").length;
+    const deliveredCount = allMessages.filter(m => m.status === "delivered" || m.status === "read").length;
     const readCount = allMessages.filter(m => m.status === "read").length;
     const failedCount = allMessages.filter(m => m.status === "failed").length;
-    const localCost = allMessages.reduce((sum, m) => sum + parseFloat(m.cost || "0"), 0);
-
-    const metaSent = allAccounts.reduce((sum, a) => sum + (a.metaSentCount || 0), 0);
-    const metaDelivered = allAccounts.reduce((sum, a) => sum + (a.metaDeliveredCount || 0), 0);
-    const metaCost = allAccounts.reduce((sum, a) => sum + parseFloat(a.metaTotalCost || "0"), 0);
-
-    const sentCount = Math.max(localSent, metaSent);
-    const deliveredCount = Math.max(localDelivered, metaDelivered);
-    const totalCost = Math.max(localCost, metaCost);
+    const totalCost = allMessages.reduce((sum, m) => sum + parseFloat(m.cost || "0"), 0);
 
     const totalMessagingLimit = allAccounts.reduce((sum, a) => sum + (a.messagingLimit || 0), 0);
-    const totalMessagingUsed = allAccounts.reduce((sum, a) => sum + (a.messagingUsed || 0), 0);
 
     const lastSync = allAccounts[0]?.lastSyncedAt;
 
     return {
-      totalMessages: Math.max(allMessages.length, sentCount),
+      totalMessages: allMessages.length,
       sentCount,
       deliveredCount,
       readCount,
@@ -302,7 +293,7 @@ export class DatabaseStorage implements IStorage {
       approvedTemplates: allTemplates.filter(t => t.status === "APPROVED").length,
       pendingTemplates: allTemplates.filter(t => t.status === "PENDING").length,
       messagingLimit: totalMessagingLimit || 100000,
-      messagingUsed: totalMessagingUsed || allMessages.length,
+      messagingUsed: allMessages.length,
       qualityRating: (allAccounts[0]?.qualityRating as QualityScore) || "GREEN",
       apiStatus: allAccounts.length > 0 ? "connected" : "disconnected",
       lastSyncedAt: lastSync ? lastSync.toISOString() : null,
