@@ -72,15 +72,15 @@ export default function Templates() {
         category: template.category,
         language: template.language,
         components: template.components,
-        saveAsDraft: true,
+        saveAsDraft: false,
       };
       return apiRequest("POST", "/api/templates", duplicateData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/templates"] });
       toast({
-        title: "Template Duplicated",
-        description: "A copy has been created as a draft. Use the menu to submit it to WhatsApp when ready.",
+        title: "Template Duplicated & Submitted",
+        description: "The copy has been created and submitted to WhatsApp for approval.",
       });
     },
     onError: (error: any) => {
