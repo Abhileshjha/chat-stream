@@ -106,6 +106,10 @@ The platform supports multiple WhatsApp Business numbers with account switching:
   - Ownership-based authorization for file deletion (users can only delete their own files)
   - Path traversal protection and filename format validation
 - Created GDPR-compliant data deletion page at `/delete-data` for users to request account deletion
+- Dashboard now shows real data from database and Meta API (quality rating, messaging limits, chart data from actual messages)
+- Inbox defaults to showing only conversations with customer replies (filter=replied), with toggle for All Conversations
+- Added team member/account sharing system: invite by email, auto-accept on login, shared accounts appear in account switcher
+- Simplified number registration: "Detect Phone Numbers" auto-discovers numbers from WABA ID + Access Token before manual entry
 
 ### Development vs Production
 

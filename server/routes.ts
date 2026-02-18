@@ -2,7 +2,9 @@ import type { Express, RequestHandler } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
-import { insertTemplateSchema, insertCampaignSchema, insertMessageSchema, type WhatsAppAccount } from "@shared/schema";
+import { insertTemplateSchema, insertCampaignSchema, insertMessageSchema, type WhatsAppAccount, teamMembers } from "@shared/schema";
+import { db } from "@db";
+import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 import { authStorage } from "./replit_integrations/auth/storage";
 import { isAuthenticated } from "./replit_integrations/auth/replitAuth";
@@ -184,9 +186,47 @@ export async function registerRoutes(
         });
       }
       const metrics = await storage.getDashboardMetrics(active.accountId);
+
+      try {
+        const account = await storage.getAccount(active.accountId);
+        if (account?.accessToken && account?.phoneNumberId) {
+          const phoneRes = await whatsappApi.getPhoneNumberAnalytics(account.phoneNumberId, account.accessToken);
+          if (phoneRes.success && phoneRes.data) {
+            const limitTierMap: Record<string, number> = {
+              "TIER_50": 50, "TIER_250": 250, "TIER_1K": 1000,
+              "TIER_10K": 10000, "TIER_100K": 100000, "TIER_UNLIMITED": 999999,
+            };
+            const qr = phoneRes.data.quality_rating || metrics.qualityRating;
+            const limitTier = phoneRes.data.messaging_limit_tier;
+            const newLimit = limitTierMap[limitTier] || metrics.messagingLimit;
+            metrics.qualityRating = qr;
+            metrics.messagingLimit = newLimit;
+            await storage.updateAccount(active.accountId, {
+              qualityRating: qr,
+              messagingLimit: newLimit,
+            });
+          }
+        }
+      } catch (metaErr) {
+        console.log("Meta API sync for dashboard metrics failed (non-critical):", metaErr);
+      }
+
       res.json(metrics);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch dashboard metrics" });
+    }
+  });
+
+  app.get("/api/dashboard/chart-data", async (req: any, res) => {
+    try {
+      const active = await getActiveAccount(req);
+      if (!active) {
+        return res.json({ messageVolume: [], statusDistribution: [] });
+      }
+      const chartData = await storage.getDashboardChartData(active.accountId);
+      res.json(chartData);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch chart data" });
     }
   });
 
@@ -1249,6 +1289,16 @@ export async function registerRoutes(
       if (!userId) {
         return res.status(401).json({ error: "Unauthorized" });
       }
+
+      const userEmail = req.user?.claims?.email;
+      if (userEmail) {
+        const pendingInvites = await db.select().from(teamMembers)
+          .where(and(eq(teamMembers.memberEmail, userEmail.toLowerCase()), eq(teamMembers.status, "pending")));
+        for (const invite of pendingInvites) {
+          await storage.acceptTeamInvite(invite.id, userId);
+        }
+      }
+
       const accounts = await storage.getAccountsByUser(userId);
       const activeId = await storage.getActiveAccountId(userId);
       res.json({ accounts, activeAccountId: activeId });
@@ -1494,6 +1544,42 @@ export async function registerRoutes(
     } catch (error) {
       console.error('Embedded signup error:', error);
       res.status(500).json({ error: "Failed to connect WhatsApp account. Please try again." });
+    }
+  });
+
+  // Auto-detect phone numbers from a WABA
+  app.post("/api/whatsapp-accounts/detect-numbers", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const { businessAccountId, accessToken } = req.body;
+      if (!businessAccountId || !accessToken) {
+        return res.status(400).json({ error: "WABA ID and Access Token are required" });
+      }
+
+      const response = await fetch(
+        `https://graph.facebook.com/v21.0/${businessAccountId}/phone_numbers?access_token=${accessToken}`
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json() as any;
+        return res.status(400).json({
+          error: "Failed to fetch phone numbers",
+          message: errorData.error?.message || "Could not retrieve phone numbers from this WABA. Check your WABA ID and Access Token."
+        });
+      }
+
+      const data = await response.json() as any;
+      const phoneNumbers = (data.data || []).map((pn: any) => ({
+        id: pn.id,
+        displayPhoneNumber: pn.display_phone_number,
+        verifiedName: pn.verified_name,
+        qualityRating: pn.quality_rating,
+        status: pn.code_verification_status || "unknown",
+      }));
+
+      res.json({ phoneNumbers });
+    } catch (error) {
+      console.error("Detect numbers error:", error);
+      res.status(500).json({ error: "Failed to detect phone numbers" });
     }
   });
 
@@ -1872,8 +1958,22 @@ export async function registerRoutes(
     try {
       const active = await getActiveAccount(req);
       if (!active) return res.status(401).json({ error: "No active account" });
-      const conversations = await storage.getConversations(active.accountId);
-      res.json(conversations);
+      const filter = req.query.filter as string;
+      const allConversations = await storage.getConversations(active.accountId);
+
+      if (filter === "replied") {
+        const replied = [];
+        for (const conv of allConversations) {
+          const msgs = await storage.getConversationMessages(conv.id);
+          const hasInbound = msgs.some(m => m.direction === "inbound");
+          if (hasInbound) {
+            replied.push(conv);
+          }
+        }
+        return res.json(replied);
+      }
+
+      res.json(allConversations);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch conversations" });
     }
@@ -2446,6 +2546,101 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Backfill error:", error);
       res.status(500).json({ error: "Failed to backfill conversations" });
+    }
+  });
+
+  // ============== Team Members (Account Sharing) ==============
+  app.get("/api/team-members", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const members = await storage.getTeamMembers(active.accountId);
+      res.json(members);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch team members" });
+    }
+  });
+
+  app.post("/api/team-members", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const { email, role } = req.body;
+      if (!email) return res.status(400).json({ error: "Email is required" });
+
+      const existing = await storage.getTeamMemberByEmail(email, active.accountId);
+      if (existing) return res.status(400).json({ error: "This email is already a team member" });
+
+      const member = await storage.addTeamMember({
+        accountId: active.accountId,
+        ownerUserId: userId,
+        memberEmail: email.toLowerCase().trim(),
+        role: role || "member",
+        status: "pending",
+      });
+
+      res.json(member);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to add team member" });
+    }
+  });
+
+  app.delete("/api/team-members/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const removed = await storage.removeTeamMember(req.params.id);
+      if (!removed) return res.status(404).json({ error: "Team member not found" });
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to remove team member" });
+    }
+  });
+
+  app.post("/api/team-members/accept", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const userEmail = req.user?.claims?.email;
+      if (!userId || !userEmail) return res.status(401).json({ error: "Unauthorized" });
+
+      const pendingInvites = await storage.getSharedAccountsForUser(userEmail);
+      const pending = pendingInvites.filter(m => m.status === "pending");
+
+      const accepted = [];
+      for (const invite of pending) {
+        const updated = await storage.acceptTeamInvite(invite.id, userId);
+        if (updated) accepted.push(updated);
+      }
+
+      const active = await storage.getSharedAccountsForUser(userEmail);
+      res.json({ accepted: accepted.length, activeShares: active.length });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to accept invites" });
+    }
+  });
+
+  // Auto-accept pending invites on login
+  app.post("/api/team-members/check-invites", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const userEmail = req.user?.claims?.email;
+      if (!userId || !userEmail) return res.json({ accepted: 0 });
+
+      const allInvites = await db.select().from(teamMembers)
+        .where(and(eq(teamMembers.memberEmail, userEmail.toLowerCase()), eq(teamMembers.status, "pending")));
+
+      let acceptedCount = 0;
+      for (const invite of allInvites) {
+        await storage.acceptTeamInvite(invite.id, userId);
+        acceptedCount++;
+      }
+
+      res.json({ accepted: acceptedCount });
+    } catch (error) {
+      res.json({ accepted: 0 });
     }
   });
 

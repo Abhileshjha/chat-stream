@@ -373,6 +373,28 @@ export const activeAccounts = pgTable("active_accounts", {
   accountId: varchar("account_id").notNull(),
 });
 
+// Team Members (account sharing)
+export const teamMembers = pgTable("team_members", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  ownerUserId: varchar("owner_user_id").notNull(),
+  memberEmail: varchar("member_email", { length: 255 }).notNull(),
+  memberUserId: varchar("member_user_id", { length: 255 }),
+  role: varchar("role", { length: 20 }).notNull().default("member"),
+  status: varchar("status", { length: 20 }).notNull().default("pending"),
+  invitedAt: timestamp("invited_at").defaultNow(),
+  acceptedAt: timestamp("accepted_at"),
+});
+
+export const insertTeamMemberSchema = createInsertSchema(teamMembers).omit({
+  id: true,
+  invitedAt: true,
+  acceptedAt: true,
+});
+
+export type InsertTeamMember = z.infer<typeof insertTeamMemberSchema>;
+export type TeamMember = typeof teamMembers.$inferSelect;
+
 // Content Library Media
 export interface MediaAsset {
   id: string;

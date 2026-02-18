@@ -13,6 +13,7 @@ import {
   type Conversation, type InsertConversation, conversations,
   type ConversationMessage, type InsertConversationMessage, conversationMessages,
   type Notification, type InsertNotification, notifications,
+  type TeamMember, type InsertTeamMember, teamMembers,
   activeAccounts,
   type QualityScore,
 } from "@shared/schema";
@@ -45,6 +46,7 @@ export interface IStorage {
   upsertCampaignMetrics(metrics: InsertCampaignMetrics): Promise<CampaignMetrics>;
 
   getDashboardMetrics(accountId?: string): Promise<DashboardMetrics>;
+  getDashboardChartData(accountId: string): Promise<{ messageVolume: any[]; statusDistribution: any[] }>;
   getRecentActivities(accountId?: string): Promise<ActivityItem[]>;
   addActivity(activity: Omit<ActivityItem, "id">): Promise<ActivityItem>;
 
@@ -105,6 +107,13 @@ export interface IStorage {
 
   getApiSettings(): Promise<ApiSettings | undefined>;
   deleteApiSettings(): Promise<boolean>;
+
+  getTeamMembers(accountId: string): Promise<TeamMember[]>;
+  addTeamMember(member: InsertTeamMember): Promise<TeamMember>;
+  removeTeamMember(id: string): Promise<boolean>;
+  getTeamMemberByEmail(email: string, accountId: string): Promise<TeamMember | undefined>;
+  getSharedAccountsForUser(userEmail: string): Promise<TeamMember[]>;
+  acceptTeamInvite(id: string, userId: string): Promise<TeamMember | undefined>;
 }
 
 export interface AnalyticsData {
@@ -288,6 +297,49 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  async getDashboardChartData(accountId: string): Promise<{ messageVolume: any[]; statusDistribution: any[] }> {
+    const allMessages = await db.select().from(messages).where(eq(messages.accountId, accountId));
+
+    const now = new Date();
+    const hourlyMap = new Map<string, { time: string; sent: number; delivered: number; read: number }>();
+    for (let i = 23; i >= 0; i--) {
+      const h = new Date(now);
+      h.setHours(now.getHours() - i, 0, 0, 0);
+      const label = h.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+      hourlyMap.set(label, { time: label, sent: 0, delivered: 0, read: 0 });
+    }
+
+    for (const msg of allMessages) {
+      const sentTime = msg.sentAt || msg.queuedAt;
+      if (!sentTime) continue;
+      const msgDate = new Date(sentTime);
+      const hoursDiff = (now.getTime() - msgDate.getTime()) / (1000 * 60 * 60);
+      if (hoursDiff > 24) continue;
+      const label = msgDate.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+      const bucket = hourlyMap.get(label);
+      if (bucket) {
+        bucket.sent++;
+        if (msg.status === "delivered" || msg.status === "read") bucket.delivered++;
+        if (msg.status === "read") bucket.read++;
+      }
+    }
+
+    const messageVolume = Array.from(hourlyMap.values());
+
+    const sentOnly = allMessages.filter(m => m.status === "sent").length;
+    const delivered = allMessages.filter(m => m.status === "delivered").length;
+    const read = allMessages.filter(m => m.status === "read").length;
+    const failed = allMessages.filter(m => m.status === "failed").length;
+    const statusDistribution = [
+      { name: "Delivered", value: delivered },
+      { name: "Read", value: read },
+      { name: "Sent", value: sentOnly },
+      { name: "Failed", value: failed },
+    ].filter(s => s.value > 0);
+
+    return { messageVolume, statusDistribution };
+  }
+
   async getRecentActivities(accountId?: string): Promise<ActivityItem[]> {
     if (accountId) {
       return db.select().from(activities).where(eq(activities.accountId, accountId)).orderBy(desc(activities.timestamp)).limit(20);
@@ -446,7 +498,16 @@ export class DatabaseStorage implements IStorage {
 
   // WhatsApp Accounts
   async getAccountsByUser(userId: string): Promise<WhatsAppAccount[]> {
-    return db.select().from(whatsappAccounts).where(eq(whatsappAccounts.userId, userId));
+    const ownAccounts = await db.select().from(whatsappAccounts).where(eq(whatsappAccounts.userId, userId));
+    const sharedMemberships = await db.select().from(teamMembers)
+      .where(and(eq(teamMembers.memberUserId, userId), eq(teamMembers.status, "active")));
+    const sharedAccountIds = sharedMemberships.map(m => m.accountId).filter(id => !ownAccounts.some(a => a.id === id));
+    const sharedAccounts: WhatsAppAccount[] = [];
+    for (const accId of sharedAccountIds) {
+      const acc = await this.getAccount(accId);
+      if (acc) sharedAccounts.push(acc);
+    }
+    return [...ownAccounts, ...sharedAccounts];
   }
 
   async getAccounts(): Promise<WhatsAppAccount[]> {
@@ -734,6 +795,40 @@ export class DatabaseStorage implements IStorage {
 
   async getContactsByAccount(accountId: string): Promise<Contact[]> {
     return this.getContacts(accountId);
+  }
+
+  async getTeamMembers(accountId: string): Promise<TeamMember[]> {
+    return db.select().from(teamMembers).where(eq(teamMembers.accountId, accountId));
+  }
+
+  async addTeamMember(member: InsertTeamMember): Promise<TeamMember> {
+    const rows = await db.insert(teamMembers).values(member).returning();
+    return rows[0];
+  }
+
+  async removeTeamMember(id: string): Promise<boolean> {
+    const result = await db.delete(teamMembers).where(eq(teamMembers.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async getTeamMemberByEmail(email: string, accountId: string): Promise<TeamMember | undefined> {
+    const rows = await db.select().from(teamMembers)
+      .where(and(eq(teamMembers.memberEmail, email), eq(teamMembers.accountId, accountId)));
+    return rows[0];
+  }
+
+  async getSharedAccountsForUser(userEmail: string): Promise<TeamMember[]> {
+    return db.select().from(teamMembers)
+      .where(and(eq(teamMembers.memberEmail, userEmail), eq(teamMembers.status, "active")));
+  }
+
+  async acceptTeamInvite(id: string, userId: string): Promise<TeamMember | undefined> {
+    const rows = await db.update(teamMembers).set({
+      memberUserId: userId,
+      status: "active",
+      acceptedAt: new Date(),
+    }).where(eq(teamMembers.id, id)).returning();
+    return rows[0];
   }
 }
 

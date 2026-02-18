@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Save, Eye, EyeOff, RefreshCw, CheckCircle, XCircle, AlertTriangle, ExternalLink, HelpCircle, ChevronDown, ChevronUp, Copy, Plus, Smartphone, Trash2, MessageSquare } from "lucide-react";
+import { Save, Eye, EyeOff, RefreshCw, CheckCircle, XCircle, AlertTriangle, ExternalLink, HelpCircle, ChevronDown, ChevronUp, Copy, Plus, Smartphone, Trash2, MessageSquare, Search } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -286,116 +286,13 @@ export default function Settings() {
 
       {/* Add WhatsApp Number Manually - show if no accounts or toggled */}
       {(accounts.length === 0 || showAddAccount) && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <Smartphone className="h-5 w-5 text-primary" />
-              <div>
-                <CardTitle className="text-base font-semibold">Add WhatsApp Number</CardTitle>
-                <CardDescription>
-                  Connect a WhatsApp Business number using your Meta API credentials
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="manual-phone-number-id">Phone Number ID</Label>
-              <Input
-                id="manual-phone-number-id"
-                value={manualAccount.phoneNumberId}
-                onChange={(e) => setManualAccount(prev => ({ ...prev, phoneNumberId: e.target.value }))}
-                placeholder="e.g., 123456789012345"
-                className="font-mono text-sm"
-                data-testid="input-manual-phone-number-id"
-              />
-              <p className="text-xs text-muted-foreground">
-                Find this in Meta Business Suite &gt; WhatsApp &gt; API Setup
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="manual-waba-id">WABA ID (Business Account ID)</Label>
-              <Input
-                id="manual-waba-id"
-                value={manualAccount.businessAccountId}
-                onChange={(e) => setManualAccount(prev => ({ ...prev, businessAccountId: e.target.value }))}
-                placeholder="e.g., 987654321098765"
-                className="font-mono text-sm"
-                data-testid="input-manual-waba-id"
-              />
-              <p className="text-xs text-muted-foreground">
-                WhatsApp Business Account ID from Meta Business Suite
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="manual-access-token">Permanent Access Token</Label>
-              <div className="relative">
-                <Input
-                  id="manual-access-token"
-                  type={showManualToken ? "text" : "password"}
-                  value={manualAccount.accessToken}
-                  onChange={(e) => setManualAccount(prev => ({ ...prev, accessToken: e.target.value }))}
-                  placeholder="Enter your permanent access token"
-                  className="pr-10 font-mono text-sm"
-                  data-testid="input-manual-access-token"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-0 top-0"
-                  onClick={() => setShowManualToken(!showManualToken)}
-                  data-testid="button-toggle-manual-token"
-                >
-                  {showManualToken ? (
-                    <EyeOff className="h-4 w-4 text-muted-foreground" />
-                  ) : (
-                    <Eye className="h-4 w-4 text-muted-foreground" />
-                  )}
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Generate a permanent System User token from Meta Business Settings
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="manual-name">Account Name (Optional)</Label>
-              <Input
-                id="manual-name"
-                value={manualAccount.name}
-                onChange={(e) => setManualAccount(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="e.g., My Business WhatsApp"
-                className="text-sm"
-                data-testid="input-manual-name"
-              />
-              <p className="text-xs text-muted-foreground">
-                A friendly name to identify this account
-              </p>
-            </div>
-
-            <Button
-              onClick={() => addManualAccountMutation.mutate(manualAccount)}
-              disabled={addManualAccountMutation.isPending || !manualAccount.phoneNumberId || !manualAccount.businessAccountId || !manualAccount.accessToken}
-              className="w-full"
-              data-testid="button-add-manual-account"
-            >
-            {addManualAccountMutation.isPending ? (
-              <>
-                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                Verifying & Connecting...
-              </>
-            ) : (
-              <>
-                <Plus className="h-4 w-4 mr-2" />
-                Add WhatsApp Number
-              </>
-            )}
-          </Button>
-          </CardContent>
-        </Card>
+        <AddNumberSection
+          manualAccount={manualAccount}
+          setManualAccount={setManualAccount}
+          showManualToken={showManualToken}
+          setShowManualToken={setShowManualToken}
+          addManualAccountMutation={addManualAccountMutation}
+        />
       )}
 
       {/* Connection Status */}
@@ -633,6 +530,9 @@ export default function Settings() {
         </CardContent>
       </Card>
 
+      {/* Team Members / Account Sharing */}
+      <TeamMembersSection />
+
       {/* Rate Limits */}
       <Card>
         <CardHeader>
@@ -670,6 +570,318 @@ export default function Settings() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function AddNumberSection({
+  manualAccount,
+  setManualAccount,
+  showManualToken,
+  setShowManualToken,
+  addManualAccountMutation,
+}: {
+  manualAccount: { phoneNumberId: string; businessAccountId: string; accessToken: string; name: string };
+  setManualAccount: (fn: (prev: any) => any) => void;
+  showManualToken: boolean;
+  setShowManualToken: (v: boolean) => void;
+  addManualAccountMutation: any;
+}) {
+  const [detectedNumbers, setDetectedNumbers] = useState<any[]>([]);
+  const [detectLoading, setDetectLoading] = useState(false);
+  const { toast } = useToast();
+
+  const handleDetectNumbers = async () => {
+    if (!manualAccount.businessAccountId || !manualAccount.accessToken) {
+      toast({ title: "Missing info", description: "Enter your WABA ID and Access Token first, then click Detect.", variant: "destructive" });
+      return;
+    }
+    setDetectLoading(true);
+    try {
+      const res = await apiRequest("POST", "/api/whatsapp-accounts/detect-numbers", {
+        businessAccountId: manualAccount.businessAccountId,
+        accessToken: manualAccount.accessToken,
+      });
+      const data = await res.json();
+      setDetectedNumbers(data.phoneNumbers || []);
+      if ((data.phoneNumbers || []).length === 0) {
+        toast({ title: "No numbers found", description: "No phone numbers were found for this WABA. Check your credentials." });
+      } else {
+        toast({ title: `Found ${data.phoneNumbers.length} number(s)`, description: "Select a number below to auto-fill." });
+      }
+    } catch (err: any) {
+      toast({ title: "Detection failed", description: "Could not fetch numbers. Check your WABA ID and token.", variant: "destructive" });
+    } finally {
+      setDetectLoading(false);
+    }
+  };
+
+  const selectNumber = (pn: any) => {
+    setManualAccount((prev: any) => ({
+      ...prev,
+      phoneNumberId: pn.id,
+      name: pn.verifiedName || prev.name || "",
+    }));
+    toast({ title: "Number selected", description: `${pn.displayPhoneNumber} (${pn.verifiedName || "Unknown"}) selected.` });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-3">
+          <Smartphone className="h-5 w-5 text-primary" />
+          <div>
+            <CardTitle className="text-base font-semibold">Add WhatsApp Number</CardTitle>
+            <CardDescription>
+              Enter your WABA ID and Access Token to auto-detect numbers, or fill in all fields manually
+            </CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="manual-waba-id">WABA ID (Business Account ID)</Label>
+          <Input
+            id="manual-waba-id"
+            value={manualAccount.businessAccountId}
+            onChange={(e) => setManualAccount((prev: any) => ({ ...prev, businessAccountId: e.target.value }))}
+            placeholder="e.g., 987654321098765"
+            className="font-mono text-sm"
+            data-testid="input-manual-waba-id"
+          />
+          <p className="text-xs text-muted-foreground">
+            WhatsApp Business Account ID from Meta Business Suite
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="manual-access-token">Permanent Access Token</Label>
+          <div className="relative">
+            <Input
+              id="manual-access-token"
+              type={showManualToken ? "text" : "password"}
+              value={manualAccount.accessToken}
+              onChange={(e) => setManualAccount((prev: any) => ({ ...prev, accessToken: e.target.value }))}
+              placeholder="Enter your permanent access token"
+              className="pr-10 font-mono text-sm"
+              data-testid="input-manual-access-token"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="absolute right-0 top-0"
+              onClick={() => setShowManualToken(!showManualToken)}
+              data-testid="button-toggle-manual-token"
+            >
+              {showManualToken ? (
+                <EyeOff className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <Eye className="h-4 w-4 text-muted-foreground" />
+              )}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Generate a permanent System User token from Meta Business Settings
+          </p>
+        </div>
+
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={handleDetectNumbers}
+          disabled={detectLoading || !manualAccount.businessAccountId || !manualAccount.accessToken}
+          data-testid="button-detect-numbers"
+        >
+          {detectLoading ? (
+            <>
+              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+              Detecting Numbers...
+            </>
+          ) : (
+            <>
+              <Search className="h-4 w-4 mr-2" />
+              Detect Phone Numbers
+            </>
+          )}
+        </Button>
+
+        {detectedNumbers.length > 0 && (
+          <div className="space-y-2 p-3 rounded-lg border bg-muted/30">
+            <p className="text-sm font-medium">Detected Numbers</p>
+            {detectedNumbers.map((pn: any) => (
+              <button
+                key={pn.id}
+                onClick={() => selectNumber(pn)}
+                className={`w-full text-left p-2 rounded-md border transition-colors ${
+                  manualAccount.phoneNumberId === pn.id ? "border-primary bg-primary/5" : "hover-elevate"
+                }`}
+                data-testid={`detected-number-${pn.id}`}
+              >
+                <p className="text-sm font-medium">{pn.displayPhoneNumber}</p>
+                <p className="text-xs text-muted-foreground">{pn.verifiedName} · ID: {pn.id}</p>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <Separator />
+
+        <div className="space-y-2">
+          <Label htmlFor="manual-phone-number-id">Phone Number ID</Label>
+          <Input
+            id="manual-phone-number-id"
+            value={manualAccount.phoneNumberId}
+            onChange={(e) => setManualAccount((prev: any) => ({ ...prev, phoneNumberId: e.target.value }))}
+            placeholder="e.g., 123456789012345 (auto-filled if detected above)"
+            className="font-mono text-sm"
+            data-testid="input-manual-phone-number-id"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="manual-name">Account Name (Optional)</Label>
+          <Input
+            id="manual-name"
+            value={manualAccount.name}
+            onChange={(e) => setManualAccount((prev: any) => ({ ...prev, name: e.target.value }))}
+            placeholder="e.g., My Business WhatsApp"
+            className="text-sm"
+            data-testid="input-manual-name"
+          />
+        </div>
+
+        <Button
+          onClick={() => addManualAccountMutation.mutate(manualAccount)}
+          disabled={addManualAccountMutation.isPending || !manualAccount.phoneNumberId || !manualAccount.businessAccountId || !manualAccount.accessToken}
+          className="w-full"
+          data-testid="button-add-manual-account"
+        >
+          {addManualAccountMutation.isPending ? (
+            <>
+              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+              Verifying & Connecting...
+            </>
+          ) : (
+            <>
+              <Plus className="h-4 w-4 mr-2" />
+              Add WhatsApp Number
+            </>
+          )}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TeamMembersSection() {
+  const [inviteEmail, setInviteEmail] = useState("");
+  const { toast } = useToast();
+
+  const { data: members = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/team-members"],
+  });
+
+  const addMemberMutation = useMutation({
+    mutationFn: async (email: string) => {
+      return apiRequest("POST", "/api/team-members", { email, role: "member" });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/team-members"] });
+      setInviteEmail("");
+      toast({ title: "Team member invited", description: "They can now access your account when they log in." });
+    },
+    onError: (err: any) => {
+      let msg = "Failed to add team member";
+      try { msg = JSON.parse(err.message)?.error || msg; } catch {}
+      toast({ title: "Error", description: msg, variant: "destructive" });
+    },
+  });
+
+  const removeMemberMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("DELETE", `/api/team-members/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/team-members"] });
+      toast({ title: "Team member removed" });
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base font-semibold">Team Members</CardTitle>
+        <CardDescription>
+          Share access to your account with team members by entering their email address. They will get full access to this WhatsApp account when they log in.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-4">
+          <div className="flex gap-2">
+            <Input
+              placeholder="Enter team member's email"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              type="email"
+              data-testid="input-team-email"
+            />
+            <Button
+              onClick={() => {
+                if (inviteEmail.trim()) addMemberMutation.mutate(inviteEmail.trim());
+              }}
+              disabled={!inviteEmail.trim() || addMemberMutation.isPending}
+              data-testid="button-add-team-member"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add
+            </Button>
+          </div>
+
+          {isLoading ? (
+            <Skeleton className="h-12 w-full" />
+          ) : members.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              No team members added yet. Add members by email to share access to your account.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {members.map((member: any) => (
+                <div
+                  key={member.id}
+                  className="flex items-center justify-between p-3 rounded-lg border"
+                  data-testid={`team-member-${member.id}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-medium">
+                      {member.memberEmail?.charAt(0).toUpperCase() || "?"}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">{member.memberEmail}</p>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary" className="text-xs">
+                          {member.role || "member"}
+                        </Badge>
+                        <Badge variant={member.status === "active" ? "default" : "secondary"} className="text-xs">
+                          {member.status === "active" ? "Active" : "Pending"}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => removeMemberMutation.mutate(member.id)}
+                    data-testid={`button-remove-member-${member.id}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

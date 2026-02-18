@@ -434,6 +434,38 @@ export async function uploadMedia(
   });
 }
 
+export async function getPhoneNumberAnalytics(
+  phoneNumberId: string,
+  accessToken: string
+): Promise<MetaApiResponse> {
+  const fields = "quality_rating,messaging_limit_tier,verified_name,display_phone_number,status";
+  return metaApiRequest(
+    `${META_API_BASE}/${phoneNumberId}?fields=${fields}&access_token=${accessToken}`
+  );
+}
+
+export async function getWabaAnalytics(
+  wabaId: string,
+  accessToken: string,
+  startTimestamp: number,
+  endTimestamp: number
+): Promise<MetaApiResponse> {
+  const granularity = "DAY";
+  const url = `${META_API_BASE}/${wabaId}?fields=analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${granularity})&access_token=${accessToken}`;
+  return metaApiRequest(url);
+}
+
+export async function getConversationAnalytics(
+  wabaId: string,
+  accessToken: string,
+  startTimestamp: number,
+  endTimestamp: number
+): Promise<MetaApiResponse> {
+  const granularity = "DAILY";
+  const url = `${META_API_BASE}/${wabaId}?fields=conversation_analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${granularity}).conversation_type(FREE_ENTRY,FREE_TIER,REGULAR)&access_token=${accessToken}`;
+  return metaApiRequest(url);
+}
+
 const whatsappApi = {
   testConnection,
   createTemplate,
@@ -444,6 +476,9 @@ const whatsappApi = {
   uploadMedia,
   uploadSessionMedia,
   subscribeAppToWaba,
+  getPhoneNumberAnalytics,
+  getWabaAnalytics,
+  getConversationAnalytics,
 };
 
 export async function subscribeAppToWaba(

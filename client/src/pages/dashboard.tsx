@@ -24,28 +24,16 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  BarChart,
-  Bar,
-  Cell,
   PieChart,
   Pie,
+  Cell,
 } from "recharts";
 
-// Mock data for charts
-const messageData = [
-  { time: "00:00", sent: 120, delivered: 115, read: 80 },
-  { time: "04:00", sent: 80, delivered: 75, read: 50 },
-  { time: "08:00", sent: 250, delivered: 240, read: 180 },
-  { time: "12:00", sent: 320, delivered: 310, read: 250 },
-  { time: "16:00", sent: 280, delivered: 270, read: 200 },
-  { time: "20:00", sent: 180, delivered: 175, read: 140 },
-];
-
-const statusDistribution = [
-  { name: "Delivered", value: 3200, color: "hsl(var(--chart-1))" },
-  { name: "Read", value: 2100, color: "hsl(var(--chart-2))" },
-  { name: "Sent", value: 450, color: "hsl(var(--chart-4))" },
-  { name: "Failed", value: 120, color: "hsl(var(--chart-5))" },
+const CHART_COLORS = [
+  "hsl(var(--chart-1))",
+  "hsl(var(--chart-2))",
+  "hsl(var(--chart-4))",
+  "hsl(var(--chart-5))",
 ];
 
 export default function Dashboard() {
@@ -53,11 +41,15 @@ export default function Dashboard() {
     queryKey: ["/api/dashboard/metrics"],
   });
 
-  const { data: activities = [], isLoading: activitiesLoading } = useQuery<ActivityItem[]>({
+  const { data: chartData } = useQuery<{ messageVolume: any[]; statusDistribution: any[] }>({
+    queryKey: ["/api/dashboard/chart-data"],
+  });
+
+  const { data: activities = [] } = useQuery<ActivityItem[]>({
     queryKey: ["/api/dashboard/activities"],
   });
 
-  const { data: campaigns = [], isLoading: campaignsLoading } = useQuery<Campaign[]>({
+  const { data: campaigns = [] } = useQuery<Campaign[]>({
     queryKey: ["/api/campaigns"],
   });
 
@@ -68,28 +60,38 @@ export default function Dashboard() {
   }
 
   const dashboardMetrics: DashboardMetrics = metrics || {
-    totalMessages: 5870,
-    sentCount: 5750,
-    deliveredCount: 5200,
-    readCount: 3100,
-    failedCount: 120,
-    deliveryRate: 90.4,
-    readRate: 59.6,
-    totalCost: 234.50,
-    activeCampaigns: 3,
-    approvedTemplates: 12,
-    pendingTemplates: 2,
-    messagingLimit: 100000,
-    messagingUsed: 5870,
-    qualityRating: "GREEN",
-    apiStatus: "connected",
+    totalMessages: 0,
+    sentCount: 0,
+    deliveredCount: 0,
+    readCount: 0,
+    failedCount: 0,
+    deliveryRate: 0,
+    readRate: 0,
+    totalCost: 0,
+    activeCampaigns: 0,
+    approvedTemplates: 0,
+    pendingTemplates: 0,
+    messagingLimit: 0,
+    messagingUsed: 0,
+    qualityRating: "UNKNOWN",
+    apiStatus: "disconnected",
   };
+
+  const messageVolume = chartData?.messageVolume || [];
+  const statusDist = (chartData?.statusDistribution || []).map((s: any, i: number) => ({
+    ...s,
+    color: CHART_COLORS[i % CHART_COLORS.length],
+  }));
+
+  const limitPercent = dashboardMetrics.messagingLimit > 0
+    ? (dashboardMetrics.messagingUsed / dashboardMetrics.messagingLimit) * 100
+    : 0;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-dashboard-title">Dashboard</h1>
           <p className="text-sm text-muted-foreground">
             Real-time overview of your messaging performance
           </p>
@@ -100,14 +102,12 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Primary Metrics */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           title="Messages Sent"
           value={dashboardMetrics.sentCount}
           icon={Send}
           isLive
-          trend={{ value: 12.5, label: "vs last week" }}
         />
         <MetricCard
           title="Delivered"
@@ -129,7 +129,6 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Secondary Metrics */}
       <div className="grid gap-4 md:grid-cols-3">
         <MetricCard
           title="Active Campaigns"
@@ -147,137 +146,147 @@ export default function Dashboard() {
           value={`$${dashboardMetrics.totalCost.toFixed(2)}`}
           subtitle="This billing period"
           icon={DollarSign}
-          trend={{ value: -5.2, label: "vs last period" }}
         />
       </div>
 
-      {/* Charts Row */}
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Message Volume Chart */}
         <Card className="lg:col-span-2">
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-semibold">Message Volume</CardTitle>
             <p className="text-xs text-muted-foreground">Last 24 hours</p>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={messageData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="sentGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(var(--chart-2))" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="hsl(var(--chart-2))" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="deliveredGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(var(--chart-1))" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="hsl(var(--chart-1))" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
-                  <XAxis 
-                    dataKey="time" 
-                    tick={{ fontSize: 12 }} 
-                    className="text-muted-foreground"
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis 
-                    tick={{ fontSize: 12 }} 
-                    className="text-muted-foreground"
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: "hsl(var(--popover))",
-                      borderColor: "hsl(var(--border))",
-                      borderRadius: "var(--radius)",
-                      fontSize: 12
-                    }}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="sent"
-                    stroke="hsl(var(--chart-2))"
-                    fill="url(#sentGradient)"
-                    strokeWidth={2}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="delivered"
-                    stroke="hsl(var(--chart-1))"
-                    fill="url(#deliveredGradient)"
-                    strokeWidth={2}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="flex items-center justify-center gap-6 pt-2">
-              <div className="flex items-center gap-2">
-                <div className="h-3 w-3 rounded-full" style={{ backgroundColor: "hsl(var(--chart-2))" }} />
-                <span className="text-xs text-muted-foreground">Sent</span>
+            {messageVolume.length > 0 ? (
+              <>
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={messageVolume} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="sentGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="hsl(var(--chart-2))" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="hsl(var(--chart-2))" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="deliveredGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="hsl(var(--chart-1))" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="hsl(var(--chart-1))" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
+                      <XAxis 
+                        dataKey="time" 
+                        tick={{ fontSize: 12 }} 
+                        className="text-muted-foreground"
+                        tickLine={false}
+                        axisLine={false}
+                      />
+                      <YAxis 
+                        tick={{ fontSize: 12 }} 
+                        className="text-muted-foreground"
+                        tickLine={false}
+                        axisLine={false}
+                      />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: "hsl(var(--popover))",
+                          borderColor: "hsl(var(--border))",
+                          borderRadius: "var(--radius)",
+                          fontSize: 12
+                        }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="sent"
+                        stroke="hsl(var(--chart-2))"
+                        fill="url(#sentGradient)"
+                        strokeWidth={2}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="delivered"
+                        stroke="hsl(var(--chart-1))"
+                        fill="url(#deliveredGradient)"
+                        strokeWidth={2}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="flex items-center justify-center gap-6 pt-2">
+                  <div className="flex items-center gap-2">
+                    <div className="h-3 w-3 rounded-full" style={{ backgroundColor: "hsl(var(--chart-2))" }} />
+                    <span className="text-xs text-muted-foreground">Sent</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="h-3 w-3 rounded-full" style={{ backgroundColor: "hsl(var(--chart-1))" }} />
+                    <span className="text-xs text-muted-foreground">Delivered</span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="h-80 flex items-center justify-center">
+                <p className="text-sm text-muted-foreground">No message data in the last 24 hours</p>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="h-3 w-3 rounded-full" style={{ backgroundColor: "hsl(var(--chart-1))" }} />
-                <span className="text-xs text-muted-foreground">Delivered</span>
-              </div>
-            </div>
+            )}
           </CardContent>
         </Card>
 
-        {/* Status Distribution */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-semibold">Status Distribution</CardTitle>
-            <p className="text-xs text-muted-foreground">Current period</p>
+            <p className="text-xs text-muted-foreground">All messages</p>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className="h-52 flex items-center justify-center">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={statusDistribution}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={80}
-                    paddingAngle={2}
-                    dataKey="value"
-                  >
-                    {statusDistribution.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: "hsl(var(--popover))",
-                      borderColor: "hsl(var(--border))",
-                      borderRadius: "var(--radius)",
-                      fontSize: 12
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="grid grid-cols-2 gap-2 pt-2">
-              {statusDistribution.map((item) => (
-                <div key={item.name} className="flex items-center gap-2">
-                  <div 
-                    className="h-2.5 w-2.5 rounded-full shrink-0" 
-                    style={{ backgroundColor: item.color }} 
-                  />
-                  <span className="text-xs text-muted-foreground truncate">{item.name}</span>
-                  <span className="text-xs font-medium ml-auto tabular-nums">{item.value.toLocaleString()}</span>
+            {statusDist.length > 0 ? (
+              <>
+                <div className="h-52 flex items-center justify-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={statusDist}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={80}
+                        paddingAngle={2}
+                        dataKey="value"
+                      >
+                        {statusDist.map((entry: any, index: number) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: "hsl(var(--popover))",
+                          borderColor: "hsl(var(--border))",
+                          borderRadius: "var(--radius)",
+                          fontSize: 12
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
                 </div>
-              ))}
-            </div>
+                <div className="grid grid-cols-2 gap-2 pt-2">
+                  {statusDist.map((item: any) => (
+                    <div key={item.name} className="flex items-center gap-2">
+                      <div 
+                        className="h-2.5 w-2.5 rounded-full shrink-0" 
+                        style={{ backgroundColor: item.color }} 
+                      />
+                      <span className="text-xs text-muted-foreground truncate">{item.name}</span>
+                      <span className="text-xs font-medium ml-auto tabular-nums">{item.value.toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="h-52 flex items-center justify-center">
+                <p className="text-sm text-muted-foreground">No messages yet</p>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
 
-      {/* Bottom Row */}
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Active Campaigns */}
         <Card className="lg:col-span-2">
           <CardHeader className="pb-3">
             <CardTitle className="text-base font-semibold">Active Campaigns</CardTitle>
@@ -289,50 +298,52 @@ export default function Dashboard() {
               </div>
             ) : (
               <div className="space-y-4">
-                {activeCampaigns.slice(0, 3).map((campaign) => (
-                  <div 
-                    key={campaign.id}
-                    className="flex items-center gap-4 p-4 rounded-lg border bg-card"
-                    data-testid={`campaign-card-${campaign.id}`}
-                  >
-                    <ProgressRing progress={65} size={60} strokeWidth={6} showLabel={false} />
-                    <div className="flex-1 min-w-0 space-y-1">
-                      <p className="text-sm font-medium truncate">{campaign.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Template: {campaign.templateId}
-                      </p>
+                {activeCampaigns.slice(0, 3).map((campaign) => {
+                  const total = campaign.recipients?.length || 0;
+                  const progress = 0;
+                  return (
+                    <div 
+                      key={campaign.id}
+                      className="flex items-center gap-4 p-4 rounded-lg border bg-card"
+                      data-testid={`campaign-card-${campaign.id}`}
+                    >
+                      <ProgressRing progress={progress} size={60} strokeWidth={6} showLabel={false} />
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <p className="text-sm font-medium truncate">{campaign.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Template: {campaign.templateId}
+                        </p>
+                      </div>
+                      <div className="text-right space-y-1">
+                        <StatusBadge status="running" type="campaign" size="sm" />
+                        <p className="text-xs text-muted-foreground tabular-nums">
+                          {total.toLocaleString()} recipients
+                        </p>
+                      </div>
                     </div>
-                    <div className="text-right space-y-1">
-                      <StatusBadge status="running" type="campaign" size="sm" />
-                      <p className="text-xs text-muted-foreground tabular-nums">
-                        2,450 / 3,800
-                      </p>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Activity Feed */}
         <ActivityFeed 
-          activities={activities.length > 0 ? activities : mockActivities}
+          activities={activities}
           maxHeight="h-72"
         />
       </div>
 
-      {/* Messaging Limits */}
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <CardTitle className="text-base font-semibold">Messaging Limits</CardTitle>
-            <span className="text-xs text-muted-foreground">Resets in 18h 24m</span>
+            <span className="text-xs text-muted-foreground">Synced from Meta API</span>
           </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            <div className="flex items-center justify-between text-sm">
+            <div className="flex items-center justify-between text-sm flex-wrap gap-1">
               <span className="text-muted-foreground">24-hour messaging limit</span>
               <span className="font-medium tabular-nums">
                 {dashboardMetrics.messagingUsed.toLocaleString()} / {dashboardMetrics.messagingLimit.toLocaleString()}
@@ -341,11 +352,11 @@ export default function Dashboard() {
             <div className="h-2 rounded-full bg-muted overflow-hidden">
               <div 
                 className="h-full bg-primary transition-all duration-500"
-                style={{ width: `${(dashboardMetrics.messagingUsed / dashboardMetrics.messagingLimit) * 100}%` }}
+                style={{ width: `${Math.min(limitPercent, 100)}%` }}
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              {((dashboardMetrics.messagingUsed / dashboardMetrics.messagingLimit) * 100).toFixed(1)}% of daily limit used
+              {limitPercent.toFixed(1)}% of daily limit used
             </p>
           </div>
         </CardContent>
@@ -353,45 +364,6 @@ export default function Dashboard() {
     </div>
   );
 }
-
-// Mock activities for demo
-const mockActivities: ActivityItem[] = [
-  {
-    id: "1",
-    type: "message_delivered",
-    title: "Message Delivered",
-    description: "Summer Sale campaign - +1234567890",
-    timestamp: new Date(Date.now() - 2 * 60 * 1000),
-  },
-  {
-    id: "2",
-    type: "template_approved",
-    title: "Template Approved",
-    description: "order_confirmation template is now active",
-    timestamp: new Date(Date.now() - 15 * 60 * 1000),
-  },
-  {
-    id: "3",
-    type: "campaign_started",
-    title: "Campaign Started",
-    description: "Holiday Special - 3,800 recipients",
-    timestamp: new Date(Date.now() - 45 * 60 * 1000),
-  },
-  {
-    id: "4",
-    type: "message_failed",
-    title: "Message Failed",
-    description: "Invalid phone number - +9876543210",
-    timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000),
-  },
-  {
-    id: "5",
-    type: "message_read",
-    title: "Message Read",
-    description: "Welcome series - +1122334455",
-    timestamp: new Date(Date.now() - 3 * 60 * 60 * 1000),
-  },
-];
 
 function DashboardSkeleton() {
   return (

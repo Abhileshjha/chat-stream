@@ -57,11 +57,13 @@ import { useToast } from "@/hooks/use-toast";
 import type { Conversation, ConversationMessage, Template, Contact } from "@shared/schema";
 
 type FilterTab = "all" | "active" | "closed";
+type InboxView = "replied" | "all";
 
 export default function Inbox() {
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterTab, setFilterTab] = useState<FilterTab>("all");
+  const [inboxView, setInboxView] = useState<InboxView>("replied");
   const [newMessage, setNewMessage] = useState("");
   const [showContactPanel, setShowContactPanel] = useState(true);
   const [contactNotes, setContactNotes] = useState("");
@@ -70,27 +72,16 @@ export default function Inbox() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
-  const [hasBackfilled, setHasBackfilled] = useState(false);
-
   const { data: conversations = [], isLoading } = useQuery<Conversation[]>({
-    queryKey: ["/api/conversations"],
+    queryKey: ["/api/conversations", { filter: inboxView === "replied" ? "replied" : undefined }],
+    queryFn: async () => {
+      const url = inboxView === "replied" ? "/api/conversations?filter=replied" : "/api/conversations";
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch");
+      return res.json();
+    },
     refetchInterval: 10000,
   });
-
-  const backfillMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/conversations/backfill"),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
-      setHasBackfilled(true);
-    },
-    onError: () => {},
-  });
-
-  useEffect(() => {
-    if (!isLoading && conversations.length === 0 && !hasBackfilled && !backfillMutation.isPending) {
-      backfillMutation.mutate();
-    }
-  }, [isLoading, conversations.length, hasBackfilled, backfillMutation.isPending]);
 
   const { data: messages = [] } = useQuery<ConversationMessage[]>({
     queryKey: ["/api/conversations", selectedConversation, "messages"],
@@ -279,6 +270,15 @@ export default function Inbox() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Select value={inboxView} onValueChange={(v) => setInboxView(v as InboxView)}>
+            <SelectTrigger className="w-[160px]" data-testid="select-inbox-view">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="replied" data-testid="option-replied-only">Replied Only</SelectItem>
+              <SelectItem value="all" data-testid="option-all-conversations">All Conversations</SelectItem>
+            </SelectContent>
+          </Select>
           <Button
             variant="outline"
             size="icon"
