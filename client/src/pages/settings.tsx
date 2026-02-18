@@ -71,11 +71,13 @@ export default function Settings() {
 
   const testMutation = useMutation({
     mutationFn: async () => {
-      // Test connection with the active account
+      let res;
       if (activeAccount) {
-        return apiRequest("POST", `/api/whatsapp-accounts/${activeAccount.id}/test`);
+        res = await apiRequest("POST", `/api/whatsapp-accounts/${activeAccount.id}/test`);
+      } else {
+        res = await apiRequest("POST", "/api/settings/test");
       }
-      return apiRequest("POST", "/api/settings/test");
+      return await res.json();
     },
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/accounts"] });

@@ -1427,7 +1427,7 @@ export async function registerRoutes(
       }
 
       // Test the connection by making a simple API call to Meta
-      const apiUrl = `https://graph.facebook.com/v18.0/${account.phoneNumberId}?access_token=${account.accessToken}`;
+      const apiUrl = `https://graph.facebook.com/v21.0/${account.phoneNumberId}?access_token=${account.accessToken}`;
       console.log("Testing Meta API with phoneNumberId:", account.phoneNumberId);
       
       const response = await fetch(apiUrl);
