@@ -110,6 +110,10 @@ The platform supports multiple WhatsApp Business numbers with account switching:
 - Inbox defaults to showing only conversations with customer replies (filter=replied), with toggle for All Conversations
 - Added team member/account sharing system: invite by email, auto-accept on login, shared accounts appear in account switcher
 - Simplified number registration: "Detect Phone Numbers" auto-discovers numbers from WABA ID + Access Token before manual entry
+- Analytics: Failed stat is clickable, shows dialog with all failed message phone numbers, error codes, and CSV download
+- Notification Report page: `/notifications/:id/report` with full delivery breakdown charts, message-level detail table with status filtering, and CSV export
+- Template media auto-reuse: Notification editor auto-uses image/video/document from template components, no re-upload needed
+- Inbox Active/Closed tabs properly handle null conversation statuses (default to "open")
 
 ### Development vs Production
 
