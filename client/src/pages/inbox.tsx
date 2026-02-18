@@ -57,13 +57,11 @@ import { useToast } from "@/hooks/use-toast";
 import type { Conversation, ConversationMessage, Template, Contact } from "@shared/schema";
 
 type FilterTab = "all" | "active" | "closed";
-type InboxView = "replied" | "all";
 
 export default function Inbox() {
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterTab, setFilterTab] = useState<FilterTab>("all");
-  const [inboxView, setInboxView] = useState<InboxView>("replied");
   const [newMessage, setNewMessage] = useState("");
   const [showContactPanel, setShowContactPanel] = useState(true);
   const [contactNotes, setContactNotes] = useState("");
@@ -72,16 +70,28 @@ export default function Inbox() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
-  const { data: conversations = [], isLoading } = useQuery<Conversation[]>({
-    queryKey: ["/api/conversations", { filter: inboxView === "replied" ? "replied" : undefined }],
+  const { data: allConversations = [], isLoading } = useQuery<Conversation[]>({
+    queryKey: ["/api/conversations"],
     queryFn: async () => {
-      const url = inboxView === "replied" ? "/api/conversations?filter=replied" : "/api/conversations";
-      const res = await fetch(url, { credentials: "include" });
+      const res = await fetch("/api/conversations", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
     },
     refetchInterval: 10000,
   });
+
+  const { data: repliedConversations = [] } = useQuery<Conversation[]>({
+    queryKey: ["/api/conversations", { filter: "replied" }],
+    queryFn: async () => {
+      const res = await fetch("/api/conversations?filter=replied", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch");
+      return res.json();
+    },
+    refetchInterval: 10000,
+  });
+
+  const repliedIds = new Set(repliedConversations.map(c => c.id));
+  const conversations = filterTab === "active" ? repliedConversations : allConversations;
 
   const { data: messages = [] } = useQuery<ConversationMessage[]>({
     queryKey: ["/api/conversations", selectedConversation, "messages"],
@@ -175,9 +185,8 @@ export default function Inbox() {
         c.contactPhone.includes(searchQuery) || 
         (c.contactName?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false);
       
-      const status = c.status || "open";
-      if (filterTab === "active") return matchesSearch && status !== "closed";
-      if (filterTab === "closed") return matchesSearch && status === "closed";
+      if (filterTab === "closed") return matchesSearch && c.status === "closed";
+      if (filterTab === "active") return matchesSearch && c.status !== "closed";
       return matchesSearch;
     });
 
@@ -257,9 +266,9 @@ export default function Inbox() {
     }
   };
 
-  const totalUnread = conversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0);
-  const activeCount = conversations.filter(c => (c.status || "open") !== "closed").length;
-  const closedCount = conversations.filter(c => c.status === "closed").length;
+  const totalUnread = allConversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0);
+  const activeCount = repliedConversations.filter(c => c.status !== "closed").length;
+  const closedCount = allConversations.filter(c => c.status === "closed").length;
 
   return (
     <div className="h-[calc(100vh-7rem)] flex flex-col">
@@ -267,19 +276,10 @@ export default function Inbox() {
         <div>
           <h1 className="text-2xl font-semibold" data-testid="text-page-title">Inbox</h1>
           <p className="text-sm text-muted-foreground">
-            {totalUnread > 0 ? `${totalUnread} unread` : "All caught up"} · {conversations.length} conversations
+            {totalUnread > 0 ? `${totalUnread} unread` : "All caught up"} · {allConversations.length} conversations
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Select value={inboxView} onValueChange={(v) => setInboxView(v as InboxView)}>
-            <SelectTrigger className="w-[160px]" data-testid="select-inbox-view">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="replied" data-testid="option-replied-only">Replied Only</SelectItem>
-              <SelectItem value="all" data-testid="option-all-conversations">All Conversations</SelectItem>
-            </SelectContent>
-          </Select>
           <Button
             variant="outline"
             size="icon"
