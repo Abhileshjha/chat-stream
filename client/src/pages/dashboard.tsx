@@ -1,4 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import { 
   Send, 
   CheckCircle, 
@@ -11,6 +13,7 @@ import {
   Signal,
   Shield,
   Clock,
+  RefreshCw,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +47,8 @@ const CHART_COLORS = [
 ];
 
 export default function Dashboard() {
+  const { toast } = useToast();
+
   const { data: metrics, isLoading: metricsLoading } = useQuery<DashboardMetrics>({
     queryKey: ["/api/dashboard/metrics"],
   });
@@ -58,6 +63,39 @@ export default function Dashboard() {
 
   const { data: campaigns = [] } = useQuery<Campaign[]>({
     queryKey: ["/api/campaigns"],
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/dashboard/sync");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/chart-data"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/activities"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/templates"] });
+
+      const warnings = data.syncResults?.errors?.length || 0;
+      if (warnings > 0) {
+        toast({
+          title: "Synced with warnings",
+          description: `Data synced from Meta API. ${warnings} item(s) could not be fetched.`,
+        });
+      } else {
+        toast({
+          title: "Sync complete",
+          description: "Dashboard data refreshed from Meta API.",
+        });
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Sync failed",
+        description: error.message || "Could not sync with Meta API. Check your account settings.",
+        variant: "destructive",
+      });
+    },
   });
 
   const activeCampaigns = campaigns.filter(c => c.status === "running");
@@ -82,6 +120,7 @@ export default function Dashboard() {
     messagingUsed: 0,
     qualityRating: "UNKNOWN",
     apiStatus: "disconnected",
+    lastSyncedAt: null,
   };
 
   const messageVolume = chartData?.messageVolume || [];
@@ -110,6 +149,22 @@ export default function Dashboard() {
           <p className="text-sm text-muted-foreground">
             Monitor your messaging performance in real time
           </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {dashboardMetrics.lastSyncedAt && (
+            <span className="text-xs text-muted-foreground" data-testid="text-last-synced">
+              Last synced {formatDistanceToNow(new Date(dashboardMetrics.lastSyncedAt), { addSuffix: true })}
+            </span>
+          )}
+          <Button
+            variant="outline"
+            onClick={() => syncMutation.mutate()}
+            disabled={syncMutation.isPending}
+            data-testid="button-sync-dashboard"
+          >
+            <RefreshCw className={cn("h-4 w-4 mr-2", syncMutation.isPending && "animate-spin")} />
+            {syncMutation.isPending ? "Syncing..." : "Sync with Meta"}
+          </Button>
         </div>
       </div>
 

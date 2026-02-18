@@ -270,17 +270,27 @@ export class DatabaseStorage implements IStorage {
       ? await db.select().from(whatsappAccounts).where(eq(whatsappAccounts.id, accountId))
       : await db.select().from(whatsappAccounts);
 
-    const sentCount = allMessages.filter(m => m.status === "sent" || m.status === "delivered" || m.status === "read").length;
-    const deliveredCount = allMessages.filter(m => m.status === "delivered" || m.status === "read").length;
+    const localSent = allMessages.filter(m => m.status === "sent" || m.status === "delivered" || m.status === "read").length;
+    const localDelivered = allMessages.filter(m => m.status === "delivered" || m.status === "read").length;
     const readCount = allMessages.filter(m => m.status === "read").length;
     const failedCount = allMessages.filter(m => m.status === "failed").length;
-    const totalCost = allMessages.reduce((sum, m) => sum + parseFloat(m.cost || "0"), 0);
+    const localCost = allMessages.reduce((sum, m) => sum + parseFloat(m.cost || "0"), 0);
+
+    const metaSent = allAccounts.reduce((sum, a) => sum + (a.metaSentCount || 0), 0);
+    const metaDelivered = allAccounts.reduce((sum, a) => sum + (a.metaDeliveredCount || 0), 0);
+    const metaCost = allAccounts.reduce((sum, a) => sum + parseFloat(a.metaTotalCost || "0"), 0);
+
+    const sentCount = Math.max(localSent, metaSent);
+    const deliveredCount = Math.max(localDelivered, metaDelivered);
+    const totalCost = Math.max(localCost, metaCost);
 
     const totalMessagingLimit = allAccounts.reduce((sum, a) => sum + (a.messagingLimit || 0), 0);
     const totalMessagingUsed = allAccounts.reduce((sum, a) => sum + (a.messagingUsed || 0), 0);
 
+    const lastSync = allAccounts[0]?.lastSyncedAt;
+
     return {
-      totalMessages: allMessages.length,
+      totalMessages: Math.max(allMessages.length, sentCount),
       sentCount,
       deliveredCount,
       readCount,
@@ -295,6 +305,7 @@ export class DatabaseStorage implements IStorage {
       messagingUsed: totalMessagingUsed || allMessages.length,
       qualityRating: (allAccounts[0]?.qualityRating as QualityScore) || "GREEN",
       apiStatus: allAccounts.length > 0 ? "connected" : "disconnected",
+      lastSyncedAt: lastSync ? lastSync.toISOString() : null,
     };
   }
 

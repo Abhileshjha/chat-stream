@@ -182,39 +182,217 @@ export async function registerRoutes(
           totalMessages: 0, sentCount: 0, deliveredCount: 0, readCount: 0, failedCount: 0,
           deliveryRate: 0, readRate: 0, totalCost: 0, activeCampaigns: 0,
           approvedTemplates: 0, pendingTemplates: 0, messagingLimit: 0, messagingUsed: 0,
-          qualityRating: "UNKNOWN", apiStatus: "disconnected",
+          qualityRating: "UNKNOWN", apiStatus: "disconnected", lastSyncedAt: null,
         });
       }
       const metrics = await storage.getDashboardMetrics(active.accountId);
-
-      try {
-        const account = await storage.getAccount(active.accountId);
-        if (account?.accessToken && account?.phoneNumberId) {
-          const phoneRes = await whatsappApi.getPhoneNumberAnalytics(account.phoneNumberId, account.accessToken);
-          if (phoneRes.success && phoneRes.data) {
-            const limitTierMap: Record<string, number> = {
-              "TIER_NOT_SET": 0, "TIER_50": 50, "TIER_250": 250,
-              "TIER_1K": 1000, "TIER_2K": 2000,
-              "TIER_10K": 10000, "TIER_100K": 100000, "TIER_UNLIMITED": 999999,
-            };
-            const qr = phoneRes.data.quality_rating || metrics.qualityRating;
-            const limitTier = phoneRes.data.messaging_limit_tier;
-            const newLimit = limitTierMap[limitTier] || metrics.messagingLimit;
-            metrics.qualityRating = qr;
-            metrics.messagingLimit = newLimit;
-            await storage.updateAccount(active.accountId, {
-              qualityRating: qr,
-              messagingLimit: newLimit,
-            });
-          }
-        }
-      } catch (metaErr) {
-        console.log("Meta API sync for dashboard metrics failed (non-critical):", metaErr);
-      }
-
       res.json(metrics);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch dashboard metrics" });
+    }
+  });
+
+  app.post("/api/dashboard/sync", async (req: any, res) => {
+    try {
+      const active = await getActiveAccount(req);
+      if (!active) {
+        return res.status(400).json({ error: "No active WhatsApp account selected" });
+      }
+
+      const account = await storage.getAccount(active.accountId);
+      if (!account?.accessToken || !account?.phoneNumberId) {
+        return res.status(400).json({ error: "Account missing API credentials. Please configure in Settings." });
+      }
+
+      const syncResults: any = {
+        phoneAnalytics: null,
+        wabaAnalytics: null,
+        conversationAnalytics: null,
+        templateSync: null,
+        errors: [],
+      };
+
+      try {
+        const phoneRes = await whatsappApi.getPhoneNumberAnalytics(account.phoneNumberId, account.accessToken);
+        if (phoneRes.success && phoneRes.data) {
+          const limitTierMap: Record<string, number> = {
+            "TIER_NOT_SET": 0, "TIER_50": 50, "TIER_250": 250,
+            "TIER_1K": 1000, "TIER_2K": 2000,
+            "TIER_10K": 10000, "TIER_100K": 100000, "TIER_UNLIMITED": 999999,
+          };
+          const qr = phoneRes.data.quality_rating || account.qualityRating;
+          const limitTier = phoneRes.data.messaging_limit_tier;
+          const newLimit = limitTierMap[limitTier] || account.messagingLimit;
+          await storage.updateAccount(active.accountId, {
+            qualityRating: qr,
+            messagingLimit: newLimit,
+            status: phoneRes.data.status || account.status,
+          });
+          syncResults.phoneAnalytics = {
+            qualityRating: qr,
+            messagingLimit: newLimit,
+            verifiedName: phoneRes.data.verified_name,
+            displayPhoneNumber: phoneRes.data.display_phone_number,
+            status: phoneRes.data.status,
+          };
+        } else {
+          syncResults.errors.push(`Phone analytics: ${phoneRes.error?.message || "Unknown error"}`);
+        }
+      } catch (e: any) {
+        syncResults.errors.push(`Phone analytics: ${e.message}`);
+      }
+
+      let metaSent = 0;
+      let metaDelivered = 0;
+      try {
+        const now = Math.floor(Date.now() / 1000);
+        const thirtyDaysAgo = now - (30 * 24 * 60 * 60);
+        const wabaRes = await whatsappApi.getWabaAnalytics(
+          account.businessAccountId, account.accessToken, thirtyDaysAgo, now
+        );
+        if (wabaRes.success && wabaRes.data?.analytics) {
+          const analytics = wabaRes.data.analytics;
+          if (analytics.data_points) {
+            for (const dp of analytics.data_points) {
+              metaSent += dp.sent || 0;
+              metaDelivered += dp.delivered || 0;
+            }
+          } else if (analytics.data) {
+            for (const item of analytics.data) {
+              if (item.data_points) {
+                for (const dp of item.data_points) {
+                  metaSent += dp.sent || 0;
+                  metaDelivered += dp.delivered || 0;
+                }
+              }
+            }
+          }
+          await storage.updateAccount(active.accountId, {
+            metaSentCount: metaSent,
+            metaDeliveredCount: metaDelivered,
+          });
+          syncResults.wabaAnalytics = { sent: metaSent, delivered: metaDelivered };
+        } else {
+          syncResults.errors.push(`WABA analytics: ${wabaRes.error?.message || "No data returned"}`);
+        }
+      } catch (e: any) {
+        syncResults.errors.push(`WABA analytics: ${e.message}`);
+      }
+
+      let totalConversations = 0;
+      let totalCost = 0;
+      try {
+        const now = Math.floor(Date.now() / 1000);
+        const thirtyDaysAgo = now - (30 * 24 * 60 * 60);
+        const convRes = await whatsappApi.getConversationAnalytics(
+          account.businessAccountId, account.accessToken, thirtyDaysAgo, now
+        );
+        if (convRes.success && convRes.data) {
+          const rawData = convRes.data;
+          const convData = rawData.conversation_analytics || rawData;
+
+          const extractFromDataPoints = (points: any[]) => {
+            for (const dp of points) {
+              totalConversations += dp.conversation || dp.count || 0;
+              totalCost += dp.cost || 0;
+            }
+          };
+
+          if (convData.data && Array.isArray(convData.data)) {
+            for (const item of convData.data) {
+              if (item.data_points && Array.isArray(item.data_points)) {
+                extractFromDataPoints(item.data_points);
+              }
+            }
+          } else if (convData.data_points && Array.isArray(convData.data_points)) {
+            extractFromDataPoints(convData.data_points);
+          }
+
+          console.log(`[Sync] Conversation analytics: ${totalConversations} conversations, cost: ${totalCost}`);
+          await storage.updateAccount(active.accountId, {
+            messagingUsed: totalConversations,
+            metaTotalCost: totalCost.toFixed(2),
+          });
+          syncResults.conversationAnalytics = { totalConversations, totalCost };
+        } else {
+          syncResults.errors.push(`Conversation analytics: ${convRes.error?.message || "No data returned"}`);
+        }
+      } catch (e: any) {
+        syncResults.errors.push(`Conversation analytics: ${e.message}`);
+      }
+
+      try {
+        const metaTemplates = await whatsappApi.getTemplates(account.businessAccountId, account.accessToken);
+        if (metaTemplates.success && metaTemplates.data?.data) {
+          const localTemplates = await storage.getTemplates(active.accountId);
+          let synced = 0;
+          for (const metaT of metaTemplates.data.data) {
+            const local = localTemplates.find(
+              (lt) => lt.metaTemplateId === metaT.id || lt.name?.toLowerCase() === metaT.name?.toLowerCase()
+            );
+            if (local) {
+              const updates: any = { status: metaT.status, lastSyncedAt: new Date() };
+              if (metaT.id && !local.metaTemplateId) {
+                updates.metaTemplateId = metaT.id;
+              }
+              if (metaT.quality_score?.score) {
+                updates.qualityScore = metaT.quality_score.score;
+              }
+              if (metaT.rejected_reason) {
+                updates.rejectionReason = metaT.rejected_reason;
+              }
+              await storage.updateTemplate(local.id, updates);
+              synced++;
+            }
+          }
+          syncResults.templateSync = {
+            metaTemplateCount: metaTemplates.data.data.length,
+            localSynced: synced,
+          };
+        } else {
+          syncResults.errors.push(`Template sync: ${metaTemplates.error?.message || "No data returned"}`);
+        }
+      } catch (e: any) {
+        syncResults.errors.push(`Template sync: ${e.message}`);
+      }
+
+      const syncedAt = new Date();
+      await storage.updateAccount(active.accountId, { lastSyncedAt: syncedAt });
+
+      await storage.addActivity({
+        accountId: active.accountId,
+        type: "sync_completed",
+        title: "Dashboard Synced",
+        description: `Synced with Meta API${syncResults.errors.length > 0 ? ` (${syncResults.errors.length} warnings)` : ""}`,
+        timestamp: syncedAt,
+        metadata: null,
+      });
+
+      const updatedMetrics = await storage.getDashboardMetrics(active.accountId);
+      if (syncResults.phoneAnalytics) {
+        updatedMetrics.qualityRating = syncResults.phoneAnalytics.qualityRating;
+        updatedMetrics.messagingLimit = syncResults.phoneAnalytics.messagingLimit;
+      }
+      if (metaSent > 0) {
+        updatedMetrics.sentCount = Math.max(updatedMetrics.sentCount, metaSent);
+      }
+      if (metaDelivered > 0) {
+        updatedMetrics.deliveredCount = Math.max(updatedMetrics.deliveredCount, metaDelivered);
+        updatedMetrics.deliveryRate = updatedMetrics.sentCount > 0 ? (updatedMetrics.deliveredCount / updatedMetrics.sentCount) * 100 : 0;
+      }
+      if (totalCost > 0) {
+        updatedMetrics.totalCost = totalCost;
+      }
+
+      res.json({
+        success: true,
+        metrics: updatedMetrics,
+        syncResults,
+        syncedAt: syncedAt.toISOString(),
+      });
+    } catch (error: any) {
+      console.error("Dashboard sync error:", error);
+      res.status(500).json({ error: "Sync failed: " + (error.message || "Unknown error") });
     }
   });
 
