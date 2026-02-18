@@ -114,6 +114,9 @@ The platform supports multiple WhatsApp Business numbers with account switching:
 - Notification Report page: `/notifications/:id/report` with full delivery breakdown charts, message-level detail table with status filtering, and CSV export
 - Template media auto-reuse: Notification editor auto-uses image/video/document from template components, no re-upload needed
 - Inbox Active/Closed tabs properly handle null conversation statuses (default to "open")
+- Fixed messaging limit tier mapping: added TIER_2K (2,000), TIER_NOT_SET, and complete Meta API tier coverage
+- Professional UI overhaul: redesigned dashboard with compact KPI cards, messaging capacity visualization with tier progression, consistent page headers with tracking-tight typography across all pages
+- Unified stat card patterns across dashboard, notifications, and analytics pages
 
 ### Development vs Production
 

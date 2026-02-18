@@ -164,7 +164,7 @@ export default function NotificationEditor() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold" data-testid="text-page-title">
+          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">
             {isEdit ? "Edit Notification" : "Add Notification"}
           </h1>
           <p className="text-sm text-muted-foreground">

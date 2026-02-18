@@ -104,7 +104,7 @@ export default function Analytics() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Analytics</h1>
           <p className="text-sm text-muted-foreground">

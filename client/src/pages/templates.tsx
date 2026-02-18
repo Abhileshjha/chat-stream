@@ -161,9 +161,9 @@ export default function Templates() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Templates</h1>
+          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Templates</h1>
           <p className="text-sm text-muted-foreground">
             Manage your WhatsApp message templates
           </p>

@@ -193,7 +193,8 @@ export async function registerRoutes(
           const phoneRes = await whatsappApi.getPhoneNumberAnalytics(account.phoneNumberId, account.accessToken);
           if (phoneRes.success && phoneRes.data) {
             const limitTierMap: Record<string, number> = {
-              "TIER_50": 50, "TIER_250": 250, "TIER_1K": 1000,
+              "TIER_NOT_SET": 0, "TIER_50": 50, "TIER_250": 250,
+              "TIER_1K": 1000, "TIER_2K": 2000,
               "TIER_10K": 10000, "TIER_100K": 100000, "TIER_UNLIMITED": 999999,
             };
             const qr = phoneRes.data.quality_rating || metrics.qualityRating;

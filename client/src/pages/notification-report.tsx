@@ -148,7 +148,7 @@ export default function NotificationReport() {
           </Link>
         </Button>
         <div className="flex-1">
-          <h1 className="text-2xl font-semibold" data-testid="text-report-title">
+          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-report-title">
             {notification.name}
           </h1>
           <p className="text-sm text-muted-foreground">

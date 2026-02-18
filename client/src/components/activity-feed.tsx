@@ -70,7 +70,7 @@ export function ActivityFeed({ activities, className, maxHeight = "h-96" }: Acti
                         {activity.description}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {formatDistanceToNow(new Date(activity.timestamp), { addSuffix: true })}
+                        {activity.timestamp ? formatDistanceToNow(new Date(activity.timestamp), { addSuffix: true }) : ""}
                       </p>
                     </div>
                   </div>

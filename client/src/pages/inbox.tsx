@@ -274,7 +274,7 @@ export default function Inbox() {
     <div className="h-[calc(100vh-7rem)] flex flex-col">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-2xl font-semibold" data-testid="text-page-title">Inbox</h1>
+          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Inbox</h1>
           <p className="text-sm text-muted-foreground">
             {totalUnread > 0 ? `${totalUnread} unread` : "All caught up"} · {allConversations.length} conversations
           </p>

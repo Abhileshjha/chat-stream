@@ -104,9 +104,9 @@ export default function Notifications() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h1 className="text-2xl font-semibold" data-testid="text-page-title">Notifications</h1>
+          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Notifications</h1>
           <p className="text-sm text-muted-foreground">
             Create and schedule broadcast notifications
           </p>
@@ -119,16 +119,16 @@ export default function Notifications() {
         </Button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-muted">
-                <FileText className="h-5 w-5 text-muted-foreground" />
+                <FileText className="h-4 w-4 text-muted-foreground" />
               </div>
-              <div>
-                <p className="text-2xl font-semibold">{notifications.filter((n) => n.status === "draft").length}</p>
-                <p className="text-sm text-muted-foreground">Drafts</p>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">Drafts</p>
+                <p className="text-lg font-semibold tabular-nums">{notifications.filter((n) => n.status === "draft").length}</p>
               </div>
             </div>
           </CardContent>
@@ -137,11 +137,11 @@ export default function Notifications() {
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-yellow-500/10">
-                <Clock className="h-5 w-5 text-yellow-500" />
+                <Clock className="h-4 w-4 text-yellow-500" />
               </div>
-              <div>
-                <p className="text-2xl font-semibold">{notifications.filter((n) => n.status === "scheduled").length}</p>
-                <p className="text-sm text-muted-foreground">Scheduled</p>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">Scheduled</p>
+                <p className="text-lg font-semibold tabular-nums">{notifications.filter((n) => n.status === "scheduled").length}</p>
               </div>
             </div>
           </CardContent>
@@ -150,11 +150,11 @@ export default function Notifications() {
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-blue-500/10">
-                <Send className="h-5 w-5 text-blue-500" />
+                <Send className="h-4 w-4 text-blue-500" />
               </div>
-              <div>
-                <p className="text-2xl font-semibold">{notifications.filter((n) => n.status === "sending").length}</p>
-                <p className="text-sm text-muted-foreground">Sending</p>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">Sending</p>
+                <p className="text-lg font-semibold tabular-nums">{notifications.filter((n) => n.status === "sending").length}</p>
               </div>
             </div>
           </CardContent>
@@ -163,11 +163,11 @@ export default function Notifications() {
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-green-500/10">
-                <CheckCircle className="h-5 w-5 text-green-500" />
+                <CheckCircle className="h-4 w-4 text-green-500" />
               </div>
-              <div>
-                <p className="text-2xl font-semibold">{notifications.filter((n) => n.status === "completed").length}</p>
-                <p className="text-sm text-muted-foreground">Completed</p>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">Completed</p>
+                <p className="text-lg font-semibold tabular-nums">{notifications.filter((n) => n.status === "completed").length}</p>
               </div>
             </div>
           </CardContent>
@@ -175,8 +175,8 @@ export default function Notifications() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>All Notifications</CardTitle>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold">All Notifications</CardTitle>
         </CardHeader>
         <CardContent>
           <ScrollArea className="h-[500px]">
