@@ -392,9 +392,11 @@ export default function Dashboard() {
                     style={{ width: `${Math.min(limitPercent, 100)}%` }}
                   />
                 </div>
-                <div className="grid grid-cols-5 gap-1">
+                <div className="grid grid-cols-7 gap-1">
                   {[
+                    { label: "50", active: dashboardMetrics.messagingLimit >= 50 },
                     { label: "250", active: dashboardMetrics.messagingLimit >= 250 },
+                    { label: "1K", active: dashboardMetrics.messagingLimit >= 1000 },
                     { label: "2K", active: dashboardMetrics.messagingLimit >= 2000 },
                     { label: "10K", active: dashboardMetrics.messagingLimit >= 10000 },
                     { label: "100K", active: dashboardMetrics.messagingLimit >= 100000 },
