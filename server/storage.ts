@@ -18,7 +18,7 @@ import {
   type QualityScore,
 } from "@shared/schema";
 import { db } from "@db";
-import { eq, desc, and, or, sql as dsql } from "drizzle-orm";
+import { eq, desc, and, or, isNull, sql as dsql } from "drizzle-orm";
 
 export interface IStorage {
   getTemplates(accountId?: string): Promise<Template[]>;
@@ -52,6 +52,7 @@ export interface IStorage {
 
   getSettings(): Promise<ApiSettings | undefined>;
   saveSettings(settings: Omit<ApiSettings, "id">): Promise<ApiSettings>;
+  backfillMessageCampaignIds(): Promise<void>;
 
   getAnalyticsData(timeRange: string, accountId?: string): Promise<AnalyticsData>;
 
@@ -269,7 +270,7 @@ export class DatabaseStorage implements IStorage {
       ? await db.select().from(whatsappAccounts).where(eq(whatsappAccounts.id, accountId))
       : await db.select().from(whatsappAccounts);
 
-    const sentCount = allMessages.filter(m => m.status !== "queued").length;
+    const sentCount = allMessages.filter(m => m.status === "sent" || m.status === "delivered" || m.status === "read").length;
     const deliveredCount = allMessages.filter(m => m.status === "delivered" || m.status === "read").length;
     const readCount = allMessages.filter(m => m.status === "read").length;
     const failedCount = allMessages.filter(m => m.status === "failed").length;
@@ -829,6 +830,50 @@ export class DatabaseStorage implements IStorage {
       acceptedAt: new Date(),
     }).where(eq(teamMembers.id, id)).returning();
     return rows[0];
+  }
+
+  async backfillMessageCampaignIds(): Promise<void> {
+    const orphanedMessages = await db.select().from(messages).where(isNull(messages.campaignId));
+    if (orphanedMessages.length === 0) {
+      console.log("[Backfill] No orphaned messages found");
+      return;
+    }
+    console.log(`[Backfill] Found ${orphanedMessages.length} messages without campaign_id, attempting to link...`);
+
+    const allNotifications = await db.select().from(notifications);
+    let linked = 0;
+
+    for (const msg of orphanedMessages) {
+      const matchingNotification = allNotifications
+        .filter(n =>
+          n.templateId === msg.templateId &&
+          n.sentAt &&
+          n.accountId === msg.accountId
+        )
+        .sort((a, b) => {
+          const msgTime = msg.sentAt || msg.queuedAt;
+          if (!msgTime) return 0;
+          const aDiff = Math.abs(new Date(a.sentAt!).getTime() - new Date(msgTime).getTime());
+          const bDiff = Math.abs(new Date(b.sentAt!).getTime() - new Date(msgTime).getTime());
+          return aDiff - bDiff;
+        })
+        .find(n => {
+          const msgTime = msg.sentAt || msg.queuedAt;
+          if (!msgTime || !n.sentAt) return false;
+          const nStart = new Date(n.sentAt).getTime();
+          const nEnd = n.completedAt ? new Date(n.completedAt).getTime() + 60000 : nStart + 30 * 60 * 1000;
+          const mTime = new Date(msgTime).getTime();
+          return mTime >= nStart - 5000 && mTime <= nEnd;
+        });
+
+      if (matchingNotification) {
+        await db.update(messages)
+          .set({ campaignId: matchingNotification.id })
+          .where(eq(messages.id, msg.id));
+        linked++;
+      }
+    }
+    console.log(`[Backfill] Linked ${linked} of ${orphanedMessages.length} orphaned messages to notifications`);
   }
 }
 

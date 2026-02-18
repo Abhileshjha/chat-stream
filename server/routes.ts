@@ -1214,7 +1214,32 @@ export async function registerRoutes(
                     updates.errorDescription = status.errors?.[0]?.message;
                   }
                   
+                  const previousStatus = message.status;
                   await storage.updateMessage(message.id, updates);
+
+                  if (message.campaignId && previousStatus !== status.status) {
+                    try {
+                      const notif = await storage.getNotification(message.campaignId);
+                      if (notif) {
+                        const notifUpdates: any = {};
+                        if (status.status === "delivered" && previousStatus !== "delivered" && previousStatus !== "read") {
+                          notifUpdates.deliveredCount = (notif.deliveredCount || 0) + 1;
+                        } else if (status.status === "read" && previousStatus !== "read") {
+                          notifUpdates.readCount = (notif.readCount || 0) + 1;
+                          if (previousStatus !== "delivered") {
+                            notifUpdates.deliveredCount = (notif.deliveredCount || 0) + 1;
+                          }
+                        } else if (status.status === "failed" && previousStatus !== "failed") {
+                          notifUpdates.failedCount = (notif.failedCount || 0) + 1;
+                        }
+                        if (Object.keys(notifUpdates).length > 0) {
+                          await storage.updateNotification(notif.id, notifUpdates);
+                        }
+                      }
+                    } catch (e) {
+                      console.error("[Webhook] Failed to update notification counts:", e);
+                    }
+                  }
                   
                   const activityType = status.status === "delivered" 
                     ? "message_delivered" 
@@ -2141,13 +2166,20 @@ export async function registerRoutes(
       const allMessages = await storage.getMessages(active.accountId);
       const notificationMessages = allMessages.filter(m => m.campaignId === notification.id);
 
+      const msgSent = notificationMessages.filter(m => m.status === "sent").length;
+      const msgDelivered = notificationMessages.filter(m => m.status === "delivered").length;
+      const msgRead = notificationMessages.filter(m => m.status === "read").length;
+      const msgFailed = notificationMessages.filter(m => m.status === "failed").length;
+      const msgQueued = notificationMessages.filter(m => m.status === "queued").length;
+      const hasMessages = notificationMessages.length > 0;
+
       const statusBreakdown = {
         total: notification.totalRecipients || notificationMessages.length,
-        sent: notificationMessages.filter(m => m.status === "sent").length,
-        delivered: notification.deliveredCount || notificationMessages.filter(m => m.status === "delivered").length,
-        read: notification.readCount || notificationMessages.filter(m => m.status === "read").length,
-        failed: notification.failedCount || notificationMessages.filter(m => m.status === "failed").length,
-        queued: notificationMessages.filter(m => m.status === "queued").length,
+        sent: hasMessages ? (msgSent + msgDelivered + msgRead) : (notification.sentCount || 0),
+        delivered: hasMessages ? (msgDelivered + msgRead) : (notification.deliveredCount || 0),
+        read: hasMessages ? msgRead : (notification.readCount || 0),
+        failed: hasMessages ? msgFailed : (notification.failedCount || 0),
+        queued: hasMessages ? msgQueued : 0,
       };
 
       const failedMessages = notificationMessages
@@ -2358,6 +2390,7 @@ export async function registerRoutes(
             const waMessageId = result.data.messages[0].id;
             await storage.createMessage({
               accountId: activeAccount.id,
+              campaignId: notification.id,
               templateId: template.id,
               recipientPhone,
               whatsappMessageId: waMessageId,
@@ -2392,6 +2425,7 @@ export async function registerRoutes(
             console.error(`Message send failed to ${recipientPhone}:`, result.error?.message || "Unknown error", `(code: ${result.error?.code})`);
             await storage.createMessage({
               accountId: activeAccount.id,
+              campaignId: notification.id,
               templateId: template.id,
               recipientPhone,
               status: "failed",
@@ -2964,6 +2998,12 @@ export async function registerRoutes(
       }
     } catch (err) {
       console.error("[Startup] Auto-subscribe error:", err);
+    }
+
+    try {
+      await storage.backfillMessageCampaignIds();
+    } catch (err) {
+      console.error("[Startup] Message backfill error:", err);
     }
   }, 3000);
 
