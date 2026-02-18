@@ -80,7 +80,7 @@ export default function Templates() {
       queryClient.invalidateQueries({ queryKey: ["/api/templates"] });
       toast({
         title: "Template Duplicated",
-        description: "A copy of the template has been created as a draft.",
+        description: "A copy has been created as a draft. Use the menu to submit it to WhatsApp when ready.",
       });
     },
     onError: (error: any) => {

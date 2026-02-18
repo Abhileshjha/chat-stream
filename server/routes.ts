@@ -945,6 +945,20 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/messages/failed", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.json([]);
+      const { campaignId } = req.query;
+      const allMessages = await storage.getMessages(active.accountId);
+      let failedMessages = allMessages.filter(m => m.status === "failed");
+      if (campaignId) failedMessages = failedMessages.filter(m => m.campaignId === campaignId);
+      res.json(failedMessages);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch failed messages" });
+    }
+  });
+
   app.get("/api/messages/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
@@ -2113,6 +2127,60 @@ export async function registerRoutes(
       res.json(notifications);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch notifications" });
+    }
+  });
+
+  app.get("/api/notifications/:id/report", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const notification = await storage.getNotification(req.params.id);
+      if (!notification) return res.status(404).json({ error: "Notification not found" });
+
+      const allMessages = await storage.getMessages(active.accountId);
+      const notificationMessages = allMessages.filter(m => m.campaignId === notification.id);
+
+      const statusBreakdown = {
+        total: notification.totalRecipients || notificationMessages.length,
+        sent: notificationMessages.filter(m => m.status === "sent").length,
+        delivered: notification.deliveredCount || notificationMessages.filter(m => m.status === "delivered").length,
+        read: notification.readCount || notificationMessages.filter(m => m.status === "read").length,
+        failed: notification.failedCount || notificationMessages.filter(m => m.status === "failed").length,
+        queued: notificationMessages.filter(m => m.status === "queued").length,
+      };
+
+      const failedMessages = notificationMessages
+        .filter(m => m.status === "failed")
+        .map(m => ({
+          id: m.id,
+          phone: m.recipientPhone,
+          errorCode: m.errorCode,
+          errorDescription: m.errorDescription,
+          sentAt: m.sentAt || m.queuedAt,
+        }));
+
+      const templates = await storage.getTemplates(active.accountId);
+      const template = templates.find(t => t.id === notification.templateId);
+
+      res.json({
+        notification,
+        template: template ? { name: template.name, category: template.category } : null,
+        statusBreakdown,
+        failedMessages,
+        messages: notificationMessages.map(m => ({
+          id: m.id,
+          phone: m.recipientPhone,
+          status: m.status,
+          errorCode: m.errorCode,
+          errorDescription: m.errorDescription,
+          sentAt: m.sentAt,
+          deliveredAt: m.deliveredAt,
+          readAt: m.readAt,
+        })),
+      });
+    } catch (error) {
+      console.error("Report error:", error);
+      res.status(500).json({ error: "Failed to generate report" });
     }
   });
 

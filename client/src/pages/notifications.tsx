@@ -18,6 +18,7 @@ import {
   Trash2,
   Play,
   Edit,
+  BarChart3,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -227,6 +228,14 @@ export default function Notifications() {
                                       Send Now
                                     </DropdownMenuItem>
                                   </>
+                                )}
+                                {notification.status !== "draft" && (
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/notifications/${notification.id}/report`}>
+                                      <BarChart3 className="h-4 w-4 mr-2" />
+                                      View Report
+                                    </Link>
+                                  </DropdownMenuItem>
                                 )}
                                 <DropdownMenuItem
                                   className="text-destructive"

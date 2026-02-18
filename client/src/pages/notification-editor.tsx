@@ -64,7 +64,9 @@ export default function NotificationEditor() {
 
   const selectedTemplateComponents = (selectedTemplate?.components as any[]) || [];
   const selectedTemplateHeader = selectedTemplateComponents.find((c: any) => c.type === "HEADER");
-  const needsMediaUrl = selectedTemplateHeader && ["IMAGE", "VIDEO", "DOCUMENT"].includes(selectedTemplateHeader.format || "");
+  const hasMediaHeader = selectedTemplateHeader && ["IMAGE", "VIDEO", "DOCUMENT"].includes(selectedTemplateHeader.format || "");
+  const templateMediaUrl = selectedTemplateHeader?.mediaUrl || "";
+  const needsMediaUrl = hasMediaHeader && !templateMediaUrl;
 
   const saveMutation = useMutation({
     mutationFn: async (sendNow: boolean) => {
@@ -72,7 +74,7 @@ export default function NotificationEditor() {
         name,
         templateId: selectedTemplateId,
         listIds: selectedListIds,
-        headerMediaUrl: headerMediaUrl || undefined,
+        headerMediaUrl: headerMediaUrl || templateMediaUrl || undefined,
         scheduledAt: sendNow ? undefined : scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
         status: scheduledAt && !sendNow ? "scheduled" : "draft",
       };
@@ -106,7 +108,7 @@ export default function NotificationEditor() {
         name,
         templateId: selectedTemplateId,
         listIds: selectedListIds,
-        headerMediaUrl: headerMediaUrl || undefined,
+        headerMediaUrl: headerMediaUrl || templateMediaUrl || undefined,
       };
 
       let notificationId: string;
@@ -344,8 +346,8 @@ export default function NotificationEditor() {
                       <div key={i} className="text-sm">
                         {component.type === "HEADER" && component.format === "IMAGE" && (
                           <div className="bg-muted rounded mb-2 p-4 text-center text-muted-foreground text-xs">
-                            {headerMediaUrl ? (
-                              <img src={headerMediaUrl} alt="Header" className="max-h-32 mx-auto rounded" />
+                            {(headerMediaUrl || component.mediaUrl) ? (
+                              <img src={headerMediaUrl || component.mediaUrl} alt="Header" className="max-h-32 mx-auto rounded" />
                             ) : (
                               "Image header - provide URL below"
                             )}
@@ -376,6 +378,17 @@ export default function NotificationEditor() {
                 </div>
               )}
 
+              {hasMediaHeader && templateMediaUrl && (
+                <div className="rounded-lg border p-3 bg-muted/30">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Check className="h-4 w-4 text-green-500" />
+                    <span className="text-sm font-medium">Media from template</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    This template already has {selectedTemplateHeader?.format?.toLowerCase()} media attached. It will be used automatically.
+                  </p>
+                </div>
+              )}
               {needsMediaUrl && (
                 <div>
                   <Label>Header Media URL</Label>
@@ -426,7 +439,7 @@ export default function NotificationEditor() {
               <Button
                 className="w-full"
                 onClick={() => sendMutation.mutate()}
-                disabled={sendMutation.isPending || !name || !selectedTemplateId || selectedListIds.length === 0 || (needsMediaUrl && !headerMediaUrl)}
+                disabled={sendMutation.isPending || !name || !selectedTemplateId || selectedListIds.length === 0 || (needsMediaUrl && !headerMediaUrl && !templateMediaUrl)}
                 data-testid="button-send-now"
               >
                 <Send className="h-4 w-4 mr-2" />

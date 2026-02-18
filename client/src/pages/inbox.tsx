@@ -175,8 +175,9 @@ export default function Inbox() {
         c.contactPhone.includes(searchQuery) || 
         (c.contactName?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false);
       
-      if (filterTab === "active") return matchesSearch && c.status !== "closed";
-      if (filterTab === "closed") return matchesSearch && c.status === "closed";
+      const status = c.status || "open";
+      if (filterTab === "active") return matchesSearch && status !== "closed";
+      if (filterTab === "closed") return matchesSearch && status === "closed";
       return matchesSearch;
     });
 
@@ -257,7 +258,7 @@ export default function Inbox() {
   };
 
   const totalUnread = conversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0);
-  const activeCount = conversations.filter(c => c.status !== "closed").length;
+  const activeCount = conversations.filter(c => (c.status || "open") !== "closed").length;
   const closedCount = conversations.filter(c => c.status === "closed").length;
 
   return (

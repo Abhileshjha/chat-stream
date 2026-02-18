@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -8,7 +10,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useState } from "react";
+import { Download, AlertTriangle, Phone } from "lucide-react";
 import {
   AreaChart,
   Area,
@@ -44,17 +54,47 @@ interface AnalyticsData {
   };
 }
 
+interface FailedMessage {
+  id: string;
+  recipientPhone: string;
+  errorCode: string | null;
+  errorDescription: string | null;
+  sentAt: string | null;
+  queuedAt: string | null;
+}
+
 export default function Analytics() {
   const [timeRange, setTimeRange] = useState("7d");
+  const [showFailedDialog, setShowFailedDialog] = useState(false);
 
   const { data: analytics, isLoading } = useQuery<AnalyticsData>({
     queryKey: ["/api/analytics", timeRange],
     queryFn: async () => {
-      const res = await fetch(`/api/analytics?range=${timeRange}`);
+      const res = await fetch(`/api/analytics?range=${timeRange}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch analytics");
       return res.json();
     },
   });
+
+  const { data: failedMessages = [] } = useQuery<FailedMessage[]>({
+    queryKey: ["/api/messages/failed"],
+    enabled: showFailedDialog,
+  });
+
+  const downloadFailedCSV = () => {
+    if (failedMessages.length === 0) return;
+    const headers = "Phone Number,Error Code,Error Description,Date\n";
+    const rows = failedMessages.map(m => 
+      `"${m.recipientPhone}","${m.errorCode || ""}","${(m.errorDescription || "").replace(/"/g, '""')}","${m.sentAt || m.queuedAt || ""}"`
+    ).join("\n");
+    const blob = new Blob([headers + rows], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `failed-messages-${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   if (isLoading || !analytics) {
     return <AnalyticsSkeleton />;
@@ -66,7 +106,7 @@ export default function Analytics() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Analytics</h1>
+          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Analytics</h1>
           <p className="text-sm text-muted-foreground">
             Detailed insights into your messaging performance
           </p>
@@ -84,7 +124,6 @@ export default function Analytics() {
         </Select>
       </div>
 
-      {/* Summary Stats */}
       <div className="grid gap-4 md:grid-cols-4">
         <StatCard 
           label="Total Messages" 
@@ -101,16 +140,26 @@ export default function Analytics() {
           value={`${summary.readRate.toFixed(1)}%`}
           subValue={`${summary.totalRead.toLocaleString()} read`}
         />
-        <StatCard 
-          label="Failed" 
-          value={summary.totalFailed.toLocaleString()}
-          subValue={`${summary.totalMessages > 0 ? ((summary.totalFailed / summary.totalMessages) * 100).toFixed(2) : 0}% failure rate`}
-        />
+        <button
+          onClick={() => setShowFailedDialog(true)}
+          className="text-left"
+          data-testid="button-show-failed"
+        >
+          <Card className="hover-elevate h-full border-destructive/30">
+            <CardContent className="p-6">
+              <p className="text-xs font-medium text-destructive uppercase tracking-wider">
+                Failed
+              </p>
+              <p className="text-2xl font-semibold mt-1 tabular-nums">{summary.totalFailed.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {summary.totalMessages > 0 ? ((summary.totalFailed / summary.totalMessages) * 100).toFixed(2) : 0}% failure rate · Click to view
+              </p>
+            </CardContent>
+          </Card>
+        </button>
       </div>
 
-      {/* Main Charts */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Message Volume Trend */}
         <Card className="lg:col-span-2">
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-semibold">Message Volume Trend</CardTitle>
@@ -158,7 +207,6 @@ export default function Analytics() {
           </CardContent>
         </Card>
 
-        {/* Hourly Distribution */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-semibold">Hourly Distribution</CardTitle>
@@ -185,7 +233,6 @@ export default function Analytics() {
           </CardContent>
         </Card>
 
-        {/* Category Distribution */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-semibold">By Category</CardTitle>
@@ -230,29 +277,29 @@ export default function Analytics() {
         </Card>
       </div>
 
-      {/* Bottom Row */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Error Analysis */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-semibold">Error Analysis</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {errorData.map((error) => (
+              {errorData.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No errors in this period</p>
+              ) : errorData.map((error) => (
                 <div key={error.code} className="flex items-center gap-3">
                   <span className="font-mono text-xs text-destructive w-16 shrink-0">
                     {error.code}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center justify-between gap-1 mb-1">
                       <span className="text-sm truncate">{error.description}</span>
                       <span className="text-sm font-medium tabular-nums ml-2">{error.count}</span>
                     </div>
                     <div className="h-1.5 rounded-full bg-muted overflow-hidden">
                       <div 
                         className="h-full bg-destructive/60"
-                        style={{ width: `${(error.count / errorData[0].count) * 100}%` }}
+                        style={{ width: `${(error.count / (errorData[0]?.count || 1)) * 100}%` }}
                       />
                     </div>
                   </div>
@@ -262,7 +309,6 @@ export default function Analytics() {
           </CardContent>
         </Card>
 
-        {/* Cost Trend */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-semibold">Cost Trend</CardTitle>
@@ -307,6 +353,69 @@ export default function Analytics() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={showFailedDialog} onOpenChange={setShowFailedDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <div className="flex items-center justify-between gap-4">
+              <DialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-destructive" />
+                Failed Messages ({failedMessages.length})
+              </DialogTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={downloadFailedCSV}
+                disabled={failedMessages.length === 0}
+                data-testid="button-download-failed-csv"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Download CSV
+              </Button>
+            </div>
+          </DialogHeader>
+          <ScrollArea className="max-h-[60vh]">
+            {failedMessages.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <AlertTriangle className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">No failed messages found</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {failedMessages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className="flex items-center justify-between p-3 rounded-lg border"
+                    data-testid={`failed-msg-${msg.id}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-destructive/10">
+                        <Phone className="h-4 w-4 text-destructive" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium font-mono">{msg.recipientPhone}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {msg.sentAt ? new Date(msg.sentAt).toLocaleString() : msg.queuedAt ? new Date(msg.queuedAt).toLocaleString() : "-"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      {msg.errorCode && (
+                        <Badge variant="destructive" className="text-xs">
+                          {msg.errorCode}
+                        </Badge>
+                      )}
+                      <p className="text-xs text-muted-foreground mt-1 max-w-[200px] truncate">
+                        {msg.errorDescription || "Unknown error"}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

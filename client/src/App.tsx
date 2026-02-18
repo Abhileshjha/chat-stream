@@ -23,6 +23,7 @@ import ContactsTags from "@/pages/contacts-tags";
 import ContactsImport from "@/pages/contacts-import";
 import Notifications from "@/pages/notifications";
 import NotificationEditor from "@/pages/notification-editor";
+import NotificationReport from "@/pages/notification-report";
 import Landing from "@/pages/landing";
 import Privacy from "@/pages/privacy";
 import Terms from "@/pages/terms";
@@ -49,6 +50,7 @@ function AppRouter() {
       <Route path="/notifications" component={Notifications} />
       <Route path="/notifications/new" component={NotificationEditor} />
       <Route path="/notifications/:id/edit" component={NotificationEditor} />
+      <Route path="/notifications/:id/report" component={NotificationReport} />
       <Route path="/messages" component={Messages} />
       <Route path="/analytics" component={Analytics} />
       <Route path="/settings" component={Settings} />
