@@ -204,7 +204,9 @@ export default function TemplateEditor() {
       let errorMsg = "Failed to save template. Please try again.";
       try {
         if (error?.message) {
-          const parsed = JSON.parse(error.message);
+          const colonIdx = error.message.indexOf(":");
+          const jsonPart = colonIdx !== -1 ? error.message.slice(colonIdx + 1).trim() : error.message;
+          const parsed = JSON.parse(jsonPart);
           errorMsg = parsed.details || parsed.error || errorMsg;
         }
       } catch {}

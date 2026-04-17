@@ -42,10 +42,25 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Template } from "@shared/schema";
 
+function parseApiError(error: any, fallback: string): string {
+  try {
+    if (error?.message) {
+      const colonIdx = error.message.indexOf(":");
+      if (colonIdx !== -1) {
+        const jsonPart = error.message.slice(colonIdx + 1).trim();
+        const parsed = JSON.parse(jsonPart);
+        return parsed.details || parsed.error || fallback;
+      }
+    }
+  } catch {}
+  return error?.message || fallback;
+}
+
 export default function Templates() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
+  const isManualSync = useRef(false);
   const { toast } = useToast();
 
   const { data: templates = [], isLoading, refetch, isRefetching } = useQuery<Template[]>({
@@ -86,7 +101,7 @@ export default function Templates() {
     onError: (error: any) => {
       toast({
         title: "Duplication Failed",
-        description: error.message || "Failed to duplicate template.",
+        description: parseApiError(error, "Failed to duplicate template."),
         variant: "destructive",
       });
     },
@@ -98,18 +113,24 @@ export default function Templates() {
     },
     onSuccess: async (response: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/templates"] });
-      const data = await response.json();
-      toast({
-        title: "Templates Synced",
-        description: `Synced ${data.synced || 0} templates from WhatsApp.`,
-      });
+      if (isManualSync.current) {
+        const data = await response.json();
+        toast({
+          title: "Templates Synced",
+          description: `Synced ${data.synced || 0} templates from WhatsApp.`,
+        });
+      }
+      isManualSync.current = false;
     },
     onError: (error: any) => {
-      toast({
-        title: "Sync Failed",
-        description: error.message || "Failed to sync templates from WhatsApp. Make sure your account is connected.",
-        variant: "destructive",
-      });
+      if (isManualSync.current) {
+        toast({
+          title: "Sync Failed",
+          description: parseApiError(error, "Failed to sync templates from WhatsApp. Make sure your account is connected."),
+          variant: "destructive",
+        });
+      }
+      isManualSync.current = false;
     },
   });
 
@@ -127,7 +148,7 @@ export default function Templates() {
     onError: (error: any) => {
       toast({
         title: "Submit Failed",
-        description: error.message || "Failed to submit template to Meta.",
+        description: parseApiError(error, "Failed to submit template to Meta."),
         variant: "destructive",
       });
     },
@@ -137,11 +158,13 @@ export default function Templates() {
   useEffect(() => {
     if (!autoSyncDone.current && !isLoading) {
       autoSyncDone.current = true;
+      isManualSync.current = false;
       syncMutation.mutate();
     }
   }, [isLoading]);
 
   const handleRefresh = () => {
+    isManualSync.current = true;
     syncMutation.mutate();
   };
 
