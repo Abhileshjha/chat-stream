@@ -8,6 +8,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { useRealtimeSync } from "@/hooks/use-realtime-sync";
+import { usePageTracking } from "@/hooks/use-page-tracking";
 import { useAuth } from "@/hooks/use-auth";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
@@ -31,6 +32,7 @@ import Terms from "@/pages/terms";
 import Refund from "@/pages/refund";
 import Contact from "@/pages/contact";
 import Admin from "@/pages/admin";
+import Billing from "@/pages/billing";
 import DeleteData from "@/pages/delete-data";
 import { useQuery } from "@tanstack/react-query";
 import { ErrorBoundary } from "@/components/error-boundary";
@@ -55,6 +57,7 @@ function AppRouter() {
       <Route path="/messages" component={Messages} />
       <Route path="/analytics" component={Analytics} />
       <Route path="/settings" component={Settings} />
+      <Route path="/billing" component={Billing} />
       <Route path="/admin" component={Admin} />
       <Route path="/privacy" component={Privacy} />
       <Route path="/terms" component={Terms} />
@@ -136,6 +139,7 @@ function AuthenticatedApp() {
 
 function AppContent() {
   const { user, isLoading } = useAuth();
+  usePageTracking();
 
   if (isLoading) {
     return (

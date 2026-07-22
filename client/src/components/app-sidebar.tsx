@@ -23,6 +23,7 @@ import {
   Shield,
   Eye,
   EyeOff,
+  CreditCard,
   Smartphone,
   LogOut,
 } from "lucide-react";
@@ -130,6 +131,11 @@ const bottomNavItems = [
 ];
 
 const settingsItems = [
+  {
+    title: "Billing",
+    url: "/billing",
+    icon: CreditCard,
+  },
   {
     title: "Settings",
     url: "/settings",

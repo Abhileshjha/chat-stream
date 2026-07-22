@@ -76,6 +76,7 @@ export async function setupAuth(app: Express) {
       }
 
       const passwordHash = await bcrypt.hash(password, 10);
+      const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
       const [user] = await db
         .insert(users)
         .values({
@@ -83,6 +84,8 @@ export async function setupAuth(app: Express) {
           passwordHash,
           firstName: firstName || undefined,
           lastName: lastName || undefined,
+          subscriptionStatus: "trial",
+          trialEndsAt,
         })
         .returning();
 

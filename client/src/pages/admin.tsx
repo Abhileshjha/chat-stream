@@ -10,18 +10,20 @@ import { Switch } from "@/components/ui/switch";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { 
-  Users, 
-  UserCheck, 
-  UserX, 
-  CreditCard, 
-  Shield, 
+import {
+  Users,
+  UserCheck,
+  UserX,
+  CreditCard,
+  Shield,
   Search,
   RefreshCw,
   CheckCircle2,
   XCircle,
   Clock,
-  ChevronDown
+  ChevronDown,
+  Eye,
+  Globe
 } from "lucide-react";
 import type { User } from "@shared/models/auth";
 import {
@@ -37,6 +39,20 @@ interface AdminStats {
   trialUsers: number;
   paidUsers: number;
   pendingApproval: number;
+}
+
+interface VisitorAnalytics {
+  visitors24h: number;
+  visitors7d: number;
+  visitorsAllTime: number;
+  recentViews: Array<{
+    id: string;
+    path: string;
+    sessionId: string;
+    userId: string | null;
+    referrer: string | null;
+    timestamp: string;
+  }>;
 }
 
 export default function Admin() {
@@ -75,6 +91,11 @@ export default function Admin() {
     queryKey: ["/api/admin/users"],
   });
 
+  const { data: visitors } = useQuery<VisitorAnalytics>({
+    queryKey: ["/api/admin/visitors"],
+    refetchInterval: 30000,
+  });
+
   const updateRoleMutation = useMutation({
     mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
       return apiRequest("PATCH", `/api/admin/users/${userId}/role`, { role });
@@ -90,12 +111,13 @@ export default function Admin() {
   });
 
   const updateAccessMutation = useMutation({
-    mutationFn: async ({ userId, grantedFreeAccess, subscriptionStatus }: { 
-      userId: string; 
+    mutationFn: async ({ userId, grantedFreeAccess, subscriptionStatus, hasPaid }: {
+      userId: string;
       grantedFreeAccess?: boolean;
       subscriptionStatus?: string;
+      hasPaid?: boolean;
     }) => {
-      return apiRequest("PATCH", `/api/admin/users/${userId}/access`, { grantedFreeAccess, subscriptionStatus });
+      return apiRequest("PATCH", `/api/admin/users/${userId}/access`, { grantedFreeAccess, subscriptionStatus, hasPaid });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
@@ -262,6 +284,81 @@ export default function Admin() {
         </Card>
       </div>
 
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Visitors (24h)</CardTitle>
+            <Eye className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-visitors-24h">{visitors?.visitors24h ?? 0}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Visitors (7d)</CardTitle>
+            <Globe className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-visitors-7d">{visitors?.visitors7d ?? 0}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Visitors (All Time)</CardTitle>
+            <Users className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-visitors-all-time">{visitors?.visitorsAllTime ?? 0}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Visitor Activity</CardTitle>
+          <CardDescription>Live feed of page visits across the site, refreshes every 30s</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="rounded-md border max-h-80 overflow-y-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Path</TableHead>
+                  <TableHead>User</TableHead>
+                  <TableHead>Referrer</TableHead>
+                  <TableHead className="text-right">Time</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {!visitors?.recentViews?.length ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                      No visitor activity recorded yet
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  visitors.recentViews.map((view) => (
+                    <TableRow key={view.id} data-testid={`row-visitor-${view.id}`}>
+                      <TableCell className="font-mono text-xs">{view.path}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {view.userId ? "Logged in" : "Anonymous"}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground truncate max-w-[200px]">
+                        {view.referrer || "Direct"}
+                      </TableCell>
+                      <TableCell className="text-right text-xs text-muted-foreground">
+                        {new Date(view.timestamp).toLocaleTimeString()}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>User Management</CardTitle>
@@ -392,8 +489,8 @@ export default function Admin() {
                             <Button
                               variant={user.grantedFreeAccess ? "destructive" : "default"}
                               size="sm"
-                              onClick={() => updateAccessMutation.mutate({ 
-                                userId: user.id, 
+                              onClick={() => updateAccessMutation.mutate({
+                                userId: user.id,
                                 grantedFreeAccess: !user.grantedFreeAccess,
                                 subscriptionStatus: !user.grantedFreeAccess ? "active" : "inactive"
                               })}
@@ -409,6 +506,21 @@ export default function Admin() {
                                   <CheckCircle2 className="h-4 w-4 mr-1" /> Approve
                                 </>
                               )}
+                            </Button>
+
+                            <Button
+                              variant={user.hasPaid ? "destructive" : "outline"}
+                              size="sm"
+                              onClick={() => updateAccessMutation.mutate({
+                                userId: user.id,
+                                hasPaid: !user.hasPaid,
+                                subscriptionStatus: !user.hasPaid ? "active" : "inactive",
+                              })}
+                              disabled={updateAccessMutation.isPending}
+                              data-testid={`button-premium-${user.id}`}
+                            >
+                              <CreditCard className="h-4 w-4 mr-1" />
+                              {user.hasPaid ? "Remove Premium" : "Mark Premium"}
                             </Button>
                           </div>
                         </TableCell>

@@ -4,10 +4,13 @@ import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { insertTemplateSchema, insertCampaignSchema, insertMessageSchema, type WhatsAppAccount, teamMembers } from "@shared/schema";
 import { db } from "@db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc, gte, sql as sqlOp } from "drizzle-orm";
 import { z } from "zod";
 import { authStorage } from "./auth/storage";
 import { isAuthenticated } from "./auth/localAuth";
+import { requireActiveSubscription, hasActiveSubscription, SUBSCRIPTION_REQUIRED_MESSAGE } from "./subscriptionGate";
+import { pageViews, users } from "@shared/models/auth";
+import * as razorpayApi from "./razorpay";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -1004,7 +1007,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/campaigns/:id/execute", isAuthenticated as RequestHandler, async (req: any, res) => {
+  app.post("/api/campaigns/:id/execute", isAuthenticated as RequestHandler, requireActiveSubscription, async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
       if (!active) return res.status(401).json({ error: "No active account" });
@@ -2343,6 +2346,10 @@ export async function registerRoutes(
       const activeAccount = accounts.find(a => a.id === conversation.accountId);
       const isOutbound = req.body.direction === "outbound" || req.body.direction === "outgoing";
 
+      if (isOutbound && userId && !(await hasActiveSubscription(userId))) {
+        return res.status(402).json({ error: "subscription_required", message: SUBSCRIPTION_REQUIRED_MESSAGE });
+      }
+
       if (isOutbound && (!activeAccount?.accessToken || !activeAccount?.phoneNumberId)) {
         return res.status(400).json({ error: "This conversation's WhatsApp account is missing API credentials. Please reconnect it in Settings." });
       }
@@ -2573,7 +2580,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/notifications/:id/send", isAuthenticated as RequestHandler, async (req: any, res) => {
+  app.post("/api/notifications/:id/send", isAuthenticated as RequestHandler, requireActiveSubscription, async (req: any, res) => {
     try {
       const notification = await storage.getNotification(req.params.id);
       if (!notification) {
@@ -3215,9 +3222,9 @@ export async function registerRoutes(
   // Grant/revoke free access (super_admin only)
   app.patch("/api/admin/users/:id/access", requireSuperAdmin, async (req, res) => {
     try {
-      const { grantedFreeAccess, subscriptionStatus } = req.body;
+      const { grantedFreeAccess, subscriptionStatus, hasPaid } = req.body;
       const userId = req.params.id as string;
-      
+
       const updates: any = { updatedAt: new Date() };
       if (typeof grantedFreeAccess === "boolean") {
         updates.grantedFreeAccess = grantedFreeAccess;
@@ -3225,7 +3232,15 @@ export async function registerRoutes(
       if (subscriptionStatus) {
         updates.subscriptionStatus = subscriptionStatus;
       }
-      
+      if (typeof hasPaid === "boolean") {
+        updates.hasPaid = hasPaid;
+        // Manually marking someone paid/premium should actually unlock
+        // sending (hasActiveSubscription requires status "active" too).
+        if (hasPaid && !subscriptionStatus) {
+          updates.subscriptionStatus = "active";
+        }
+      }
+
       const user = await authStorage.updateUserSubscription(userId, updates);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
@@ -3254,6 +3269,162 @@ export async function registerRoutes(
       });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch admin stats" });
+    }
+  });
+
+  // ============== Visitor Analytics ==============
+  // No auth required - this fires from the public landing page too, before
+  // anyone has logged in, so we can see the full visitor funnel.
+  app.post("/api/analytics/pageview", async (req: any, res) => {
+    try {
+      const { path: pagePath, sessionId, referrer } = req.body || {};
+      if (!pagePath || !sessionId) {
+        return res.status(400).json({ error: "path and sessionId are required" });
+      }
+      const userId = req.user?.claims?.sub || null;
+      await db.insert(pageViews).values({
+        path: String(pagePath).slice(0, 500),
+        sessionId: String(sessionId).slice(0, 200),
+        referrer: referrer ? String(referrer).slice(0, 500) : null,
+        userAgent: req.headers["user-agent"]?.slice(0, 500) || null,
+        userId,
+      });
+      res.sendStatus(204);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to record page view" });
+    }
+  });
+
+  app.get("/api/admin/visitors", requireSuperAdmin, async (req, res) => {
+    try {
+      const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+      const [last24h] = await db
+        .select({ count: sqlOp<number>`count(distinct ${pageViews.sessionId})` })
+        .from(pageViews)
+        .where(gte(pageViews.timestamp, since24h));
+
+      const [last7d] = await db
+        .select({ count: sqlOp<number>`count(distinct ${pageViews.sessionId})` })
+        .from(pageViews)
+        .where(gte(pageViews.timestamp, since7d));
+
+      const [allTime] = await db
+        .select({ count: sqlOp<number>`count(distinct ${pageViews.sessionId})` })
+        .from(pageViews);
+
+      const recent = await db
+        .select()
+        .from(pageViews)
+        .orderBy(desc(pageViews.timestamp))
+        .limit(100);
+
+      res.json({
+        visitors24h: Number(last24h?.count || 0),
+        visitors7d: Number(last7d?.count || 0),
+        visitorsAllTime: Number(allTime?.count || 0),
+        recentViews: recent,
+      });
+    } catch (error) {
+      console.error("Visitor analytics error:", error);
+      res.status(500).json({ error: "Failed to fetch visitor analytics" });
+    }
+  });
+
+  // ============== Subscription / Razorpay ==============
+  app.get("/api/subscription/status", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await authStorage.getUser(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      res.json({
+        subscriptionStatus: user.subscriptionStatus,
+        hasPaid: user.hasPaid,
+        grantedFreeAccess: user.grantedFreeAccess,
+        trialEndsAt: user.trialEndsAt,
+        isActive: await hasActiveSubscription(userId),
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch subscription status" });
+    }
+  });
+
+  app.post("/api/subscription/create", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await authStorage.getUser(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      if (!process.env.RAZORPAY_KEY_ID) {
+        return res.status(500).json({ error: "Payments are not configured yet. Please try again later." });
+      }
+
+      const subscription = await razorpayApi.createSubscription(
+        user.email || "",
+        `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email || "Customer"
+      );
+
+      await authStorage.updateUserSubscription(userId, {
+        razorpaySubscriptionId: subscription.id,
+      });
+
+      res.json({
+        subscriptionId: subscription.id,
+        keyId: process.env.RAZORPAY_KEY_ID,
+      });
+    } catch (error: any) {
+      console.error("Failed to create Razorpay subscription:", error);
+      res.status(500).json({ error: "Failed to start subscription. Please try again." });
+    }
+  });
+
+  // Razorpay calls this directly - no user session exists, verified by
+  // webhook signature instead. Uses the raw request body captured in
+  // index.ts, since re-serialized JSON won't match the signed bytes.
+  app.post("/api/webhooks/razorpay", async (req: any, res) => {
+    try {
+      const signature = req.headers["x-razorpay-signature"] as string;
+      const rawBody = req.rawBody?.toString() || "";
+
+      if (!razorpayApi.verifyWebhookSignature(rawBody, signature)) {
+        console.error("[Razorpay Webhook] Invalid signature");
+        return res.sendStatus(400);
+      }
+
+      const event = req.body.event;
+      const payload = req.body.payload;
+      console.log(`[Razorpay Webhook] Received event: ${event}`);
+
+      const subscriptionId = payload?.subscription?.entity?.id;
+
+      if (event === "subscription.activated" || event === "subscription.charged") {
+        if (subscriptionId) {
+          const [user] = await db.select().from(users).where(eq(users.razorpaySubscriptionId, subscriptionId));
+          if (user) {
+            await authStorage.updateUserSubscription(user.id, {
+              hasPaid: true,
+              subscriptionStatus: "active",
+            });
+            console.log(`[Razorpay Webhook] User ${user.email} marked active/paid`);
+          }
+        }
+      } else if (["subscription.cancelled", "subscription.halted", "subscription.completed"].includes(event)) {
+        if (subscriptionId) {
+          const [user] = await db.select().from(users).where(eq(users.razorpaySubscriptionId, subscriptionId));
+          if (user) {
+            await authStorage.updateUserSubscription(user.id, { subscriptionStatus: "cancelled" });
+            console.log(`[Razorpay Webhook] User ${user.email} subscription cancelled`);
+          }
+        }
+      } else if (event === "payment.failed") {
+        console.error("[Razorpay Webhook] Payment failed:", JSON.stringify(payload?.payment?.entity));
+      }
+
+      res.sendStatus(200);
+    } catch (error) {
+      console.error("[Razorpay Webhook] Error:", error);
+      res.sendStatus(500);
     }
   });
 

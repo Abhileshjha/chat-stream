@@ -34,9 +34,33 @@ export const users = pgTable("users", {
   subscriptionId: varchar("subscription_id"),
   hasPaid: boolean("has_paid").notNull().default(false),
   grantedFreeAccess: boolean("granted_free_access").notNull().default(false),
+  trialEndsAt: timestamp("trial_ends_at"),
+  razorpayCustomerId: varchar("razorpay_customer_id"),
+  razorpaySubscriptionId: varchar("razorpay_subscription_id"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
+
+// Visitor/page-view tracking for the admin analytics dashboard.
+export const pageViews = pgTable(
+  "page_views",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    sessionId: varchar("session_id").notNull(),
+    userId: varchar("user_id"),
+    path: varchar("path", { length: 500 }).notNull(),
+    referrer: varchar("referrer", { length: 500 }),
+    userAgent: varchar("user_agent", { length: 500 }),
+    timestamp: timestamp("timestamp").defaultNow(),
+  },
+  (table) => [
+    index("IDX_page_views_timestamp").on(table.timestamp),
+    index("IDX_page_views_session").on(table.sessionId),
+  ]
+);
+
+export type PageView = typeof pageViews.$inferSelect;
+export type InsertPageView = typeof pageViews.$inferInsert;
