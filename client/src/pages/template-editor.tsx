@@ -207,9 +207,18 @@ export default function TemplateEditor() {
       let errorMsg = "Failed to save template. Please try again.";
       try {
         if (error?.message) {
-          const colonIdx = error.message.indexOf(":");
-          const jsonPart = colonIdx !== -1 ? error.message.slice(colonIdx + 1).trim() : error.message;
-          const parsed = JSON.parse(jsonPart);
+          // Locally-thrown validation errors are plain JSON. Errors from
+          // apiRequest are formatted as "<status>: <json>" - a naive split on
+          // the first colon breaks the JSON itself (e.g. {"error":"..."}), so
+          // try parsing the whole message first before falling back to that.
+          let parsed;
+          try {
+            parsed = JSON.parse(error.message);
+          } catch {
+            const colonIdx = error.message.indexOf(":");
+            const jsonPart = colonIdx !== -1 ? error.message.slice(colonIdx + 1).trim() : error.message;
+            parsed = JSON.parse(jsonPart);
+          }
           errorMsg = parsed.details || parsed.error || errorMsg;
         }
       } catch {}
