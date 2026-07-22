@@ -27,6 +27,7 @@ import NotificationEditor from "@/pages/notification-editor";
 import NotificationReport from "@/pages/notification-report";
 import Landing from "@/pages/landing";
 import Login from "@/pages/login";
+import AdminLogin from "@/pages/admin-login";
 import Privacy from "@/pages/privacy";
 import Terms from "@/pages/terms";
 import Refund from "@/pages/refund";
@@ -74,6 +75,7 @@ function PublicRouter() {
     <Switch>
       <Route path="/" component={Landing} />
       <Route path="/login" component={Login} />
+      <Route path="/admin-login" component={AdminLogin} />
       <Route path="/privacy" component={Privacy} />
       <Route path="/terms" component={Terms} />
       <Route path="/refund" component={Refund} />
