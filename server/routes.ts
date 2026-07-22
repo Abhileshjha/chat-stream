@@ -6,8 +6,8 @@ import { insertTemplateSchema, insertCampaignSchema, insertMessageSchema, type W
 import { db } from "@db";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
-import { authStorage } from "./replit_integrations/auth/storage";
-import { isAuthenticated } from "./replit_integrations/auth/replitAuth";
+import { authStorage } from "./auth/storage";
+import { isAuthenticated } from "./auth/localAuth";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -37,6 +37,45 @@ const allowedExtensions: Record<string, string[]> = {
   "video/quicktime": [".mov"],
   "application/pdf": [".pdf"],
 };
+
+// Meta requires header media to be either a publicly-reachable URL or an
+// uploaded media ID - a locally-stored /uploads/... path is neither, so
+// resolve it to a real Meta media ID before it's ever used in a send call.
+async function resolveHeaderMediaParam(
+  mediaUrl: string,
+  mediaType: "image" | "video" | "document",
+  phoneNumberId: string,
+  accessToken: string
+): Promise<any> {
+  if (/^https?:\/\//i.test(mediaUrl)) {
+    return { type: mediaType, [mediaType]: { link: mediaUrl } };
+  }
+
+  const localPath = mediaUrl.startsWith("/uploads/")
+    ? path.join(uploadDir, path.basename(mediaUrl))
+    : null;
+
+  if (!localPath || !fs.existsSync(localPath)) {
+    throw new Error(`Header media file not found: ${mediaUrl}`);
+  }
+
+  const fileBuffer = fs.readFileSync(localPath);
+  const ext = path.extname(localPath).toLowerCase();
+  const mimeMap: Record<string, string> = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp",
+    ".mp4": "video/mp4", ".mov": "video/quicktime",
+    ".pdf": "application/pdf", ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  };
+  const mimeType = mimeMap[ext] || "application/octet-stream";
+
+  const uploadResult = await whatsappApi.uploadMedia(phoneNumberId, accessToken, fileBuffer, mimeType, path.basename(localPath));
+  if (!uploadResult.success || !uploadResult.data?.id) {
+    throw new Error(`Failed to upload header media to Meta: ${uploadResult.error?.message || "Unknown error"}`);
+  }
+
+  return { type: mediaType, [mediaType]: { id: uploadResult.data.id } };
+}
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -223,10 +262,13 @@ export async function registerRoutes(
           const qr = phoneRes.data.quality_rating || account.qualityRating;
           const limitTier = phoneRes.data.messaging_limit_tier;
           const newLimit = limitTierMap[limitTier] || account.messagingLimit;
+          // Meta returns this field UPPERCASE (e.g. "CONNECTED", "PENDING") while the
+          // rest of the app's status checks are lowercase - normalize to match.
+          const normalizedStatus = phoneRes.data.status?.toLowerCase() || account.status;
           await storage.updateAccount(active.accountId, {
             qualityRating: qr,
             messagingLimit: newLimit,
-            status: phoneRes.data.status || account.status,
+            status: normalizedStatus,
           });
           syncResults.phoneAnalytics = {
             qualityRating: qr,
@@ -1062,6 +1104,19 @@ export async function registerRoutes(
           await new Promise(resolve => setTimeout(resolve, 100));
         } catch (err: any) {
           console.error(`Failed to send to ${recipientPhone}:`, err.message);
+          try {
+            await storage.createMessage({
+              accountId: activeAccount.id,
+              campaignId: campaign.id,
+              templateId: template.id,
+              recipientPhone,
+              status: "failed",
+              errorCode: "EXCEPTION",
+              errorDescription: err.message || "Unexpected error while sending",
+            });
+          } catch (persistErr: any) {
+            console.error(`Also failed to record the failure for ${recipientPhone}:`, persistErr.message);
+          }
           failedCount++;
         }
       }
@@ -1206,7 +1261,7 @@ export async function registerRoutes(
   });
 
   // ============== Settings ==============
-  app.get("/api/settings", async (req, res) => {
+  app.get("/api/settings", isAuthenticated as RequestHandler, async (req, res) => {
     try {
       const settings = await storage.getSettings();
       res.json(settings || null);
@@ -1215,14 +1270,14 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/settings", async (req, res) => {
+  app.put("/api/settings", isAuthenticated as RequestHandler, async (req, res) => {
     try {
       const validatedSettings = apiSettingsSchema.parse(req.body);
       const settings = await storage.saveSettings(validatedSettings);
-      
+
       // Broadcast settings update
       broadcast("settings-updated", { connected: true });
-      
+
       res.json(settings);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -1232,7 +1287,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/settings/test", async (req, res) => {
+  app.post("/api/settings/test", isAuthenticated as RequestHandler, async (req, res) => {
     try {
       const settings = await storage.getSettings();
       if (!settings || !settings.accessToken) {
@@ -1299,8 +1354,17 @@ export async function registerRoutes(
 
                 const accounts = await storage.getAccounts();
                 const account = accounts.find(a => a.phoneNumberId === phoneNumberId);
-                const accountId = account?.id || null;
-                console.log(`[Webhook] Matched account: ${account?.name || "none"} (id: ${accountId})`);
+
+                if (!account) {
+                  console.error(
+                    `[Webhook] DROPPED incoming message from ${from}: no connected account has phoneNumberId="${phoneNumberId}". ` +
+                    `Known account phoneNumberIds: ${accounts.map(a => a.phoneNumberId).join(", ") || "(none connected)"}. ` +
+                    `This message will NOT appear anywhere in the app - check Settings for a phoneNumberId mismatch.`
+                  );
+                  continue;
+                }
+                const accountId = account.id;
+                console.log(`[Webhook] Matched account: ${account.name} (id: ${accountId})`);
 
                 let msgContent = "";
                 if (incoming.type === "text") {
@@ -1335,9 +1399,9 @@ export async function registerRoutes(
                 }
                 if (!msgContent) msgContent = "[Unsupported message]";
 
-                let conversation = await storage.getConversationByPhone(from, accountId || "");
+                let conversation = await storage.getConversationByPhone(from, accountId);
                 if (!conversation) {
-                  conversation = await storage.createConversation(from, contactName, accountId || "");
+                  conversation = await storage.createConversation(from, contactName, accountId);
                   await storage.updateConversation(conversation.id, {
                     lastMessage: msgContent,
                     lastMessageAt: new Date(),
@@ -1573,8 +1637,13 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/accounts/:id", async (req, res) => {
+  app.delete("/api/accounts/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const userId = req.user?.claims?.sub;
+      const account = await storage.getAccount(req.params.id);
+      if (!account || account.userId !== userId) {
+        return res.status(404).json({ error: "Account not found" });
+      }
       const deleted = await storage.deleteAccount(req.params.id);
       if (!deleted) {
         return res.status(404).json({ error: "Account not found" });
@@ -1632,8 +1701,9 @@ export async function registerRoutes(
 
       if (response.ok) {
         const data = JSON.parse(responseText) as any;
-        res.json({ 
-          success: true, 
+        await storage.updateAccount(accountId, { status: "connected" });
+        res.json({
+          success: true,
           message: `Connection successful! Phone: ${data.display_phone_number || account.phoneNumber}`
         });
       } else {
@@ -1645,8 +1715,9 @@ export async function registerRoutes(
         } catch (e) {
           console.log("Meta API raw error response:", responseText);
         }
-        res.json({ 
-          success: false, 
+        await storage.updateAccount(accountId, { status: "disconnected" });
+        res.json({
+          success: false,
           message: errorMessage
         });
       }
@@ -2040,8 +2111,14 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/contacts/:id", async (req, res) => {
+  app.patch("/api/contacts/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const existing = await storage.getContact(req.params.id);
+      if (!existing || existing.accountId !== active.accountId) {
+        return res.status(404).json({ error: "Contact not found" });
+      }
       const contact = await storage.updateContact(req.params.id, req.body);
       if (!contact) {
         return res.status(404).json({ error: "Contact not found" });
@@ -2052,8 +2129,14 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/contacts/:id", async (req, res) => {
+  app.delete("/api/contacts/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const existing = await storage.getContact(req.params.id);
+      if (!existing || existing.accountId !== active.accountId) {
+        return res.status(404).json({ error: "Contact not found" });
+      }
       const deleted = await storage.deleteContact(req.params.id);
       if (!deleted) {
         return res.status(404).json({ error: "Contact not found" });
@@ -2117,8 +2200,14 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/lists/:id", async (req, res) => {
+  app.delete("/api/lists/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const existing = await storage.getList(req.params.id);
+      if (!existing || existing.accountId !== active.accountId) {
+        return res.status(404).json({ error: "List not found" });
+      }
       const deleted = await storage.deleteList(req.params.id);
       if (!deleted) {
         return res.status(404).json({ error: "List not found" });
@@ -2152,8 +2241,14 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/tags/:id", async (req, res) => {
+  app.delete("/api/tags/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const existing = await storage.getTag(req.params.id);
+      if (!existing || existing.accountId !== active.accountId) {
+        return res.status(404).json({ error: "Tag not found" });
+      }
       const deleted = await storage.deleteTag(req.params.id);
       if (!deleted) {
         return res.status(404).json({ error: "Tag not found" });
@@ -2234,8 +2329,15 @@ export async function registerRoutes(
 
       const userId = req.user?.claims?.sub;
       const accounts = userId ? await storage.getAccountsByUser(userId) : await storage.getAccounts();
-      const activeAccount = accounts.find(a => a.status === "connected") || accounts[0];
+      // Always use the account this conversation belongs to - never substitute
+      // a different connected account, or the reply can go out from the wrong
+      // WhatsApp number entirely.
+      const activeAccount = accounts.find(a => a.id === conversation.accountId);
       const isOutbound = req.body.direction === "outbound" || req.body.direction === "outgoing";
+
+      if (isOutbound && (!activeAccount?.accessToken || !activeAccount?.phoneNumberId)) {
+        return res.status(400).json({ error: "This conversation's WhatsApp account is missing API credentials. Please reconnect it in Settings." });
+      }
 
       if (isOutbound && activeAccount?.accessToken && activeAccount?.phoneNumberId && conversation.contactPhone) {
         let metaResult;
@@ -2251,7 +2353,7 @@ export async function registerRoutes(
             const mediaUrl = headerComp.mediaUrl;
             if (mediaUrl) {
               const mediaType = headerComp.format === "IMAGE" ? "image" : headerComp.format === "VIDEO" ? "video" : "document";
-              headerParams = [{ type: mediaType, [mediaType]: { link: mediaUrl } }];
+              headerParams = [await resolveHeaderMediaParam(mediaUrl, mediaType, activeAccount.phoneNumberId, activeAccount.accessToken)];
             }
           }
 
@@ -2481,12 +2583,16 @@ export async function registerRoutes(
 
       const userId = req.user?.claims?.sub;
       const accounts = userId ? await storage.getAccountsByUser(userId) : await storage.getAccounts();
-      const activeAccount = accounts.find(a => a.id === notification.accountId && a.status === "connected")
-        || accounts.find(a => a.status === "connected")
-        || accounts[0];
+      // Always send from the account this notification was created for - never
+      // silently substitute a different connected account, or a message can go
+      // out from the wrong WhatsApp number entirely.
+      const activeAccount = accounts.find(a => a.id === notification.accountId);
 
-      if (!activeAccount?.accessToken || !activeAccount?.phoneNumberId) {
-        return res.status(400).json({ error: "No connected WhatsApp account with valid credentials" });
+      if (!activeAccount) {
+        return res.status(400).json({ error: "The WhatsApp account this notification belongs to was not found." });
+      }
+      if (!activeAccount.accessToken || !activeAccount.phoneNumberId) {
+        return res.status(400).json({ error: `${activeAccount.name} is missing API credentials. Please reconnect it in Settings.` });
       }
 
       const listIds = notification.listIds || [];
@@ -2526,10 +2632,11 @@ export async function registerRoutes(
         }
         const mediaType = headerComp.format === "IMAGE" ? "image" :
                          headerComp.format === "VIDEO" ? "video" : "document";
-        headerParams = [{
-          type: mediaType,
-          [mediaType]: { link: mediaUrl },
-        }];
+        try {
+          headerParams = [await resolveHeaderMediaParam(mediaUrl, mediaType, activeAccount.phoneNumberId, activeAccount.accessToken)];
+        } catch (mediaErr: any) {
+          return res.status(400).json({ error: mediaErr.message || "Failed to prepare header media for sending" });
+        }
       } else if (headerComp && headerComp.format === "TEXT" && headerComp.text?.includes("{{")) {
         const varCount = (headerComp.text.match(/\{\{\d+\}\}/g) || []).length;
         if (varCount > 0) {
@@ -2634,6 +2741,19 @@ export async function registerRoutes(
           await new Promise(resolve => setTimeout(resolve, 100));
         } catch (err: any) {
           console.error(`Failed to send to ${recipientPhone}:`, err.message);
+          try {
+            await storage.createMessage({
+              accountId: activeAccount.id,
+              campaignId: notification.id,
+              templateId: template.id,
+              recipientPhone,
+              status: "failed",
+              errorCode: "EXCEPTION",
+              errorDescription: err.message || "Unexpected error while sending",
+            });
+          } catch (persistErr: any) {
+            console.error(`Also failed to record the failure for ${recipientPhone}:`, persistErr.message);
+          }
           failedCount++;
         }
       }

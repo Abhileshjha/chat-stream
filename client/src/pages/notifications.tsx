@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +31,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Notification, Template } from "@shared/schema";
 
 export default function Notifications() {
+  const [, navigate] = useLocation();
   const { toast } = useToast();
 
   const { data: notifications = [], isLoading } = useQuery<Notification[]>({
@@ -194,7 +195,16 @@ export default function Notifications() {
                   const template = templates.find((t) => t.id === notification.templateId);
                   
                   return (
-                    <Card key={notification.id} className="hover-elevate" data-testid={`notification-${notification.id}`}>
+                    <Card
+                      key={notification.id}
+                      className="hover-elevate cursor-pointer"
+                      data-testid={`notification-${notification.id}`}
+                      onClick={() => navigate(
+                        notification.status === "draft"
+                          ? `/notifications/${notification.id}/edit`
+                          : `/notifications/${notification.id}/report`
+                      )}
+                    >
                       <CardContent className="p-4">
                         <div className="flex items-start justify-between gap-4">
                           <div className="flex items-start gap-3">
@@ -206,7 +216,7 @@ export default function Notifications() {
                               </p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                             {getStatusBadge(notification.status)}
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>

@@ -7,7 +7,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
-import { useWebSocket } from "@/hooks/use-websocket";
+import { useRealtimeSync } from "@/hooks/use-realtime-sync";
 import { useAuth } from "@/hooks/use-auth";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
@@ -25,6 +25,7 @@ import Notifications from "@/pages/notifications";
 import NotificationEditor from "@/pages/notification-editor";
 import NotificationReport from "@/pages/notification-report";
 import Landing from "@/pages/landing";
+import Login from "@/pages/login";
 import Privacy from "@/pages/privacy";
 import Terms from "@/pages/terms";
 import Refund from "@/pages/refund";
@@ -69,6 +70,7 @@ function PublicRouter() {
   return (
     <Switch>
       <Route path="/" component={Landing} />
+      <Route path="/login" component={Login} />
       <Route path="/privacy" component={Privacy} />
       <Route path="/terms" component={Terms} />
       <Route path="/refund" component={Refund} />
@@ -80,7 +82,7 @@ function PublicRouter() {
 }
 
 function AuthenticatedApp() {
-  useWebSocket();
+  useRealtimeSync();
 
   const { data: templates = [] } = useQuery<Template[]>({
     queryKey: ["/api/templates"],

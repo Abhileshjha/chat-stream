@@ -3,7 +3,6 @@ import { db } from "@db";
 import { eq, desc } from "drizzle-orm";
 
 // Interface for auth storage operations
-// (IMPORTANT) These user operations are mandatory for Replit Auth.
 export interface IAuthStorage {
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
@@ -14,10 +13,16 @@ export interface IAuthStorage {
   deleteUser(userId: string): Promise<boolean>;
 }
 
+// Never let the password hash leave this module - every method below strips it
+// before returning, since callers only ever need it for cache-fresh auth checks.
+function hidePassword(user: User): User {
+  return { ...user, passwordHash: null };
+}
+
 class AuthStorage implements IAuthStorage {
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
-    return user;
+    return user ? hidePassword(user) : undefined;
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
@@ -32,11 +37,12 @@ class AuthStorage implements IAuthStorage {
         },
       })
       .returning();
-    return user;
+    return hidePassword(user);
   }
 
   async getAllUsers(): Promise<User[]> {
-    return await db.select().from(users).orderBy(desc(users.createdAt));
+    const all = await db.select().from(users).orderBy(desc(users.createdAt));
+    return all.map(hidePassword);
   }
 
   async updateUserRole(userId: string, role: string): Promise<User | undefined> {
@@ -45,7 +51,7 @@ class AuthStorage implements IAuthStorage {
       .set({ role, updatedAt: new Date() })
       .where(eq(users.id, userId))
       .returning();
-    return user;
+    return user ? hidePassword(user) : undefined;
   }
 
   async updateUserSubscription(userId: string, updates: Partial<User>): Promise<User | undefined> {
@@ -54,7 +60,7 @@ class AuthStorage implements IAuthStorage {
       .set({ ...updates, updatedAt: new Date() })
       .where(eq(users.id, userId))
       .returning();
-    return user;
+    return user ? hidePassword(user) : undefined;
   }
 
   async getUserStats(userId: string): Promise<{ contactsCount: number; messagesCount: number; notificationsCount: number }> {

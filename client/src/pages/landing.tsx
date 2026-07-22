@@ -30,12 +30,12 @@ export default function Landing() {
             <Link href="/terms" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Terms</Link>
           </div>
           <div className="flex items-center gap-3">
-            <a href="/api/login">
+            <Link href="/login">
               <Button variant="outline" data-testid="button-login">Log In</Button>
-            </a>
-            <a href="/api/login">
+            </Link>
+            <Link href="/login">
               <Button data-testid="button-get-started">Get Started</Button>
-            </a>
+            </Link>
           </div>
         </div>
       </nav>
@@ -52,11 +52,11 @@ export default function Landing() {
                 Manage templates, track deliveries, and grow your business with enterprise-grade messaging.
               </p>
               <div className="flex flex-wrap gap-4">
-                <a href="/api/login">
+                <Link href="/login">
                   <Button size="lg" className="gap-2" data-testid="button-start-free">
                     Start Free Trial <ArrowRight className="h-4 w-4" />
                   </Button>
-                </a>
+                </Link>
                 <a href="#features">
                   <Button size="lg" variant="outline">
                     Learn More
@@ -232,11 +232,11 @@ export default function Landing() {
                 </li>
               </ul>
 
-              <a href="/api/login" className="block">
+              <Link href="/login" className="block">
                 <Button className="w-full" size="lg" data-testid="button-subscribe">
                   Start 7-Day Free Trial
                 </Button>
-              </a>
+              </Link>
               <p className="text-center text-sm text-muted-foreground">
                 No credit card required to start
               </p>
@@ -265,7 +265,7 @@ export default function Landing() {
               <ul className="space-y-2 text-sm text-muted-foreground">
                 <li><a href="#features" className="hover:text-foreground transition-colors">Features</a></li>
                 <li><a href="#pricing" className="hover:text-foreground transition-colors">Pricing</a></li>
-                <li><a href="/api/login" className="hover:text-foreground transition-colors">Login</a></li>
+                <li><Link href="/login" className="hover:text-foreground transition-colors">Login</Link></li>
               </ul>
             </div>
             

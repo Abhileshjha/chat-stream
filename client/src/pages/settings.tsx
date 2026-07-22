@@ -734,7 +734,7 @@ function AddNumberSection({
             id="manual-phone-number-id"
             value={manualAccount.phoneNumberId}
             onChange={(e) => setManualAccount((prev: any) => ({ ...prev, phoneNumberId: e.target.value }))}
-            placeholder="e.g., 123456789012345 (auto-filled if detected above)"
+            placeholder="e.g., 123456789012345 (click a detected number above, or type it here)"
             className="font-mono text-sm"
             data-testid="input-manual-phone-number-id"
           />

@@ -8,7 +8,7 @@ export type UserRole = "super_admin" | "admin" | "user";
 export type SubscriptionStatus = "active" | "inactive" | "trial" | "cancelled";
 
 // Session storage table.
-// (IMPORTANT) This table is mandatory for Replit Auth, don't drop it.
+// (IMPORTANT) This table is required by connect-pg-simple for Passport sessions, don't drop it.
 export const sessions = pgTable(
   "sessions",
   {
@@ -20,10 +20,12 @@ export const sessions = pgTable(
 );
 
 // User storage table.
-// (IMPORTANT) This table is mandatory for Replit Auth, don't drop it.
+// id is the Facebook profile id for users signed in via Facebook Login,
+// or a generated uuid for users registered with email + password.
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   email: varchar("email").unique(),
+  passwordHash: varchar("password_hash"),
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),

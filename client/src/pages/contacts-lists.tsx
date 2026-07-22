@@ -150,7 +150,7 @@ export default function ContactsLists() {
                     </div>
                     <div className="mt-4 flex items-center gap-2">
                       <Users className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">{list.contactCount.toLocaleString()}</span>
+                      <span className="text-sm font-medium">{(list.contactCount ?? 0).toLocaleString()}</span>
                       <span className="text-sm text-muted-foreground">contacts</span>
                     </div>
                   </CardContent>

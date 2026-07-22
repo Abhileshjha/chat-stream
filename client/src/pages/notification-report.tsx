@@ -338,39 +338,42 @@ export default function NotificationReport() {
               </div>
             ) : (
               <div className="space-y-1">
-                <div className="grid grid-cols-5 gap-2 px-3 py-2 text-xs font-medium text-muted-foreground border-b sticky top-0 bg-background">
+                <div className="grid grid-cols-[1fr_1fr_1fr_1fr_2fr] gap-2 px-3 py-2 text-xs font-medium text-muted-foreground border-b sticky top-0 bg-background">
                   <span>Phone Number</span>
                   <span>Status</span>
                   <span>Sent</span>
                   <span>Delivered</span>
                   <span>Error</span>
                 </div>
-                {filteredMessages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className="grid grid-cols-5 gap-2 px-3 py-2.5 text-sm border-b last:border-0 items-center"
-                    data-testid={`report-msg-${msg.id}`}
-                  >
-                    <span className="font-mono text-xs">{msg.phone}</span>
-                    <span>
-                      <Badge
-                        variant={
-                          msg.status === "delivered" || msg.status === "read" ? "default"
-                          : msg.status === "failed" ? "destructive"
-                          : "secondary"
-                        }
-                        className="text-xs"
-                      >
-                        {msg.status}
-                      </Badge>
-                    </span>
-                    <span className="text-xs text-muted-foreground">{formatDate(msg.sentAt)}</span>
-                    <span className="text-xs text-muted-foreground">{formatDate(msg.deliveredAt)}</span>
-                    <span className="text-xs text-muted-foreground truncate">
-                      {msg.errorCode ? `[${msg.errorCode}] ${msg.errorDescription || ""}` : "-"}
-                    </span>
-                  </div>
-                ))}
+                {filteredMessages.map((msg) => {
+                  const errorText = [msg.errorCode, msg.errorDescription].filter(Boolean).join(": ");
+                  return (
+                    <div
+                      key={msg.id}
+                      className="grid grid-cols-[1fr_1fr_1fr_1fr_2fr] gap-2 px-3 py-2.5 text-sm border-b last:border-0 items-center"
+                      data-testid={`report-msg-${msg.id}`}
+                    >
+                      <span className="font-mono text-xs">{msg.phone}</span>
+                      <span>
+                        <Badge
+                          variant={
+                            msg.status === "delivered" || msg.status === "read" ? "default"
+                            : msg.status === "failed" ? "destructive"
+                            : "secondary"
+                          }
+                          className="text-xs"
+                        >
+                          {msg.status}
+                        </Badge>
+                      </span>
+                      <span className="text-xs text-muted-foreground">{formatDate(msg.sentAt)}</span>
+                      <span className="text-xs text-muted-foreground">{formatDate(msg.deliveredAt)}</span>
+                      <span className="text-xs text-destructive break-words" title={errorText || undefined}>
+                        {errorText || "-"}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </ScrollArea>

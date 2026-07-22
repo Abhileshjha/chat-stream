@@ -184,8 +184,11 @@ export function AppSidebar({
       await apiRequest("PUT", `/api/accounts/${accountId}/active`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/accounts"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
+      // Nearly every query in the app is scoped to the active account server-side
+      // (contacts, templates, campaigns, notifications, conversations, dashboard
+      // data, analytics...). Rather than tracking every key that needs refreshing
+      // whenever a new one is added, invalidate everything on account switch.
+      queryClient.invalidateQueries();
     },
   });
 

@@ -121,9 +121,19 @@ export async function uploadSessionMedia(
     return uploadRes;
   }
 
+  // Meta's resumable upload endpoint has been observed returning the "h" field
+  // as multiple newline-joined handles instead of a single token. Only the
+  // final one is the completed upload's handle - take the last non-empty line.
+  const rawHandle = uploadRes.data.h;
+  const handleLines = rawHandle.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (handleLines.length > 1) {
+    console.warn(`[Media Upload] Received ${handleLines.length} handles instead of 1, using the last one`);
+  }
+  const handle = handleLines[handleLines.length - 1] || rawHandle;
+
   return {
     success: true,
-    data: { handle: uploadRes.data.h },
+    data: { handle },
   };
 }
 
