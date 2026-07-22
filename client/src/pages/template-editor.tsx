@@ -124,14 +124,17 @@ export default function TemplateEditor() {
       if (!bodyText.trim()) {
         throw new Error(JSON.stringify({ error: "Template body text is required" }));
       }
+      if (headerType === "media" && !headerMediaUrl) {
+        throw new Error(JSON.stringify({ error: `Please upload a ${mediaType} for the header before submitting - WhatsApp requires a sample media file for media headers.` }));
+      }
 
       const components: any[] = [];
-      
+
       if (headerType === "text" && headerText) {
         components.push({ type: "HEADER", format: "TEXT", text: headerText });
       } else if (headerType === "media") {
-        components.push({ 
-          type: "HEADER", 
+        components.push({
+          type: "HEADER",
           format: mediaType.toUpperCase(),
           mediaUrl: headerMediaUrl || undefined,
         });

@@ -624,6 +624,14 @@ export async function registerRoutes(
         });
       }
 
+      const headerComp = (data.components as any[])?.find((c: any) => c.type === "HEADER");
+      if (!saveAsDraft && headerComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format) && !headerComp.mediaUrl) {
+        return res.status(400).json({
+          error: `A ${headerComp.format.toLowerCase()} is required for this header`,
+          details: "WhatsApp requires a sample media file for media headers - please upload one before submitting.",
+        });
+      }
+
       const normalizedName = data.name.toLowerCase().replace(/[^a-z0-9_]/g, "_");
       let metaTemplateId: string | null = null;
       let templateStatus = "DRAFT";
