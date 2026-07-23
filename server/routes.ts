@@ -128,7 +128,30 @@ async function resolveTemplateHeaderParams(
         activeAccount.businessAccountId, activeAccount.accessToken, template.name
       );
       if (metaLink) {
-        return [{ type: mediaType, [mediaType]: { link: metaLink } }];
+        // This CDN link is short-lived (it's Meta's template-preview link, not
+        // meant for reuse across a send) - confirmed directly: a bulk send
+        // reusing the same fetched link sent fine for the first ~130
+        // recipients, then failed with "131053 Media upload error" for the
+        // remaining thousands once it expired. Download it once and
+        // re-upload to Meta's own media store to get a stable media ID that
+        // doesn't expire mid-send.
+        const fileRes = await fetch(metaLink);
+        if (!fileRes.ok) throw new Error(`HTTP ${fileRes.status} downloading header media from Meta`);
+        const buffer = Buffer.from(await fileRes.arrayBuffer());
+        const ext = path.extname(new URL(metaLink).pathname).toLowerCase();
+        const mimeMap: Record<string, string> = {
+          ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp",
+          ".mp4": "video/mp4", ".mov": "video/quicktime",
+          ".pdf": "application/pdf",
+        };
+        const defaultMime = mediaType === "image" ? "image/jpeg" : mediaType === "video" ? "video/mp4" : "application/pdf";
+        const mimeType = mimeMap[ext] || defaultMime;
+
+        const uploadResult = await whatsappApi.uploadMedia(activeAccount.phoneNumberId!, activeAccount.accessToken, buffer, mimeType, `header${ext || ""}`);
+        if (uploadResult.success && uploadResult.data?.id) {
+          return [{ type: mediaType, [mediaType]: { id: uploadResult.data.id } }];
+        }
+        console.warn(`Failed to re-upload Meta-hosted header media for "${template.name}", falling back:`, uploadResult.error?.message);
       }
     } catch (e: any) {
       console.warn(`Failed to fetch Meta-hosted header media for "${template.name}", falling back:`, e.message);
