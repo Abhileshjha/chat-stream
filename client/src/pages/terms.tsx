@@ -12,7 +12,7 @@ export default function Terms() {
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                 <MessageSquare className="h-5 w-5" />
               </div>
-              <span className="text-xl font-bold">WhatsApp Broadcast</span>
+              <span className="text-xl font-bold">Convora</span>
             </div>
           </Link>
           <Link href="/">
@@ -31,7 +31,7 @@ export default function Terms() {
           <section>
             <h2 className="text-2xl font-semibold mb-4">1. Acceptance of Terms</h2>
             <p className="text-muted-foreground leading-relaxed">
-              By accessing and using WhatsApp Broadcast ("Service"), you accept and agree to be bound 
+              By accessing and using Convora ("Service"), you accept and agree to be bound 
               by these Terms of Service. If you do not agree to these terms, you should not use our Service.
             </p>
           </section>
@@ -39,7 +39,7 @@ export default function Terms() {
           <section>
             <h2 className="text-2xl font-semibold mb-4">2. Description of Service</h2>
             <p className="text-muted-foreground leading-relaxed">
-              WhatsApp Broadcast provides a platform for businesses to send broadcast messages through 
+              Convora provides a platform for businesses to send broadcast messages through 
               the official WhatsApp Business API. Our Service includes template management, contact 
               management, campaign scheduling, and analytics features.
             </p>
@@ -95,7 +95,7 @@ export default function Terms() {
             <h2 className="text-2xl font-semibold mb-4">7. Intellectual Property</h2>
             <p className="text-muted-foreground leading-relaxed">
               The Service and its original content, features, and functionality are owned by 
-              WhatsApp Broadcast and are protected by international copyright, trademark, and 
+              Convora and are protected by international copyright, trademark, and 
               other intellectual property laws.
             </p>
           </section>
@@ -103,7 +103,7 @@ export default function Terms() {
           <section>
             <h2 className="text-2xl font-semibold mb-4">8. Limitation of Liability</h2>
             <p className="text-muted-foreground leading-relaxed">
-              To the maximum extent permitted by law, WhatsApp Broadcast shall not be liable for any 
+              To the maximum extent permitted by law, Convora shall not be liable for any 
               indirect, incidental, special, consequential, or punitive damages, including loss of 
               profits, data, or business opportunities arising from your use of the Service.
             </p>

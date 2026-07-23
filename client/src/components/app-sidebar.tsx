@@ -350,7 +350,7 @@ export function AppSidebar({
                 <MessageSquare className="h-5 w-5" />
               </div>
               <div className="flex flex-1 flex-col min-w-0">
-                <span className="text-sm font-semibold truncate">{activeAccount?.name || "WhatsApp Broadcast"}</span>
+                <span className="text-sm font-semibold truncate">{activeAccount?.name || "Convora"}</span>
                 <span className="text-xs text-muted-foreground truncate">{activeAccount?.phoneNumber || "No account"}</span>
               </div>
               <ChevronDown className="h-4 w-4 text-muted-foreground" />

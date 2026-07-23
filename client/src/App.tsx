@@ -9,6 +9,7 @@ import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/s
 import { AppSidebar } from "@/components/app-sidebar";
 import { useRealtimeSync } from "@/hooks/use-realtime-sync";
 import { usePageTracking } from "@/hooks/use-page-tracking";
+import { TrialStatusBadge } from "@/components/trial-status-badge";
 import { useAuth } from "@/hooks/use-auth";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
@@ -73,7 +74,7 @@ function AppRouter() {
 function PublicRouter() {
   return (
     <Switch>
-      <Route path="/" component={Landing} />
+      <Route path="/" component={Login} />
       <Route path="/login" component={Login} />
       <Route path="/admin-login" component={AdminLogin} />
       <Route path="/privacy" component={Privacy} />
@@ -127,6 +128,7 @@ function AuthenticatedApp() {
               <SidebarTrigger data-testid="button-sidebar-toggle" />
             </div>
             <div className="flex items-center gap-2">
+              <TrialStatusBadge />
               <ThemeToggle />
             </div>
           </header>
@@ -136,6 +138,31 @@ function AuthenticatedApp() {
         </SidebarInset>
       </div>
     </SidebarProvider>
+  );
+}
+
+function AdminApp() {
+  const { logout } = useAuth();
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <header className="flex h-16 shrink-0 items-center justify-between gap-2 border-b px-6 bg-zinc-950 text-zinc-100">
+        <div className="flex items-center gap-2 font-semibold">
+          <span className="text-purple-400">Convora</span>
+          <span className="text-zinc-500">/ Admin</span>
+        </div>
+        <button
+          onClick={() => logout()}
+          className="text-sm text-zinc-400 hover:text-zinc-100"
+          data-testid="button-admin-logout"
+        >
+          Log out
+        </button>
+      </header>
+      <main className="flex-1 overflow-auto p-6 bg-muted/30">
+        <Admin />
+      </main>
+    </div>
   );
 }
 
@@ -155,19 +182,52 @@ function AppContent() {
     return <PublicRouter />;
   }
 
+  // Super admins get a dedicated admin-only view - none of the customer-facing
+  // messaging features (Dashboard, Templates, Contacts, etc.) are relevant to
+  // that account, so don't show them.
+  if (user.role === "super_admin") {
+    return <AdminApp />;
+  }
+
   return <AuthenticatedApp />;
 }
 
+// convora.tech (and www.) is the public marketing site; app.convora.tech is
+// the actual product. Localhost and the Render *.onrender.com URL are
+// treated as the app, so local dev and the pre-domain deployment keep
+// working exactly as before.
+function isMarketingHost(): boolean {
+  const host = window.location.hostname;
+  return host === "convora.tech" || host === "www.convora.tech";
+}
+
 function App() {
+  const showMarketingSite = isMarketingHost();
+
   return (
     <ErrorBoundary>
       <ThemeProvider defaultTheme="light" storageKey="whatsapp-broadcast-theme">
-        <QueryClientProvider client={queryClient}>
+        {showMarketingSite ? (
           <TooltipProvider>
-            <AppContent />
+            <Switch>
+              <Route path="/" component={Landing} />
+              <Route path="/privacy" component={Privacy} />
+              <Route path="/terms" component={Terms} />
+              <Route path="/refund" component={Refund} />
+              <Route path="/contact" component={Contact} />
+              <Route path="/delete-data" component={DeleteData} />
+              <Route component={Landing} />
+            </Switch>
             <Toaster />
           </TooltipProvider>
-        </QueryClientProvider>
+        ) : (
+          <QueryClientProvider client={queryClient}>
+            <TooltipProvider>
+              <AppContent />
+              <Toaster />
+            </TooltipProvider>
+          </QueryClientProvider>
+        )}
       </ThemeProvider>
     </ErrorBoundary>
   );

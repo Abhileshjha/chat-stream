@@ -69,7 +69,7 @@ export default function Billing() {
       const razorpay = new window.Razorpay({
         key: data.keyId,
         subscription_id: data.subscriptionId,
-        name: "WhatsApp Broadcast",
+        name: "Convora",
         description: "Unlimited Messaging - ₹799/month",
         theme: { color: "#25D366" },
         handler: () => {

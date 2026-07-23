@@ -12,7 +12,7 @@ export default function Privacy() {
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                 <MessageSquare className="h-5 w-5" />
               </div>
-              <span className="text-xl font-bold">WhatsApp Broadcast</span>
+              <span className="text-xl font-bold">Convora</span>
             </div>
           </Link>
           <Link href="/">
@@ -31,7 +31,7 @@ export default function Privacy() {
           <section>
             <h2 className="text-2xl font-semibold mb-4">1. Introduction</h2>
             <p className="text-muted-foreground leading-relaxed">
-              WhatsApp Broadcast ("we", "our", or "us") is committed to protecting your privacy. 
+              Convora ("we", "our", or "us") is committed to protecting your privacy. 
               This Privacy Policy explains how we collect, use, disclose, and safeguard your information 
               when you use our WhatsApp broadcasting platform service.
             </p>

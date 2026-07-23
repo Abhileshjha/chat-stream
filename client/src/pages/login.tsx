@@ -64,7 +64,7 @@ export default function Login() {
           <CardTitle>{mode === "login" ? "Log in" : "Create your account"}</CardTitle>
           <CardDescription>
             {mode === "login"
-              ? "Welcome back to WhatsApp Broadcast"
+              ? "Welcome back to Convora"
               : "Start your 7-day free trial"}
           </CardDescription>
         </CardHeader>
