@@ -16,13 +16,17 @@ declare module "http" {
 
 app.use(
   express.json({
+    // Default 100kb is too small for bulk contact imports (e.g. 2500+
+    // contacts as JSON easily exceeds it), which failed silently with a
+    // generic error before even reaching the route handler.
+    limit: "15mb",
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
   }),
 );
 
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: false, limit: "15mb" }));
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {

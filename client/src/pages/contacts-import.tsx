@@ -19,6 +19,24 @@ import type { ContactList, ContactTag, Contact } from "@shared/schema";
 
 type ImportStep = 1 | 2 | 3;
 
+function parseApiError(error: any, fallback: string): string {
+  try {
+    if (error?.message) {
+      try {
+        const parsed = JSON.parse(error.message);
+        return parsed.details || parsed.error || fallback;
+      } catch {}
+      const colonIdx = error.message.indexOf(":");
+      if (colonIdx !== -1) {
+        const jsonPart = error.message.slice(colonIdx + 1).trim();
+        const parsed = JSON.parse(jsonPart);
+        return parsed.details || parsed.error || fallback;
+      }
+    }
+  } catch {}
+  return error?.message || fallback;
+}
+
 export default function ContactsImport() {
   const [step, setStep] = useState<ImportStep>(1);
   const [selectedList, setSelectedList] = useState<string>("");
@@ -59,10 +77,10 @@ export default function ContactsImport() {
       setParsedContacts([]);
       setCsvHeaders([]);
     },
-    onError: () => {
+    onError: (error: any) => {
       toast({
         title: "Import failed",
-        description: "There was an error importing contacts. Please try again.",
+        description: parseApiError(error, "There was an error importing contacts. Please try again."),
         variant: "destructive",
       });
     },
