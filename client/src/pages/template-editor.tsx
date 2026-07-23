@@ -417,12 +417,15 @@ export default function TemplateEditor() {
                     onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_"))}
                     placeholder="e.g., order_confirmation"
                     className="flex-1"
+                    disabled={!!template?.metaTemplateId}
                     data-testid="input-template-name"
                   />
                   <span className="text-sm text-muted-foreground">{name.length} / 512</span>
                 </div>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Spaces and special characters are not allowed.
+                  {template?.metaTemplateId
+                    ? "This template has already been submitted to WhatsApp - names can't be changed after submission. Duplicate it if you need a different name."
+                    : "Spaces and special characters are not allowed."}
                 </p>
               </div>
 

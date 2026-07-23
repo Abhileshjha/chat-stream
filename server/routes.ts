@@ -43,6 +43,27 @@ const allowedExtensions: Record<string, string[]> = {
   "application/pdf": [".pdf"],
 };
 
+// Conversation previews and message threads used to store a literal
+// "[Template: name]" placeholder for outbound template sends instead of the
+// actual message content, so the inbox never showed what was really sent.
+// Render the template's real body text (with variables substituted where
+// provided) so it reads like an actual conversation.
+function renderTemplatePreview(template: { name: string; components: unknown } | null | undefined, bodyParams?: { type: string; text?: string }[]): string {
+  if (!template) return "[Message sent]";
+  const components = (template.components as any[]) || [];
+  const bodyComp = components.find((c: any) => c.type === "BODY");
+  let text = bodyComp?.text as string | undefined;
+  if (!text) return `[Template: ${template.name}]`;
+
+  if (bodyParams && bodyParams.length > 0) {
+    text = text.replace(/\{\{(\d+)\}\}/g, (_match, index) => {
+      const param = bodyParams[Number(index) - 1];
+      return param?.text ?? `{{${index}}}`;
+    });
+  }
+  return text;
+}
+
 // Meta requires header media to be either a publicly-reachable URL or an
 // uploaded media ID - a locally-stored /uploads/... path is neither, so
 // resolve it to a real Meta media ID before it's ever used in a send call.
@@ -758,14 +779,26 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Template not found" });
       }
       const updates = updateTemplateSchema.parse(req.body);
+
+      // WhatsApp template names are immutable once submitted to Meta - Meta
+      // still only recognizes the original name, so renaming the local copy
+      // silently breaks every future send with "template name does not
+      // exist" while looking fine in the UI.
+      if (updates.name && updates.name !== existing.name && existing.metaTemplateId) {
+        return res.status(400).json({
+          error: "Can't rename a template that's already been submitted to WhatsApp",
+          details: "WhatsApp template names can't be changed after submission. Duplicate this template instead if you need a different name.",
+        });
+      }
+
       const template = await storage.updateTemplate(req.params.id, updates);
       if (!template) {
         return res.status(404).json({ error: "Template not found" });
       }
-      
+
       // Broadcast real-time update
       broadcast("template-updated", { template });
-      
+
       res.json(template);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -1120,7 +1153,7 @@ export async function registerRoutes(
 
             try {
               let conv = await storage.getConversationByPhone(recipientPhone, activeAccount.id);
-              const outboundMsg = `[Template: ${template.name}]`;
+              const outboundMsg = renderTemplatePreview(template);
               if (!conv) {
                 conv = await storage.createConversation(recipientPhone, undefined, activeAccount.id);
               }
@@ -2771,7 +2804,7 @@ export async function registerRoutes(
 
             try {
               let conv = await storage.getConversationByPhone(recipientPhone, activeAccount.id);
-              const outboundMsg = `[Template: ${template.name}]`;
+              const outboundMsg = renderTemplatePreview(template, bodyParams);
               if (!conv) {
                 conv = await storage.createConversation(recipientPhone, undefined, activeAccount.id);
               }
@@ -3000,7 +3033,7 @@ export async function registerRoutes(
         const msgs = phoneMap[phone];
         const lastMsg = msgs.sort((a: any, b: any) => (b.sentAt?.getTime() || 0) - (a.sentAt?.getTime() || 0))[0];
         const template = lastMsg.templateId ? await storage.getTemplate(lastMsg.templateId) : null;
-        const outboundMsg = template ? `[Template: ${template.name}]` : "[Message sent]";
+        const outboundMsg = renderTemplatePreview(template);
 
         let conv = await storage.getConversationByPhone(phone, active.accountId);
         if (!conv) {
