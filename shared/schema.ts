@@ -155,6 +155,7 @@ export interface DashboardMetrics {
   pendingTemplates: number;
   messagingLimit: number;
   messagingUsed: number;
+  throughputLevel: string | null;
   qualityRating: QualityScore;
   apiStatus: "connected" | "disconnected" | "error";
   lastSyncedAt: string | null;
@@ -172,7 +173,8 @@ export const whatsappAccounts = pgTable("whatsapp_accounts", {
   accessToken: text("access_token").notNull(),
   status: varchar("status", { length: 20 }).notNull().default("connected"),
   qualityRating: varchar("quality_rating", { length: 20 }).default("UNKNOWN"),
-  messagingLimit: integer("messaging_limit").default(1000),
+  messagingLimit: integer("messaging_limit").default(0),
+  throughputLevel: varchar("throughput_level", { length: 20 }),
   messagingUsed: integer("messaging_used").default(0),
   metaSentCount: integer("meta_sent_count").default(0),
   metaDeliveredCount: integer("meta_delivered_count").default(0),

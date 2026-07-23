@@ -481,7 +481,7 @@ export async function getPhoneNumberAnalytics(
   phoneNumberId: string,
   accessToken: string
 ): Promise<MetaApiResponse> {
-  const fields = "quality_rating,messaging_limit_tier,verified_name,display_phone_number,status";
+  const fields = "quality_rating,messaging_limit_tier,throughput,verified_name,display_phone_number,status";
   return metaApiRequest(
     `${META_API_BASE}/${phoneNumberId}?fields=${fields}&access_token=${accessToken}`
   );

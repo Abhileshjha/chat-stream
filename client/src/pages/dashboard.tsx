@@ -118,6 +118,7 @@ export default function Dashboard() {
     pendingTemplates: 0,
     messagingLimit: 0,
     messagingUsed: 0,
+    throughputLevel: null,
     qualityRating: "UNKNOWN",
     apiStatus: "disconnected",
     lastSyncedAt: null,
@@ -423,53 +424,66 @@ export default function Dashboard() {
               </div>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                <div className="flex items-end justify-between">
-                  <div>
-                    <p className="text-3xl font-semibold tabular-nums">
-                      {dashboardMetrics.messagingUsed.toLocaleString()}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      of {dashboardMetrics.messagingLimit.toLocaleString()} conversations used
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-medium tabular-nums">{limitPercent.toFixed(1)}%</p>
-                    <p className="text-xs text-muted-foreground">used today</p>
-                  </div>
-                </div>
-                <div className="h-2.5 rounded-full bg-muted overflow-hidden">
-                  <div 
-                    className={cn(
-                      "h-full rounded-full transition-all duration-700",
-                      limitPercent > 80 ? "bg-destructive" : limitPercent > 50 ? "bg-yellow-500" : "bg-primary"
-                    )}
-                    style={{ width: `${Math.min(limitPercent, 100)}%` }}
-                  />
-                </div>
-                <div className="grid grid-cols-7 gap-1">
-                  {[
-                    { label: "50", active: dashboardMetrics.messagingLimit >= 50 },
-                    { label: "250", active: dashboardMetrics.messagingLimit >= 250 },
-                    { label: "1K", active: dashboardMetrics.messagingLimit >= 1000 },
-                    { label: "2K", active: dashboardMetrics.messagingLimit >= 2000 },
-                    { label: "10K", active: dashboardMetrics.messagingLimit >= 10000 },
-                    { label: "100K", active: dashboardMetrics.messagingLimit >= 100000 },
-                    { label: "Unlimited", active: dashboardMetrics.messagingLimit >= 999999 },
-                  ].map((tier) => (
-                    <div key={tier.label} className="text-center">
-                      <div className={cn(
-                        "h-1 rounded-full mx-1 mb-1",
-                        tier.active ? "bg-primary" : "bg-muted"
-                      )} />
-                      <span className={cn(
-                        "text-[10px]",
-                        tier.active ? "text-foreground font-medium" : "text-muted-foreground"
-                      )}>{tier.label}</span>
+              {dashboardMetrics.messagingLimit > 0 ? (
+                <div className="space-y-4">
+                  <div className="flex items-end justify-between">
+                    <div>
+                      <p className="text-3xl font-semibold tabular-nums">
+                        {dashboardMetrics.messagingUsed.toLocaleString()}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        of {dashboardMetrics.messagingLimit.toLocaleString()} conversations used
+                      </p>
                     </div>
-                  ))}
+                    <div className="text-right">
+                      <p className="text-sm font-medium tabular-nums">{limitPercent.toFixed(1)}%</p>
+                      <p className="text-xs text-muted-foreground">used today</p>
+                    </div>
+                  </div>
+                  <div className="h-2.5 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-all duration-700",
+                        limitPercent > 80 ? "bg-destructive" : limitPercent > 50 ? "bg-yellow-500" : "bg-primary"
+                      )}
+                      style={{ width: `${Math.min(limitPercent, 100)}%` }}
+                    />
+                  </div>
+                  <div className="grid grid-cols-7 gap-1">
+                    {[
+                      { label: "50", active: dashboardMetrics.messagingLimit >= 50 },
+                      { label: "250", active: dashboardMetrics.messagingLimit >= 250 },
+                      { label: "1K", active: dashboardMetrics.messagingLimit >= 1000 },
+                      { label: "2K", active: dashboardMetrics.messagingLimit >= 2000 },
+                      { label: "10K", active: dashboardMetrics.messagingLimit >= 10000 },
+                      { label: "100K", active: dashboardMetrics.messagingLimit >= 100000 },
+                      { label: "Unlimited", active: dashboardMetrics.messagingLimit >= 999999 },
+                    ].map((tier) => (
+                      <div key={tier.label} className="text-center">
+                        <div className={cn(
+                          "h-1 rounded-full mx-1 mb-1",
+                          tier.active ? "bg-primary" : "bg-muted"
+                        )} />
+                        <span className={cn(
+                          "text-[10px]",
+                          tier.active ? "text-foreground font-medium" : "text-muted-foreground"
+                        )}>{tier.label}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-2 py-2">
+                  <p className="text-sm font-medium">
+                    {dashboardMetrics.messagingUsed.toLocaleString()} conversations used
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Meta no longer reports a fixed daily conversation cap for this number
+                    {dashboardMetrics.throughputLevel ? ` - it reports a "${dashboardMetrics.throughputLevel.toLowerCase()}" throughput level instead` : ""}.
+                    Check WhatsApp Manager in Meta Business Suite for your exact messaging limits.
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
 

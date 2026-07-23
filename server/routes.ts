@@ -2,7 +2,7 @@ import type { Express, RequestHandler } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
-import { insertTemplateSchema, insertCampaignSchema, insertMessageSchema, type WhatsAppAccount, teamMembers } from "@shared/schema";
+import { insertTemplateSchema, insertCampaignSchema, insertMessageSchema, type WhatsAppAccount, type Template, type Notification as NotificationRecord, teamMembers } from "@shared/schema";
 import { db } from "@db";
 import { eq, and, desc, gte, sql as sqlOp } from "drizzle-orm";
 import { z } from "zod";
@@ -287,18 +287,27 @@ export async function registerRoutes(
           };
           const qr = phoneRes.data.quality_rating || account.qualityRating;
           const limitTier = phoneRes.data.messaging_limit_tier;
-          const newLimit = limitTierMap[limitTier] || account.messagingLimit;
+          // Meta has stopped returning messaging_limit_tier for many numbers
+          // (replaced by a throughput level, which isn't a numeric daily cap).
+          // Falling back to the last-known value here made a one-time default
+          // of 1000 look like a permanently "Meta-verified" limit even when
+          // Meta never actually reports a number for this account - be honest
+          // that it's unknown (0) instead of presenting a fabricated cap.
+          const newLimit = limitTier ? (limitTierMap[limitTier] ?? account.messagingLimit) : 0;
+          const throughputLevel = phoneRes.data.throughput?.level as string | undefined;
           // Meta returns this field UPPERCASE (e.g. "CONNECTED", "PENDING") while the
           // rest of the app's status checks are lowercase - normalize to match.
           const normalizedStatus = phoneRes.data.status?.toLowerCase() || account.status;
           await storage.updateAccount(active.accountId, {
             qualityRating: qr,
             messagingLimit: newLimit,
+            throughputLevel: throughputLevel || account.throughputLevel,
             status: normalizedStatus,
           });
           syncResults.phoneAnalytics = {
             qualityRating: qr,
             messagingLimit: newLimit,
+            throughputLevel,
             verifiedName: phoneRes.data.verified_name,
             displayPhoneNumber: phoneRes.data.display_phone_number,
             status: phoneRes.data.status,
@@ -2659,6 +2668,139 @@ export async function registerRoutes(
     }
   });
 
+  // Sends to the given recipients and finalizes the notification's status.
+  // Runs after the HTTP response has already been sent, in the background -
+  // which means it can be silently killed by a server restart/redeploy
+  // partway through a large send. Recipients that already have a message
+  // row for this campaign are always excluded by the caller, so re-invoking
+  // this (via /resume) after an interruption picks up where it left off
+  // instead of double-sending or requiring a full resend.
+  async function runNotificationSend(
+    notification: NotificationRecord,
+    template: Template,
+    activeAccount: WhatsAppAccount,
+    recipientPhones: string[],
+    headerParams: any[] | undefined,
+    bodyParams: any[] | undefined,
+  ) {
+    let sentCount = 0;
+    let failedCount = 0;
+
+    const phoneArray = Array.from(recipientPhones);
+    for (const recipientPhone of phoneArray) {
+      try {
+        const result = await whatsappApi.sendTemplateMessage(
+          activeAccount.phoneNumberId,
+          activeAccount.accessToken,
+          recipientPhone,
+          template.name,
+          template.language || "en",
+          headerParams,
+          bodyParams
+        );
+
+        if (result.success && result.data?.messages?.[0]) {
+          const waMessageId = result.data.messages[0].id;
+          await storage.createMessage({
+            accountId: activeAccount.id,
+            campaignId: notification.id,
+            templateId: template.id,
+            recipientPhone,
+            whatsappMessageId: waMessageId,
+            status: "sent",
+            sentAt: new Date(),
+          });
+          sentCount++;
+
+          try {
+            let conv = await storage.getConversationByPhone(recipientPhone, activeAccount.id);
+            const outboundMsg = renderTemplatePreview(template, bodyParams);
+            if (!conv) {
+              conv = await storage.createConversation(recipientPhone, undefined, activeAccount.id);
+            }
+            await storage.updateConversation(conv.id, {
+              lastMessage: outboundMsg,
+              lastMessageAt: new Date(),
+              status: "open",
+            });
+            await storage.addConversationMessage({
+              conversationId: conv.id,
+              content: outboundMsg,
+              direction: "outbound",
+              type: "template",
+              status: "sent",
+            });
+            broadcast("conversation-updated", { conversationId: conv.id });
+          } catch (convErr: any) {
+            console.error(`Failed to create conversation for ${recipientPhone}:`, convErr.message);
+          }
+        } else {
+          console.error(`Message send failed to ${recipientPhone}:`, result.error?.message || "Unknown error", `(code: ${result.error?.code})`);
+          await storage.createMessage({
+            accountId: activeAccount.id,
+            campaignId: notification.id,
+            templateId: template.id,
+            recipientPhone,
+            status: "failed",
+            errorCode: String(result.error?.code || ""),
+            errorDescription: result.error?.message || "Unknown error",
+          });
+          failedCount++;
+        }
+
+        broadcast("notification-updated", {
+          notification: { id: notification.id, sentCount, failedCount, totalRecipients: phoneArray.length },
+        });
+
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } catch (err: any) {
+        console.error(`Failed to send to ${recipientPhone}:`, err.message);
+        try {
+          await storage.createMessage({
+            accountId: activeAccount.id,
+            campaignId: notification.id,
+            templateId: template.id,
+            recipientPhone,
+            status: "failed",
+            errorCode: "EXCEPTION",
+            errorDescription: err.message || "Unexpected error while sending",
+          });
+        } catch (persistErr: any) {
+          console.error(`Also failed to record the failure for ${recipientPhone}:`, persistErr.message);
+        }
+        failedCount++;
+      }
+    }
+
+    // Recompute totals from the actual message rows (cumulative across every
+    // send/resume pass) rather than trusting only this pass's local counters,
+    // so a resumed send reports a correct total instead of overwriting prior
+    // progress.
+    const allMessages = await storage.getMessagesByCampaign(notification.id);
+    const totalSent = allMessages.filter(m => m.status !== "failed").length;
+    const totalFailed = allMessages.filter(m => m.status === "failed").length;
+
+    const finalStatus = totalSent === 0 && totalFailed > 0 ? "failed" : "completed";
+    await storage.updateNotification(notification.id, {
+      status: finalStatus,
+      completedAt: new Date(),
+      sentCount: totalSent,
+      failedCount: totalFailed,
+      deliveredCount: totalSent,
+    });
+
+    const activity = await storage.addActivity({
+      accountId: activeAccount.id,
+      type: "notification_completed",
+      title: finalStatus === "failed" ? "Notification Failed" : "Notification Completed",
+      description: `${notification.name}: ${totalSent} sent, ${totalFailed} failed out of ${allMessages.length}`,
+      timestamp: new Date(),
+      metadata: null,
+    });
+    broadcast("notification-updated", { notification: { ...notification, status: finalStatus, sentCount: totalSent, failedCount: totalFailed } });
+    broadcast("activity-added", { activity });
+  }
+
   app.post("/api/notifications/:id/send", isAuthenticated as RequestHandler, requireVerifiedEmail, requireActiveSubscription, async (req: any, res) => {
     try {
       const notification = await storage.getNotification(req.params.id);
@@ -2766,116 +2908,109 @@ export async function registerRoutes(
 
       res.json({ message: `Notification sending started. Sending to ${recipientPhones.length} recipients.` });
 
-      let sentCount = 0;
-      let failedCount = 0;
+      await runNotificationSend(notification, template, activeAccount, recipientPhones, headerParams, bodyParams);
+    } catch (error) {
+      console.error("Notification send error:", error);
+    }
+  });
 
-      const phoneArray = Array.from(recipientPhones);
-      for (const recipientPhone of phoneArray) {
-        try {
-          const result = await whatsappApi.sendTemplateMessage(
-            activeAccount.phoneNumberId,
-            activeAccount.accessToken,
-            recipientPhone,
-            template.name,
-            template.language || "en",
-            headerParams,
-            bodyParams
-          );
+  // A large send can be silently interrupted by a server restart/redeploy
+  // partway through, leaving the notification stuck showing "sending"
+  // forever with the remaining recipients never attempted. This resumes it:
+  // recomputes the same target audience, skips anyone who already has a
+  // message row for this campaign, and sends only to what's left.
+  app.post("/api/notifications/:id/resume", isAuthenticated as RequestHandler, requireVerifiedEmail, requireActiveSubscription, async (req: any, res) => {
+    try {
+      const notification = await storage.getNotification(req.params.id);
+      if (!notification) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
 
-          if (result.success && result.data?.messages?.[0]) {
-            const waMessageId = result.data.messages[0].id;
-            await storage.createMessage({
-              accountId: activeAccount.id,
-              campaignId: notification.id,
-              templateId: template.id,
-              recipientPhone,
-              whatsappMessageId: waMessageId,
-              status: "sent",
-              sentAt: new Date(),
-            });
-            sentCount++;
+      const template = await storage.getTemplate(notification.templateId);
+      if (!template) {
+        return res.status(400).json({ error: "Notification template not found" });
+      }
 
-            try {
-              let conv = await storage.getConversationByPhone(recipientPhone, activeAccount.id);
-              const outboundMsg = renderTemplatePreview(template, bodyParams);
-              if (!conv) {
-                conv = await storage.createConversation(recipientPhone, undefined, activeAccount.id);
-              }
-              await storage.updateConversation(conv.id, {
-                lastMessage: outboundMsg,
-                lastMessageAt: new Date(),
-                status: "open",
-              });
-              await storage.addConversationMessage({
-                conversationId: conv.id,
-                content: outboundMsg,
-                direction: "outbound",
-                type: "template",
-                status: "sent",
-              });
-              broadcast("conversation-updated", { conversationId: conv.id });
-            } catch (convErr: any) {
-              console.error(`Failed to create conversation for ${recipientPhone}:`, convErr.message);
-            }
-          } else {
-            console.error(`Message send failed to ${recipientPhone}:`, result.error?.message || "Unknown error", `(code: ${result.error?.code})`);
-            await storage.createMessage({
-              accountId: activeAccount.id,
-              campaignId: notification.id,
-              templateId: template.id,
-              recipientPhone,
-              status: "failed",
-              errorCode: String(result.error?.code || ""),
-              errorDescription: result.error?.message || "Unknown error",
-            });
-            failedCount++;
+      const userId = req.user?.claims?.sub;
+      const accounts = userId ? await storage.getAccountsByUser(userId) : await storage.getAccounts();
+      const activeAccount = accounts.find(a => a.id === notification.accountId);
+      if (!activeAccount) {
+        return res.status(400).json({ error: "The WhatsApp account this notification belongs to was not found." });
+      }
+      if (!activeAccount.accessToken || !activeAccount.phoneNumberId) {
+        return res.status(400).json({ error: `${activeAccount.name} is missing API credentials. Please reconnect it in Settings.` });
+      }
+
+      const listIds = notification.listIds || [];
+      const notificationAccountId = notification.accountId || activeAccount.id;
+      const allContacts = await storage.getContacts(notificationAccountId);
+      const targetPhones = new Set<string>();
+      for (const contact of allContacts) {
+        const contactListIds = (contact.listIds as string[]) || [];
+        if (contactListIds.some(lid => listIds.includes(lid))) {
+          if (contact.phone && contact.status === "subscribed") {
+            targetPhones.add(contact.phone);
           }
-
-          broadcast("notification-updated", {
-            notification: { id: notification.id, sentCount, failedCount, totalRecipients: phoneArray.length },
-          });
-
-          await new Promise(resolve => setTimeout(resolve, 100));
-        } catch (err: any) {
-          console.error(`Failed to send to ${recipientPhone}:`, err.message);
-          try {
-            await storage.createMessage({
-              accountId: activeAccount.id,
-              campaignId: notification.id,
-              templateId: template.id,
-              recipientPhone,
-              status: "failed",
-              errorCode: "EXCEPTION",
-              errorDescription: err.message || "Unexpected error while sending",
-            });
-          } catch (persistErr: any) {
-            console.error(`Also failed to record the failure for ${recipientPhone}:`, persistErr.message);
-          }
-          failedCount++;
         }
       }
 
-      const finalStatus = sentCount === 0 && failedCount > 0 ? "failed" : "completed";
-      await storage.updateNotification(notification.id, {
-        status: finalStatus,
-        completedAt: new Date(),
-        sentCount,
-        failedCount,
-        deliveredCount: sentCount,
-      });
+      const alreadyAttempted = await storage.getMessagesByCampaign(notification.id);
+      const attemptedPhones = new Set(alreadyAttempted.map(m => m.recipientPhone));
+      const remainingPhones = Array.from(targetPhones).filter(p => !attemptedPhones.has(p));
 
-      const activity = await storage.addActivity({
-        accountId: activeAccount.id,
-        type: "notification_completed",
-        title: finalStatus === "failed" ? "Notification Failed" : "Notification Completed",
-        description: `${notification.name}: ${sentCount} sent, ${failedCount} failed out of ${recipientPhones.length}`,
-        timestamp: new Date(),
-        metadata: null,
-      });
-      broadcast("notification-updated", { notification: { ...notification, status: finalStatus, sentCount, failedCount } });
-      broadcast("activity-added", { activity });
+      if (remainingPhones.length === 0) {
+        const totalSent = alreadyAttempted.filter(m => m.status !== "failed").length;
+        const totalFailed = alreadyAttempted.filter(m => m.status === "failed").length;
+        await storage.updateNotification(notification.id, {
+          status: totalSent === 0 && totalFailed > 0 ? "failed" : "completed",
+          completedAt: new Date(),
+          sentCount: totalSent,
+          failedCount: totalFailed,
+          deliveredCount: totalSent,
+        });
+        return res.json({ message: "Nothing left to resume - every recipient has already been attempted.", remaining: 0 });
+      }
+
+      const components = (template.components as any[]) || [];
+      const headerComp = components.find((c: any) => c.type === "HEADER");
+      const bodyComp = components.find((c: any) => c.type === "BODY");
+
+      let headerParams: any[] | undefined;
+      if (headerComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format || "")) {
+        const mediaUrl = headerComp.mediaUrl || notification.headerMediaUrl;
+        if (mediaUrl) {
+          const mediaType = headerComp.format === "IMAGE" ? "image" : headerComp.format === "VIDEO" ? "video" : "document";
+          try {
+            headerParams = [await resolveHeaderMediaParam(mediaUrl, mediaType, activeAccount.phoneNumberId, activeAccount.accessToken)];
+          } catch (mediaErr: any) {
+            return res.status(400).json({ error: mediaErr.message || "Failed to prepare header media for sending" });
+          }
+        }
+      } else if (headerComp && headerComp.format === "TEXT" && headerComp.text?.includes("{{")) {
+        const varCount = (headerComp.text.match(/\{\{\d+\}\}/g) || []).length;
+        if (varCount > 0) {
+          const templateVars = notification.templateVariables || {};
+          headerParams = Array(varCount).fill(null).map((_, i) => ({ type: "text", text: templateVars[`header_${i + 1}`] || "N/A" }));
+        }
+      }
+
+      let bodyParams: any[] | undefined;
+      if (bodyComp?.text?.includes("{{")) {
+        const varCount = (bodyComp.text.match(/\{\{\d+\}\}/g) || []).length;
+        if (varCount > 0) {
+          const templateVars = notification.templateVariables || {};
+          bodyParams = Array(varCount).fill(null).map((_, i) => ({ type: "text", text: templateVars[`body_${i + 1}`] || "N/A" }));
+        }
+      }
+
+      await storage.updateNotification(notification.id, { status: "sending" });
+      broadcast("notification-updated", { notification: { ...notification, status: "sending" } });
+
+      res.json({ message: `Resuming - sending to ${remainingPhones.length} remaining recipients.`, remaining: remainingPhones.length });
+
+      await runNotificationSend(notification, template, activeAccount, remainingPhones, headerParams, bodyParams);
     } catch (error) {
-      console.error("Notification send error:", error);
+      console.error("Notification resume error:", error);
     }
   });
 

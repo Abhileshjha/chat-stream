@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useRoute, Link } from "wouter";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -66,6 +68,7 @@ interface ReportData {
 export default function NotificationReport() {
   const [, params] = useRoute("/notifications/:id/report");
   const [messageFilter, setMessageFilter] = useState("all");
+  const { toast } = useToast();
 
   const { data: report, isLoading } = useQuery<ReportData>({
     queryKey: ["/api/notifications", params?.id, "report"],
@@ -75,6 +78,21 @@ export default function NotificationReport() {
       return res.json();
     },
     enabled: !!params?.id,
+    refetchInterval: 5000,
+  });
+
+  const resumeMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/notifications/${params?.id}/resume`);
+      return res.json();
+    },
+    onSuccess: (data: { message: string; remaining: number }) => {
+      toast({ title: data.remaining > 0 ? "Resuming send" : "Already complete", description: data.message });
+      queryClient.invalidateQueries({ queryKey: ["/api/notifications", params?.id, "report"] });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to resume", description: error?.message || "Could not resume sending", variant: "destructive" });
+    },
   });
 
   if (isLoading || !report) {
@@ -156,6 +174,17 @@ export default function NotificationReport() {
             {notification.createdAt ? ` · Created ${formatDate(notification.createdAt)}` : ""}
           </p>
         </div>
+        {notification.status === "sending" && (
+          <Button
+            variant="default"
+            onClick={() => resumeMutation.mutate()}
+            disabled={resumeMutation.isPending}
+            data-testid="button-resume-sending"
+          >
+            <Send className="h-4 w-4 mr-2" />
+            {resumeMutation.isPending ? "Resuming..." : "Resume Sending"}
+          </Button>
+        )}
         <Button
           variant="outline"
           onClick={() => downloadCSV(messages, `report-${notification.name}-${new Date().toISOString().split("T")[0]}.csv`)}
