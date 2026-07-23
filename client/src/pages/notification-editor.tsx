@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useRoute } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Send, Clock, Users, MessageSquare, Zap, AlertCircle, Check } from "lucide-react";
+import { Send, Clock, Users, MessageSquare, Zap, AlertCircle, Check, Upload, X, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Template, ContactList, Notification } from "@shared/schema";
@@ -32,7 +32,10 @@ export default function NotificationEditor() {
   const [selectedListIds, setSelectedListIds] = useState<string[]>([]);
   const [scheduledAt, setScheduledAt] = useState("");
   const [headerMediaUrl, setHeaderMediaUrl] = useState("");
+  const [headerMediaFilename, setHeaderMediaFilename] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: templates = [] } = useQuery<Template[]>({
     queryKey: ["/api/templates"],
@@ -67,6 +70,62 @@ export default function NotificationEditor() {
   const hasMediaHeader = selectedTemplateHeader && ["IMAGE", "VIDEO", "DOCUMENT"].includes(selectedTemplateHeader.format || "");
   const templateMediaUrl = selectedTemplateHeader?.mediaUrl || "";
   const needsMediaUrl = hasMediaHeader && !templateMediaUrl;
+  const headerMediaType = selectedTemplateHeader?.format === "IMAGE" ? "image" :
+    selectedTemplateHeader?.format === "VIDEO" ? "video" : "document";
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const allowedTypes: Record<string, string[]> = {
+      image: ["image/jpeg", "image/png", "image/webp"],
+      video: ["video/mp4", "video/quicktime"],
+      document: ["application/pdf"],
+    };
+    if (!allowedTypes[headerMediaType].includes(file.type)) {
+      toast({
+        title: "Invalid file type",
+        description: `Please upload a valid ${headerMediaType} file.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      if (!response.ok) throw new Error("Upload failed");
+      const data = await response.json();
+      setHeaderMediaUrl(data.url);
+      setHeaderMediaFilename(data.filename);
+      toast({ title: "File uploaded", description: "Your media file has been uploaded successfully." });
+    } catch {
+      toast({
+        title: "Upload failed",
+        description: "Failed to upload file. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleRemoveMedia = async () => {
+    if (headerMediaFilename) {
+      try {
+        await fetch(`/api/upload/${headerMediaFilename}`, { method: "DELETE", credentials: "include" });
+      } catch {}
+    }
+    setHeaderMediaUrl("");
+    setHeaderMediaFilename("");
+  };
 
   const saveMutation = useMutation({
     mutationFn: async (sendNow: boolean) => {
@@ -391,17 +450,49 @@ export default function NotificationEditor() {
               )}
               {needsMediaUrl && (
                 <div>
-                  <Label>Header Media URL</Label>
-                  <Input
-                    value={headerMediaUrl}
-                    onChange={(e) => setHeaderMediaUrl(e.target.value)}
-                    placeholder={`Enter a public URL for the ${selectedTemplateHeader?.format?.toLowerCase() || "media"} header`}
-                    className="mt-1.5"
-                    data-testid="input-header-media-url"
+                  <Label>Header Media</Label>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="hidden"
+                    accept={
+                      headerMediaType === "image" ? "image/jpeg,image/png,image/webp" :
+                      headerMediaType === "video" ? "video/mp4,video/quicktime" : "application/pdf"
+                    }
+                    onChange={handleFileUpload}
+                    data-testid="input-header-media-file"
                   />
-                  <p className="text-sm text-muted-foreground mt-1">
-                    This template requires a {selectedTemplateHeader?.format?.toLowerCase()} in the header. Provide a publicly accessible URL.
-                  </p>
+                  {headerMediaUrl ? (
+                    <div className="mt-1.5 flex items-center gap-3 rounded-lg border p-3">
+                      {headerMediaType === "image" ? (
+                        <img src={headerMediaUrl} alt="Header" className="h-16 w-16 object-cover rounded" />
+                      ) : (
+                        <div className="h-16 w-16 flex items-center justify-center rounded bg-muted text-xs text-muted-foreground">
+                          {headerMediaType}
+                        </div>
+                      )}
+                      <div className="flex-1 text-sm text-muted-foreground">Media attached, will be sent with this notification.</div>
+                      <Button type="button" variant="ghost" size="icon" onClick={handleRemoveMedia} data-testid="button-remove-header-media">
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="mt-1.5">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploading}
+                        data-testid="button-upload-header-media"
+                      >
+                        {isUploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
+                        {isUploading ? "Uploading..." : `Upload ${selectedTemplateHeader?.format?.toLowerCase()}`}
+                      </Button>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        This template requires a {selectedTemplateHeader?.format?.toLowerCase()} in the header - upload one to send with this notification.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>

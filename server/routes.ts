@@ -2690,7 +2690,10 @@ export async function registerRoutes(
 
       let headerParams: any[] | undefined;
       if (headerComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format || "")) {
-        const mediaUrl = notification.headerMediaUrl || headerComp.mediaUrl;
+        // Prefer the template's own approved header media - it's what Meta
+        // reviewed and approved. Only fall back to a manually-attached
+        // notification image when the template itself has none.
+        const mediaUrl = headerComp.mediaUrl || notification.headerMediaUrl;
         if (!mediaUrl) {
           return res.status(400).json({
             error: `This template requires a ${headerComp.format.toLowerCase()} in the header. Please provide a media URL in the notification editor.`,
