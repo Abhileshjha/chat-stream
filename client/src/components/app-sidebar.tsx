@@ -346,8 +346,11 @@ export function AppSidebar({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className="flex w-full items-center gap-3 rounded-lg p-2 hover-elevate text-left" data-testid="button-account-switcher">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <MessageSquare className="h-5 w-5" />
+              <div className="relative h-9 w-9 shrink-0">
+                <div className="absolute inset-0 translate-x-[3px] translate-y-[3px] rounded-lg bg-[hsl(var(--sidebar-primary))]" />
+                <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-primary font-heading text-lg font-bold text-primary-foreground">
+                  c
+                </div>
               </div>
               <div className="flex flex-1 flex-col min-w-0">
                 <span className="text-sm font-semibold truncate">{activeAccount?.name || "Convora"}</span>

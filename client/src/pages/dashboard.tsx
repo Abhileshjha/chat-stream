@@ -146,7 +146,7 @@ export default function Dashboard() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-dashboard-title">Overview</h1>
+          <h1 className="font-heading text-2xl font-bold tracking-tight" data-testid="text-dashboard-title">Overview</h1>
           <p className="text-sm text-muted-foreground">
             Monitor your messaging performance in real time
           </p>
@@ -174,8 +174,9 @@ export default function Dashboard() {
           label="Sent"
           value={dashboardMetrics.sentCount}
           icon={Send}
-          iconColor="text-blue-500"
-          iconBg="bg-blue-500/10"
+          iconColor="text-[hsl(var(--chart-2))]"
+          iconBg=""
+          borderColor="border-t-foreground"
           live
           testId="kpi-sent"
         />
@@ -183,8 +184,9 @@ export default function Dashboard() {
           label="Delivered"
           value={dashboardMetrics.deliveredCount}
           icon={CheckCircle}
-          iconColor="text-green-500"
-          iconBg="bg-green-500/10"
+          iconColor="text-[hsl(var(--chart-2))]"
+          iconBg=""
+          borderColor="border-t-[hsl(var(--chart-2))]"
           sub={`${dashboardMetrics.deliveryRate.toFixed(1)}%`}
           testId="kpi-delivered"
         />
@@ -192,8 +194,9 @@ export default function Dashboard() {
           label="Read"
           value={dashboardMetrics.readCount}
           icon={Eye}
-          iconColor="text-primary"
-          iconBg="bg-primary/10"
+          iconColor="text-[hsl(var(--chart-2))]"
+          iconBg=""
+          borderColor="border-t-[hsl(var(--chart-3))]"
           sub={`${dashboardMetrics.readRate.toFixed(1)}%`}
           testId="kpi-read"
         />
@@ -202,7 +205,8 @@ export default function Dashboard() {
           value={dashboardMetrics.failedCount}
           icon={XCircle}
           iconColor="text-destructive"
-          iconBg="bg-destructive/10"
+          iconBg=""
+          borderColor="border-t-destructive"
           warn={dashboardMetrics.failedCount > 0}
           testId="kpi-failed"
         />
@@ -212,8 +216,8 @@ export default function Dashboard() {
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-primary/10">
-                <Shield className={cn("h-4 w-4", qualityColor)} />
+              <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-accent">
+                <Shield className={cn("h-4 w-4", qualityColor === "text-muted-foreground" ? "text-accent-foreground" : qualityColor)} />
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Quality</p>
@@ -225,30 +229,15 @@ export default function Dashboard() {
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-blue-500/10">
-                <Signal className="h-4 w-4 text-blue-500" />
+              <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-accent">
+                <Signal className="h-4 w-4 text-accent-foreground" />
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Limit</p>
                 <p className="text-sm font-semibold tabular-nums">
-                  {dashboardMetrics.messagingUsed.toLocaleString()}<span className="text-muted-foreground font-normal"> / {dashboardMetrics.messagingLimit.toLocaleString()}</span>
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-green-500/10">
-                <FileText className="h-4 w-4 text-green-500" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs text-muted-foreground">Templates</p>
-                <p className="text-sm font-semibold tabular-nums">
-                  {dashboardMetrics.approvedTemplates}<span className="text-muted-foreground font-normal"> approved</span>
-                  {dashboardMetrics.pendingTemplates > 0 && (
-                    <span className="text-yellow-600 dark:text-yellow-400"> +{dashboardMetrics.pendingTemplates}</span>
+                  {dashboardMetrics.messagingUsed.toLocaleString()}
+                  {dashboardMetrics.messagingLimit > 0 && (
+                    <span className="text-muted-foreground font-normal"> / {dashboardMetrics.messagingLimit.toLocaleString()}</span>
                   )}
                 </p>
               </div>
@@ -258,8 +247,26 @@ export default function Dashboard() {
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-primary/10">
-                <Activity className="h-4 w-4 text-primary" />
+              <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-accent">
+                <FileText className="h-4 w-4 text-accent-foreground" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">Templates</p>
+                <p className="text-sm font-semibold tabular-nums">
+                  {dashboardMetrics.approvedTemplates}<span className="text-muted-foreground font-normal"> approved</span>
+                  {dashboardMetrics.pendingTemplates > 0 && (
+                    <span className="text-[hsl(var(--chart-4))]"> +{dashboardMetrics.pendingTemplates}</span>
+                  )}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-accent">
+                <Activity className="h-4 w-4 text-accent-foreground" />
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Campaigns</p>
@@ -546,30 +553,29 @@ export default function Dashboard() {
   );
 }
 
-function KPICard({ label, value, icon: Icon, iconColor, iconBg, sub, live, warn, testId }: {
+function KPICard({ label, value, icon: Icon, iconColor, borderColor, sub, live, warn, testId }: {
   label: string;
   value: number;
   icon: any;
   iconColor: string;
   iconBg: string;
+  borderColor: string;
   sub?: string;
   live?: boolean;
   warn?: boolean;
   testId: string;
 }) {
   return (
-    <Card className={warn ? "border-destructive/30" : ""} data-testid={testId}>
-      <CardContent className="p-4">
-        <div className="flex items-center justify-between gap-2 mb-2">
+    <Card className={cn("border-t-[3px]", borderColor, warn && "border-destructive/40")} data-testid={testId}>
+      <CardContent className="p-5">
+        <div className="flex items-center justify-between gap-2">
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
             {label}
           </p>
-          <div className={cn("p-1.5 rounded-md", iconBg)}>
-            <Icon className={cn("h-3.5 w-3.5", iconColor)} />
-          </div>
+          <Icon className={cn("h-3.5 w-3.5", iconColor)} />
         </div>
-        <div className="flex items-baseline gap-2">
-          <span className="text-2xl font-semibold tabular-nums">
+        <div className="flex items-baseline gap-2 mt-1.5">
+          <span className="font-heading text-3xl font-bold tabular-nums">
             {value.toLocaleString()}
           </span>
           {live && (
