@@ -63,12 +63,16 @@ export default function ContactsImport() {
 
   const importMutation = useMutation({
     mutationFn: async (data: { contacts: { phone: string; name?: string; status: string; tagIds: string[] }[]; listId?: string }) => {
-      return apiRequest("POST", "/api/contacts/import", data);
+      const res = await apiRequest("POST", "/api/contacts/import", data);
+      return res.json();
     },
-    onSuccess: (data: any) => {
+    onSuccess: (data: { imported: number; updated: number }) => {
+      const parts = [];
+      if (data.imported) parts.push(`${data.imported} new contact(s) added`);
+      if (data.updated) parts.push(`${data.updated} existing contact(s) updated`);
       toast({
         title: "Import successful",
-        description: `${data.imported || parsedContacts.length} contacts imported successfully.`,
+        description: parts.length > 0 ? parts.join(", ") + "." : "No new or updated contacts - all were already up to date.",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
       queryClient.invalidateQueries({ queryKey: ["/api/lists"] });

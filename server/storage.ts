@@ -70,7 +70,8 @@ export interface IStorage {
   createContact(contact: InsertContact): Promise<Contact>;
   updateContact(id: string, updates: Partial<Contact>): Promise<Contact | undefined>;
   deleteContact(id: string): Promise<boolean>;
-  importContacts(contactsData: InsertContact[], listId?: string): Promise<number>;
+  bulkDeleteContacts(ids: string[], accountId: string): Promise<number>;
+  importContacts(contactsData: InsertContact[], listId?: string): Promise<{ imported: number; updated: number }>;
 
   getLists(accountId: string): Promise<ContactList[]>;
   getList(id: string): Promise<ContactList | undefined>;
@@ -599,8 +600,15 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
-  async importContacts(contactsData: InsertContact[], listId?: string): Promise<number> {
-    if (contactsData.length === 0) return 0;
+  async bulkDeleteContacts(ids: string[], accountId: string): Promise<number> {
+    if (ids.length === 0) return 0;
+    const result = await db.delete(contacts)
+      .where(and(inArray(contacts.id, ids), eq(contacts.accountId, accountId)));
+    return result.rowCount ?? 0;
+  }
+
+  async importContacts(contactsData: InsertContact[], listId?: string): Promise<{ imported: number; updated: number }> {
+    if (contactsData.length === 0) return { imported: 0, updated: 0 };
 
     const accountId = contactsData[0].accountId!;
 
@@ -615,16 +623,26 @@ export class DatabaseStorage implements IStorage {
     // One query to find which phones already exist, instead of one query per
     // contact - importing a few thousand contacts was issuing thousands of
     // sequential round trips and timing out.
-    const existingRows = await db.select({ phone: contacts.phone }).from(contacts)
+    const existingRows = await db.select({ id: contacts.id, phone: contacts.phone, listIds: contacts.listIds })
+      .from(contacts)
       .where(and(eq(contacts.accountId, accountId), inArray(contacts.phone, uniqueIncoming.map((c) => c.phone))));
-    const existingPhones = new Set(existingRows.map((r) => r.phone));
+    const existingByPhone = new Map(existingRows.map((r) => [r.phone, r]));
 
-    const toInsert = uniqueIncoming
-      .filter((c) => !existingPhones.has(c.phone))
-      .map((c) => ({
-        ...c,
-        listIds: listId ? [listId] : (c.listIds || []),
-      }));
+    const toInsert: any[] = [];
+    const toUpdate: { id: string; listIds: string[]; name?: string }[] = [];
+
+    for (const c of uniqueIncoming) {
+      const existing = existingByPhone.get(c.phone);
+      if (existing) {
+        // Contact already exists elsewhere - merge this list into it and
+        // refresh its name, instead of silently skipping it.
+        const currentListIds = (existing.listIds as string[]) || [];
+        const mergedListIds = listId && !currentListIds.includes(listId) ? [...currentListIds, listId] : currentListIds;
+        toUpdate.push({ id: existing.id, listIds: mergedListIds, name: c.name || undefined });
+      } else {
+        toInsert.push({ ...c, listIds: listId ? [listId] : (c.listIds || []) });
+      }
+    }
 
     let imported = 0;
     const BATCH_SIZE = 500;
@@ -634,22 +652,54 @@ export class DatabaseStorage implements IStorage {
       imported += batch.length;
     }
 
-    if (listId && imported > 0) {
-      await db.update(contactLists)
-        .set({ contactCount: dsql`${contactLists.contactCount} + ${imported}` })
-        .where(eq(contactLists.id, listId));
+    // Apply updates concurrently in bounded chunks - much faster than one
+    // sequential await per row, without building a giant dynamic bulk-update
+    // statement.
+    let updated = 0;
+    const UPDATE_CONCURRENCY = 25;
+    for (let i = 0; i < toUpdate.length; i += UPDATE_CONCURRENCY) {
+      const chunk = toUpdate.slice(i, i + UPDATE_CONCURRENCY);
+      await Promise.all(chunk.map((u) =>
+        db.update(contacts)
+          .set({ listIds: u.listIds, ...(u.name ? { name: u.name } : {}), updatedAt: new Date() })
+          .where(eq(contacts.id, u.id))
+      ));
+      updated += chunk.length;
     }
-    return imported;
+
+    // contactCount is computed live from the contacts table in getLists() -
+    // no need to maintain a separate counter here (that's what drifted out
+    // of sync before).
+    return { imported, updated };
   }
 
   // Contact Lists
   async getLists(accountId: string): Promise<ContactList[]> {
-    return db.select().from(contactLists).where(eq(contactLists.accountId, accountId)).orderBy(desc(contactLists.createdAt));
+    const lists = await db.select().from(contactLists).where(eq(contactLists.accountId, accountId)).orderBy(desc(contactLists.createdAt));
+
+    // contactCount used to be a manually-incremented counter that only ever
+    // went up (on import) and never down (on delete/edit), so it drifted
+    // from reality. Compute the real count live from the contacts table
+    // instead of trusting the stored column.
+    const countRows = await db.execute<{ list_id: string; count: number }>(dsql`
+      select list_id, count(*)::int as count
+      from contacts, jsonb_array_elements_text(list_ids) as list_id
+      where account_id = ${accountId}
+      group by list_id
+    `);
+    const countsByListId = new Map(countRows.rows.map((r: any) => [r.list_id, Number(r.count)]));
+
+    return lists.map((l) => ({ ...l, contactCount: countsByListId.get(l.id) || 0 }));
   }
 
   async getList(id: string): Promise<ContactList | undefined> {
     const rows = await db.select().from(contactLists).where(eq(contactLists.id, id));
-    return rows[0];
+    if (!rows[0]) return undefined;
+
+    const countResult = await db.execute<{ count: number }>(dsql`
+      select count(*)::int as count from contacts where list_ids @> ${JSON.stringify([id])}::jsonb
+    `);
+    return { ...rows[0], contactCount: Number(countResult.rows[0]?.count || 0) };
   }
 
   async createList(list: InsertContactList): Promise<ContactList> {
@@ -678,7 +728,17 @@ export class DatabaseStorage implements IStorage {
 
   // Contact Tags
   async getTags(accountId: string): Promise<ContactTag[]> {
-    return db.select().from(contactTags).where(eq(contactTags.accountId, accountId)).orderBy(desc(contactTags.createdAt));
+    const tags = await db.select().from(contactTags).where(eq(contactTags.accountId, accountId)).orderBy(desc(contactTags.createdAt));
+
+    const countRows = await db.execute<{ tag_id: string; count: number }>(dsql`
+      select tag_id, count(*)::int as count
+      from contacts, jsonb_array_elements_text(tag_ids) as tag_id
+      where account_id = ${accountId}
+      group by tag_id
+    `);
+    const countsByTagId = new Map(countRows.rows.map((r: any) => [r.tag_id, Number(r.count)]));
+
+    return tags.map((t) => ({ ...t, contactCount: countsByTagId.get(t.id) || 0 }));
   }
 
   async getTag(id: string): Promise<ContactTag | undefined> {

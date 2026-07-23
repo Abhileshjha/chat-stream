@@ -2205,15 +2205,16 @@ export async function registerRoutes(
 
   app.post("/api/contacts/bulk-delete", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
       const { ids } = req.body;
       if (!Array.isArray(ids) || ids.length === 0) {
         return res.status(400).json({ error: "No contact IDs provided" });
       }
-      let deletedCount = 0;
-      for (const id of ids) {
-        const deleted = await storage.deleteContact(id);
-        if (deleted) deletedCount++;
-      }
+      // Scoped to the active account and done as one query - deleting large
+      // selections one row at a time was both slow and let any authenticated
+      // user delete contacts from a different account by ID.
+      const deletedCount = await storage.bulkDeleteContacts(ids, active.accountId);
       res.json({ deleted: deletedCount });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete contacts" });
@@ -2226,8 +2227,8 @@ export async function registerRoutes(
       if (!active) return res.status(401).json({ error: "No active account" });
       const { contacts, listId } = req.body;
       const contactsWithAccount = (contacts || []).map((c: any) => ({ ...c, accountId: active.accountId }));
-      const imported = await storage.importContacts(contactsWithAccount, listId);
-      res.json({ imported });
+      const { imported, updated } = await storage.importContacts(contactsWithAccount, listId);
+      res.json({ imported, updated });
     } catch (error: any) {
       console.error("Contact import error:", error);
       res.status(500).json({ error: "Failed to import contacts", details: error.message });

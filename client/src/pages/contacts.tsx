@@ -67,6 +67,8 @@ export default function Contacts() {
   const [selectedListId, setSelectedListId] = useState<string>("");
   const [showNewListInput, setShowNewListInput] = useState(false);
   const [newListName, setNewListName] = useState("");
+  const [filterListId, setFilterListId] = useState<string>("all");
+  const [filterTagId, setFilterTagId] = useState<string>("all");
   const { toast } = useToast();
 
   const { data: contacts = [], isLoading } = useQuery<Contact[]>({
@@ -156,9 +158,14 @@ export default function Contacts() {
     createListMutation.mutate({ name: newListName.trim() });
   };
 
-  const filteredContacts = contacts.filter((c) =>
-    c.phone.includes(searchQuery) || c.name?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredContacts = contacts.filter((c) => {
+    const matchesSearch = c.phone.includes(searchQuery) || c.name?.toLowerCase().includes(searchQuery.toLowerCase());
+    const contactListIds = (c.listIds as string[] | null) || [];
+    const contactTagIds = (c.tagIds as string[] | null) || [];
+    const matchesList = filterListId === "all" || contactListIds.includes(filterListId);
+    const matchesTag = filterTagId === "all" || contactTagIds.includes(filterTagId);
+    return matchesSearch && matchesList && matchesTag;
+  });
 
   const allFilteredSelected = filteredContacts.length > 0 && filteredContacts.every((c) => selectedIds.has(c.id));
   const someFilteredSelected = filteredContacts.some((c) => selectedIds.has(c.id));
@@ -207,15 +214,43 @@ export default function Contacts() {
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0 pb-4">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search contacts..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
-              data-testid="input-search-contacts"
-            />
+          <div className="flex items-center gap-2 flex-wrap flex-1">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search contacts..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+                data-testid="input-search-contacts"
+              />
+            </div>
+            <Select value={filterListId} onValueChange={setFilterListId}>
+              <SelectTrigger className="w-[160px]" data-testid="select-filter-list">
+                <SelectValue placeholder="All lists" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All lists</SelectItem>
+                {lists.map((list) => (
+                  <SelectItem key={list.id} value={list.id} data-testid={`filter-list-option-${list.id}`}>
+                    {list.name} ({list.contactCount || 0})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={filterTagId} onValueChange={setFilterTagId}>
+              <SelectTrigger className="w-[160px]" data-testid="select-filter-tag">
+                <SelectValue placeholder="All tags" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All tags</SelectItem>
+                {tags.map((tag) => (
+                  <SelectItem key={tag.id} value={tag.id} data-testid={`filter-tag-option-${tag.id}`}>
+                    {tag.name} ({tag.contactCount || 0})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {selectedIds.size > 0 && (
