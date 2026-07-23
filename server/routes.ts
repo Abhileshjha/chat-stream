@@ -2228,8 +2228,9 @@ export async function registerRoutes(
       const contactsWithAccount = (contacts || []).map((c: any) => ({ ...c, accountId: active.accountId }));
       const imported = await storage.importContacts(contactsWithAccount, listId);
       res.json({ imported });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to import contacts" });
+    } catch (error: any) {
+      console.error("Contact import error:", error);
+      res.status(500).json({ error: "Failed to import contacts", details: error.message });
     }
   });
 

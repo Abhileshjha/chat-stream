@@ -18,7 +18,7 @@ import {
   type QualityScore,
 } from "@shared/schema";
 import { db } from "@db";
-import { eq, desc, and, or, isNull, sql as dsql } from "drizzle-orm";
+import { eq, desc, and, or, isNull, inArray, sql as dsql } from "drizzle-orm";
 
 export interface IStorage {
   getTemplates(accountId?: string): Promise<Template[]>;
@@ -600,19 +600,40 @@ export class DatabaseStorage implements IStorage {
   }
 
   async importContacts(contactsData: InsertContact[], listId?: string): Promise<number> {
+    if (contactsData.length === 0) return 0;
+
+    const accountId = contactsData[0].accountId!;
+
+    // De-dupe within the incoming batch itself (CSVs commonly contain repeats)
+    const seenPhones = new Set<string>();
+    const uniqueIncoming = contactsData.filter((c) => {
+      if (!c.phone || seenPhones.has(c.phone)) return false;
+      seenPhones.add(c.phone);
+      return true;
+    });
+
+    // One query to find which phones already exist, instead of one query per
+    // contact - importing a few thousand contacts was issuing thousands of
+    // sequential round trips and timing out.
+    const existingRows = await db.select({ phone: contacts.phone }).from(contacts)
+      .where(and(eq(contacts.accountId, accountId), inArray(contacts.phone, uniqueIncoming.map((c) => c.phone))));
+    const existingPhones = new Set(existingRows.map((r) => r.phone));
+
+    const toInsert = uniqueIncoming
+      .filter((c) => !existingPhones.has(c.phone))
+      .map((c) => ({
+        ...c,
+        listIds: listId ? [listId] : (c.listIds || []),
+      }));
+
     let imported = 0;
-    for (const contact of contactsData) {
-      const existing = await db.select().from(contacts)
-        .where(and(eq(contacts.phone, contact.phone), eq(contacts.accountId, contact.accountId!)));
-      if (existing.length === 0) {
-        const insertData = {
-          ...contact,
-          listIds: listId ? [listId] : (contact.listIds || []),
-        };
-        await db.insert(contacts).values(insertData as any);
-        imported++;
-      }
+    const BATCH_SIZE = 500;
+    for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
+      const batch = toInsert.slice(i, i + BATCH_SIZE);
+      await db.insert(contacts).values(batch as any);
+      imported += batch.length;
     }
+
     if (listId && imported > 0) {
       await db.update(contactLists)
         .set({ contactCount: dsql`${contactLists.contactCount} + ${imported}` })
