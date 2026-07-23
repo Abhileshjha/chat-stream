@@ -487,7 +487,7 @@ export async function registerRoutes(
   }, express.default.static(uploadDir));
 
   // File upload endpoint
-  app.post("/api/upload", isAuthenticated as RequestHandler, upload.single("file"), (req, res) => {
+  app.post("/api/upload", isAuthenticated as RequestHandler, upload.single("file"), async (req: any, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
@@ -502,24 +502,53 @@ export async function registerRoutes(
           fs.unlinkSync(filePath);
         }
         const limitMB = Math.round(maxSize / (1024 * 1024));
-        return res.status(400).json({ 
-          error: `File too large. Maximum size for ${req.file.mimetype.split('/')[0]}s is ${limitMB}MB.` 
+        return res.status(400).json({
+          error: `File too large. Maximum size for ${req.file.mimetype.split('/')[0]}s is ${limitMB}MB.`
         });
       }
 
       // Store upload metadata with user association
       const user = (req as any).user;
       const userId = user?.id || user?.claims?.sub || "anonymous";
-      
+
       // Track this upload for ownership verification
       uploadMetadata.set(req.file.filename, {
         userId,
         uploadedAt: new Date(),
       });
-      
+
       const fileUrl = `/uploads/${req.file.filename}`;
+
+      // Immediately push this to Meta's resumable upload API and keep the
+      // resulting handle, so template submission never depends on the local
+      // file still existing later - hosts like Render wipe local disk on
+      // every restart/redeploy, which otherwise silently breaks header media
+      // between upload and submit time.
+      let mediaHandle: string | undefined;
+      try {
+        const active = await getActiveAccount(req);
+        const facebookAppId = process.env.FACEBOOK_APP_ID;
+        if (active?.account?.accessToken && facebookAppId) {
+          const uploadResult = await whatsappApi.uploadSessionMedia(
+            facebookAppId,
+            active.account.accessToken,
+            req.file.buffer || fs.readFileSync(path.join(uploadDir, req.file.filename)),
+            req.file.mimetype,
+            req.file.originalname
+          );
+          if (uploadResult.success && uploadResult.data?.handle) {
+            mediaHandle = uploadResult.data.handle;
+          } else {
+            console.warn("[Upload] Meta media pre-upload failed, will retry from local disk at submit time:", uploadResult.error?.message);
+          }
+        }
+      } catch (metaUploadErr: any) {
+        console.warn("[Upload] Meta media pre-upload error, will retry from local disk at submit time:", metaUploadErr.message);
+      }
+
       const fileInfo = {
         url: fileUrl,
+        mediaHandle,
         filename: req.file.filename,
         originalName: req.file.originalname,
         mimetype: req.file.mimetype,
@@ -630,11 +659,25 @@ export async function registerRoutes(
       }
 
       const headerComp = (data.components as any[])?.find((c: any) => c.type === "HEADER");
-      if (!saveAsDraft && headerComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format) && !headerComp.mediaUrl) {
-        return res.status(400).json({
-          error: `A ${headerComp.format.toLowerCase()} is required for this header`,
-          details: "WhatsApp requires a sample media file for media headers - please upload one before submitting.",
-        });
+      if (!saveAsDraft && headerComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format)) {
+        if (!headerComp.mediaUrl) {
+          return res.status(400).json({
+            error: `A ${headerComp.format.toLowerCase()} is required for this header`,
+            details: "WhatsApp requires a sample media file for media headers - please upload one before submitting.",
+          });
+        }
+        // Uploaded files live on local disk, which can be wiped by a server
+        // restart/redeploy between upload and submission - fail clearly here
+        // instead of silently submitting to Meta with no media at all.
+        if (headerComp.mediaUrl.startsWith("/uploads/")) {
+          const localPath = path.join(uploadDir, path.basename(headerComp.mediaUrl));
+          if (!fs.existsSync(localPath)) {
+            return res.status(400).json({
+              error: "Uploaded image is no longer available",
+              details: "The server storage was reset since you uploaded this file. Please re-upload the header image and submit again right away.",
+            });
+          }
+        }
       }
 
       const normalizedName = data.name.toLowerCase().replace(/[^a-z0-9_]/g, "_");

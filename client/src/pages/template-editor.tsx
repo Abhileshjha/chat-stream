@@ -70,6 +70,7 @@ export default function TemplateEditor() {
   const [mediaType, setMediaType] = useState<MediaType>("image");
   const [headerText, setHeaderText] = useState("");
   const [headerMediaUrl, setHeaderMediaUrl] = useState("");
+  const [headerMediaHandle, setHeaderMediaHandle] = useState("");
   const [headerMediaFilename, setHeaderMediaFilename] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [bodyText, setBodyText] = useState("");
@@ -102,6 +103,9 @@ export default function TemplateEditor() {
           setMediaType(headerComponent.format.toLowerCase() as MediaType);
           if (headerComponent.mediaUrl) {
             setHeaderMediaUrl(headerComponent.mediaUrl);
+          }
+          if ((headerComponent as any).mediaHandle) {
+            setHeaderMediaHandle((headerComponent as any).mediaHandle);
           }
         }
       }
@@ -137,6 +141,7 @@ export default function TemplateEditor() {
           type: "HEADER",
           format: mediaType.toUpperCase(),
           mediaUrl: headerMediaUrl || undefined,
+          mediaHandle: headerMediaHandle || undefined,
         });
       }
 
@@ -312,6 +317,7 @@ export default function TemplateEditor() {
 
       const data = await response.json();
       setHeaderMediaUrl(data.url);
+      setHeaderMediaHandle(data.mediaHandle || "");
       setHeaderMediaFilename(data.filename);
 
       toast({
@@ -359,6 +365,7 @@ export default function TemplateEditor() {
       }
     }
     setHeaderMediaUrl("");
+    setHeaderMediaHandle("");
     setHeaderMediaFilename("");
   };
 

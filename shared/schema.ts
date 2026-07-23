@@ -32,6 +32,7 @@ export const templateComponentSchema = z.object({
   format: z.string().optional(),
   text: z.string().optional(),
   mediaUrl: z.string().optional(),
+  mediaHandle: z.string().optional(),
   buttons: z.array(z.object({
     type: z.string(),
     text: z.string(),

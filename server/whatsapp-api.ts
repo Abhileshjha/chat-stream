@@ -219,7 +219,12 @@ export async function createTemplate(
 
   const headerComp = components.find(c => c.type === "HEADER");
   if (headerComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format || "")) {
-    if (headerComp.mediaUrl) {
+    if ((headerComp as any).mediaHandle) {
+      // Already uploaded to Meta at file-upload time - skip local disk
+      // entirely, since it may no longer exist (ephemeral hosting storage).
+      mediaHandle = (headerComp as any).mediaHandle;
+      console.log("Using pre-uploaded media handle:", mediaHandle);
+    } else if (headerComp.mediaUrl) {
       const localFilePath = headerComp.mediaUrl.startsWith("/uploads/")
         ? path.join(process.cwd(), "uploads", path.basename(headerComp.mediaUrl))
         : null;
