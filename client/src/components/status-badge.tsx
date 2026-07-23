@@ -16,7 +16,7 @@ const statusConfig = {
   // Template statuses
   DRAFT: { label: "Draft", color: "bg-muted text-muted-foreground border-muted", icon: FileEdit },
   PENDING: { label: "Pending", color: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20", icon: Clock },
-  APPROVED: { label: "Approved", color: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20", icon: CheckCircle },
+  APPROVED: { label: "Approved", color: "bg-accent text-accent-foreground border-accent", icon: CheckCircle },
   REJECTED: { label: "Rejected", color: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20", icon: XCircle },
   DISABLED: { label: "Disabled", color: "bg-muted text-muted-foreground border-muted", icon: AlertTriangle },
   PAUSED: { label: "Paused", color: "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20", icon: Pause },

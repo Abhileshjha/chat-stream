@@ -92,6 +92,18 @@ export default function Inbox() {
   const repliedIds = new Set(repliedConversations.map(c => c.id));
   const conversations = filterTab === "active" ? repliedConversations : allConversations;
 
+  const avatarPalette = [
+    { bg: "bg-[#141A46]", text: "text-white" },
+    { bg: "bg-[#7B82AD]", text: "text-white" },
+    { bg: "bg-[#19C3E6]", text: "text-[#0B1030]" },
+    { bg: "bg-[#4B5273]", text: "text-white" },
+  ];
+  const getAvatarColor = (key: string) => {
+    let hash = 0;
+    for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) | 0;
+    return avatarPalette[Math.abs(hash) % avatarPalette.length];
+  };
+
   // A conversation is "missed" when the contact replied, the business never
   // saw it (still unread), and the 24-hour customer service window has now
   // expired - meaning the only way to reach them again is a template message.
@@ -341,20 +353,22 @@ export default function Inbox() {
                   </p>
                 </div>
               ) : (
-                filteredConversations.map((conv) => (
+                filteredConversations.map((conv) => {
+                  const avatarColor = getAvatarColor(conv.contactName || conv.contactPhone);
+                  return (
                   <button
                     key={conv.id}
                     onClick={() => handleSelectConversation(conv.id)}
                     className={cn(
-                      "w-full p-3 text-left hover-elevate flex gap-3 transition-colors",
-                      selectedConversation === conv.id && "bg-accent"
+                      "w-full p-3 text-left hover-elevate flex gap-3 transition-colors border-l-[3px]",
+                      selectedConversation === conv.id
+                        ? "bg-accent/40 border-l-[hsl(var(--chart-2))]"
+                        : "border-l-transparent"
                     )}
                     data-testid={`conversation-${conv.id}`}
                   >
                     <Avatar className="h-10 w-10 shrink-0">
-                      <AvatarFallback className={cn(
-                        (conv.unreadCount ?? 0) > 0 && "bg-primary text-primary-foreground"
-                      )}>
+                      <AvatarFallback className={cn(avatarColor.bg, avatarColor.text)}>
                         {conv.contactName ? conv.contactName[0].toUpperCase() : <User className="h-4 w-4" />}
                       </AvatarFallback>
                     </Avatar>
@@ -390,7 +404,8 @@ export default function Inbox() {
                       )}
                     </div>
                   </button>
-                ))
+                  );
+                })
               )}
             </div>
           </ScrollArea>
@@ -402,7 +417,7 @@ export default function Inbox() {
               <div className="p-3 border-b flex items-center justify-between gap-2 bg-card shrink-0">
                 <div className="flex items-center gap-3 min-w-0">
                   <Avatar className="h-9 w-9 shrink-0">
-                    <AvatarFallback>
+                    <AvatarFallback className={cn(getAvatarColor(selectedConv.contactName || selectedConv.contactPhone).bg, getAvatarColor(selectedConv.contactName || selectedConv.contactPhone).text)}>
                       {selectedConv.contactName ? selectedConv.contactName[0].toUpperCase() : <User className="h-4 w-4" />}
                     </AvatarFallback>
                   </Avatar>
@@ -413,7 +428,7 @@ export default function Inbox() {
                     </div>
                   </div>
                   {isWindowOpen(selectedConv) ? (
-                    <Badge variant="default" className="shrink-0 text-xs">Active</Badge>
+                    <Badge variant="default" className="shrink-0 text-xs bg-[hsl(var(--chart-2))] text-[#0B1030]">● Active</Badge>
                   ) : (
                     <Badge variant="secondary" className="shrink-0 text-xs">Template only</Badge>
                   )}
@@ -563,7 +578,7 @@ export default function Inbox() {
                       <Button
                         onClick={handleSendMessage}
                         disabled={!newMessage.trim() || sendMessageMutation.isPending || !isWindowOpen(selectedConv)}
-                        className="shrink-0"
+                        className="shrink-0 bg-[hsl(var(--chart-2))] text-[#0B1030] hover:bg-[hsl(var(--chart-2))]/90"
                         data-testid="button-send-message"
                       >
                         <Send className="h-4 w-4" />
@@ -589,7 +604,7 @@ export default function Inbox() {
                       <div className="p-4 space-y-4">
                         <div className="flex flex-col items-center text-center">
                           <Avatar className="h-16 w-16 mb-2">
-                            <AvatarFallback className="text-lg">
+                            <AvatarFallback className={cn("text-lg", getAvatarColor(selectedConv.contactName || selectedConv.contactPhone).bg, getAvatarColor(selectedConv.contactName || selectedConv.contactPhone).text)}>
                               {selectedConv.contactName ? selectedConv.contactName[0].toUpperCase() : <User className="h-6 w-6" />}
                             </AvatarFallback>
                           </Avatar>

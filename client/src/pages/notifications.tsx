@@ -72,9 +72,9 @@ export default function Notifications() {
       case "scheduled":
         return <Clock className="h-4 w-4 text-yellow-500" />;
       case "sending":
-        return <Send className="h-4 w-4 text-blue-500 animate-pulse" />;
+        return <Send className="h-4 w-4 text-[hsl(var(--chart-2))] animate-pulse" />;
       case "completed":
-        return <CheckCircle className="h-4 w-4 text-green-500" />;
+        return <CheckCircle className="h-4 w-4 text-foreground" />;
       case "failed":
         return <XCircle className="h-4 w-4 text-red-500" />;
       default:
@@ -83,11 +83,15 @@ export default function Notifications() {
   };
 
   const getStatusBadge = (status: string) => {
+    if (status === "sending") {
+      return <Badge variant="secondary" className="bg-accent text-accent-foreground">{status}</Badge>;
+    }
+    if (status === "completed") {
+      return <Badge variant="secondary" className="bg-[#E9EDFB] text-[#141A46] dark:bg-[hsl(var(--muted))] dark:text-foreground">{status}</Badge>;
+    }
     const variants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
       draft: "secondary",
       scheduled: "outline",
-      sending: "default",
-      completed: "default",
       failed: "destructive",
     };
     return <Badge variant={variants[status] || "secondary"}>{status}</Badge>;

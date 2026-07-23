@@ -457,7 +457,10 @@ export default function Contacts() {
                         <TableCell className="font-mono">{contact.phone}</TableCell>
                         <TableCell>{contact.name || "-"}</TableCell>
                         <TableCell>
-                          <Badge variant={contact.status === "subscribed" ? "default" : "secondary"}>
+                          <Badge
+                            variant="secondary"
+                            className={contact.status === "subscribed" ? "bg-accent text-accent-foreground" : ""}
+                          >
                             {contact.status}
                           </Badge>
                         </TableCell>
