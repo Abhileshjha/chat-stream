@@ -117,6 +117,16 @@ export default function TemplateEditor() {
       if (footerComponent?.text) {
         setFooterText(footerComponent.text);
       }
+
+      if (buttonComponents && buttonComponents.length > 0) {
+        const loadedButtons = buttonComponents.flatMap((bc: any) => bc.buttons || []);
+        setButtons(loadedButtons.map((b: any) => ({
+          type: b.type,
+          text: b.text,
+          url: b.url,
+          phoneNumber: b.phone_number || b.phoneNumber,
+        })));
+      }
     }
   }, [template]);
 
