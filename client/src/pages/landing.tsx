@@ -34,7 +34,15 @@ function FadeIn({ children, delay = 0 }: { children: React.ReactNode; delay?: nu
 
 export default function Landing() {
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-cyan-400/30">
+    <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-cyan-400/30 relative">
+      {/* Subtle dot-grid texture across the whole page so dark sections never read as empty */}
+      <div
+        className="fixed inset-0 -z-20 opacity-[0.15]"
+        style={{
+          backgroundImage: "radial-gradient(circle, rgba(148,163,184,0.4) 1px, transparent 1px)",
+          backgroundSize: "32px 32px",
+        }}
+      />
       {/* Top help bar */}
       <div className="bg-slate-900 border-b border-slate-800/80 text-slate-400 text-center text-sm py-2 px-4">
         <Phone className="inline h-3.5 w-3.5 mr-1.5 -mt-0.5 text-cyan-400" />
@@ -70,9 +78,12 @@ export default function Landing() {
       </nav>
 
       {/* Hero */}
-      <section className="pt-24 pb-28 px-4 relative overflow-hidden">
-        <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_60%_50%_at_50%_-10%,rgba(34,211,238,0.12),transparent)]" />
+      <section className="pt-20 pb-20 px-4 relative overflow-hidden">
+        <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_60%_50%_at_50%_-10%,rgba(34,211,238,0.14),transparent)]" />
         <div className="absolute inset-0 -z-10 bg-[linear-gradient(to_bottom,transparent,rgba(9,9,11,0.6))]" />
+        {/* Glow orbs for depth - purely decorative, blurred and low-opacity */}
+        <div className="absolute -left-32 top-10 h-72 w-72 rounded-full bg-cyan-500/10 blur-[100px] -z-10" />
+        <div className="absolute -right-24 top-1/3 h-80 w-80 rounded-full bg-blue-600/10 blur-[110px] -z-10" />
         <div className="container mx-auto max-w-4xl text-center">
           <motion.div
             initial={{ opacity: 0, y: 16 }}
