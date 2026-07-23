@@ -296,14 +296,42 @@ export async function createTemplate(
     JSON.stringify(payload, null, 2)
   );
 
-  return metaApiRequest(`${META_API_BASE}/${wabaId}/message_templates`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify(payload),
-  });
+  const submit = () =>
+    metaApiRequest(`${META_API_BASE}/${wabaId}/message_templates`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+  const result = await submit();
+  if (result.success || !mediaHandle) {
+    return result;
+  }
+
+  // Freshly-uploaded media handles are sometimes not yet fully processed on
+  // Meta's side, causing an immediate submission to fail with a generic
+  // "(#100) Invalid parameter" even though the same handle works moments
+  // later. Retry a couple of times with a short delay before giving up.
+  const isRetryableMediaError = result.error?.code === 100;
+  if (!isRetryableMediaError) {
+    return result;
+  }
+
+  const delays = [3000, 6000];
+  let lastResult = result;
+  for (const delayMs of delays) {
+    console.warn(`Template submission failed with a possibly-stale media handle, retrying in ${delayMs}ms:`, lastResult.error?.message);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    lastResult = await submit();
+    if (lastResult.success) {
+      return lastResult;
+    }
+  }
+
+  return lastResult;
 }
 
 export async function deleteTemplate(
