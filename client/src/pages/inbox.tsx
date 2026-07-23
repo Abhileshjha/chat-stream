@@ -92,6 +92,17 @@ export default function Inbox() {
   const repliedIds = new Set(repliedConversations.map(c => c.id));
   const conversations = filterTab === "active" ? repliedConversations : allConversations;
 
+  // A conversation is "missed" when the contact replied, the business never
+  // saw it (still unread), and the 24-hour customer service window has now
+  // expired - meaning the only way to reach them again is a template message.
+  const isMissedReply = (conv: Conversation) => {
+    if (!repliedIds.has(conv.id)) return false;
+    if ((conv.unreadCount ?? 0) === 0) return false;
+    if (!conv.lastMessageAt) return false;
+    const hoursSinceLastMessage = (Date.now() - new Date(conv.lastMessageAt).getTime()) / (1000 * 60 * 60);
+    return hoursSinceLastMessage >= 24;
+  };
+
   const { data: messages = [] } = useQuery<ConversationMessage[]>({
     queryKey: ["/api/conversations", selectedConversation, "messages"],
     enabled: !!selectedConversation,
@@ -204,17 +215,6 @@ export default function Inbox() {
       conversationId: selectedConversation,
       templateId: selectedTemplateId,
     });
-  };
-
-  // A conversation is "missed" when the contact replied, the business never
-  // saw it (still unread), and the 24-hour customer service window has now
-  // expired - meaning the only way to reach them again is a template message.
-  const isMissedReply = (conv: Conversation) => {
-    if (!repliedIds.has(conv.id)) return false;
-    if ((conv.unreadCount ?? 0) === 0) return false;
-    if (!conv.lastMessageAt) return false;
-    const hoursSinceLastMessage = (Date.now() - new Date(conv.lastMessageAt).getTime()) / (1000 * 60 * 60);
-    return hoursSinceLastMessage >= 24;
   };
 
   const isWindowOpen = (conv: Conversation | undefined) => {
