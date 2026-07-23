@@ -46,7 +46,6 @@ import {
   Plus,
   Ban,
   Trash2,
-  Archive,
   Tag,
   RefreshCw,
   Filter,
@@ -165,16 +164,6 @@ export default function Inbox() {
     },
   });
 
-  const updateStatusMutation = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      return apiRequest("PATCH", `/api/conversations/${id}`, { status });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
-      toast({ title: "Conversation updated" });
-    },
-  });
-
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -185,8 +174,8 @@ export default function Inbox() {
         c.contactPhone.includes(searchQuery) || 
         (c.contactName?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false);
       
-      if (filterTab === "closed") return matchesSearch && c.status === "closed";
-      if (filterTab === "active") return matchesSearch && c.status !== "closed";
+      if (filterTab === "closed") return matchesSearch && isMissedReply(c);
+      if (filterTab === "active") return matchesSearch && repliedIds.has(c.id) && !isMissedReply(c);
       return matchesSearch;
     });
 
@@ -215,6 +204,17 @@ export default function Inbox() {
       conversationId: selectedConversation,
       templateId: selectedTemplateId,
     });
+  };
+
+  // A conversation is "missed" when the contact replied, the business never
+  // saw it (still unread), and the 24-hour customer service window has now
+  // expired - meaning the only way to reach them again is a template message.
+  const isMissedReply = (conv: Conversation) => {
+    if (!repliedIds.has(conv.id)) return false;
+    if ((conv.unreadCount ?? 0) === 0) return false;
+    if (!conv.lastMessageAt) return false;
+    const hoursSinceLastMessage = (Date.now() - new Date(conv.lastMessageAt).getTime()) / (1000 * 60 * 60);
+    return hoursSinceLastMessage >= 24;
   };
 
   const isWindowOpen = (conv: Conversation | undefined) => {
@@ -267,8 +267,8 @@ export default function Inbox() {
   };
 
   const totalUnread = allConversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0);
-  const activeCount = repliedConversations.filter(c => c.status !== "closed").length;
-  const closedCount = allConversations.filter(c => c.status === "closed").length;
+  const activeCount = repliedConversations.filter(c => !isMissedReply(c)).length;
+  const closedCount = allConversations.filter(c => isMissedReply(c)).length;
 
   return (
     <div className="h-[calc(100vh-7rem)] flex flex-col">
@@ -333,7 +333,11 @@ export default function Inbox() {
                   <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-30" />
                   <p className="text-sm font-medium">No conversations</p>
                   <p className="text-xs mt-1">
-                    {filterTab === "all" ? "Send a notification to start conversations" : `No ${filterTab} conversations`}
+                    {filterTab === "all"
+                      ? "Send a notification to start conversations"
+                      : filterTab === "closed"
+                        ? "No missed replies - you're caught up within 24 hours"
+                        : "No active conversations"}
                   </p>
                 </div>
               ) : (
@@ -379,9 +383,9 @@ export default function Inbox() {
                           </Badge>
                         )}
                       </div>
-                      {conv.status === "closed" && (
+                      {isMissedReply(conv) && (
                         <Badge variant="secondary" className="mt-1 text-xs">
-                          Closed
+                          Missed reply
                         </Badge>
                       )}
                     </div>
@@ -430,24 +434,6 @@ export default function Inbox() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      {selectedConv.status !== "closed" ? (
-                        <DropdownMenuItem
-                          onClick={() => updateStatusMutation.mutate({ id: selectedConv.id, status: "closed" })}
-                          data-testid="menu-close-conversation"
-                        >
-                          <Archive className="h-4 w-4 mr-2" />
-                          Close conversation
-                        </DropdownMenuItem>
-                      ) : (
-                        <DropdownMenuItem
-                          onClick={() => updateStatusMutation.mutate({ id: selectedConv.id, status: "open" })}
-                          data-testid="menu-reopen-conversation"
-                        >
-                          <RefreshCw className="h-4 w-4 mr-2" />
-                          Reopen conversation
-                        </DropdownMenuItem>
-                      )}
-                      <DropdownMenuSeparator />
                       <DropdownMenuItem
                         onClick={() => setShowTemplateDialog(true)}
                         data-testid="menu-send-template"
@@ -623,9 +609,9 @@ export default function Inbox() {
                               </span>
                             </div>
                             <div className="flex justify-between">
-                              <span className="text-muted-foreground">Status</span>
-                              <Badge variant={selectedConv.status === "closed" ? "secondary" : "default"}>
-                                {selectedConv.status === "closed" ? "Closed" : "Open"}
+                              <span className="text-muted-foreground">Reply status</span>
+                              <Badge variant={isMissedReply(selectedConv) ? "secondary" : "default"}>
+                                {isMissedReply(selectedConv) ? "Missed reply" : repliedIds.has(selectedConv.id) ? "Replied" : "No reply yet"}
                               </Badge>
                             </div>
                           </div>
@@ -675,29 +661,6 @@ export default function Inbox() {
 
                         <div className="space-y-2">
                           <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Contact actions</h4>
-                          {selectedConv.status !== "closed" ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full"
-                              onClick={() => updateStatusMutation.mutate({ id: selectedConv.id, status: "closed" })}
-                              data-testid="button-close-conv"
-                            >
-                              <Archive className="h-4 w-4 mr-2" />
-                              Close conversation
-                            </Button>
-                          ) : (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full"
-                              onClick={() => updateStatusMutation.mutate({ id: selectedConv.id, status: "open" })}
-                              data-testid="button-reopen-conv"
-                            >
-                              <RefreshCw className="h-4 w-4 mr-2" />
-                              Reopen
-                            </Button>
-                          )}
                           <Button
                             variant="destructive"
                             size="sm"

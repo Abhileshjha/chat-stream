@@ -2359,15 +2359,8 @@ export async function registerRoutes(
       const allConversations = await storage.getConversations(active.accountId);
 
       if (filter === "replied") {
-        const replied = [];
-        for (const conv of allConversations) {
-          const msgs = await storage.getConversationMessages(conv.id);
-          const hasInbound = msgs.some(m => m.direction === "inbound");
-          if (hasInbound) {
-            replied.push(conv);
-          }
-        }
-        return res.json(replied);
+        const repliedIds = await storage.getRepliedConversationIds(active.accountId);
+        return res.json(allConversations.filter((conv) => repliedIds.has(conv.id)));
       }
 
       res.json(allConversations);

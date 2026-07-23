@@ -94,6 +94,7 @@ export interface IStorage {
   createConversation(phone: string, name: string | undefined, accountId: string): Promise<Conversation>;
   updateConversation(id: string, updates: Partial<Conversation>): Promise<Conversation | undefined>;
   getConversationMessages(conversationId: string): Promise<ConversationMessage[]>;
+  getRepliedConversationIds(accountId: string): Promise<Set<string>>;
   addConversationMessage(message: InsertConversationMessage): Promise<ConversationMessage>;
   getConversationsByAccount(accountId: string): Promise<Conversation[]>;
   deleteConversation(id: string): Promise<boolean>;
@@ -813,6 +814,16 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(conversationMessages)
       .where(eq(conversationMessages.conversationId, conversationId))
       .orderBy(conversationMessages.sentAt);
+  }
+
+  async getRepliedConversationIds(accountId: string): Promise<Set<string>> {
+    // One joined query instead of fetching every conversation's full message
+    // history one at a time just to check for an inbound message.
+    const rows = await db.selectDistinct({ id: conversationMessages.conversationId })
+      .from(conversationMessages)
+      .innerJoin(conversations, eq(conversations.id, conversationMessages.conversationId))
+      .where(and(eq(conversations.accountId, accountId), eq(conversationMessages.direction, "inbound")));
+    return new Set(rows.map((r) => r.id));
   }
 
   async addConversationMessage(message: InsertConversationMessage): Promise<ConversationMessage> {
