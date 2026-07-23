@@ -103,6 +103,45 @@ async function resolveHeaderMediaParam(
   return { type: mediaType, [mediaType]: { id: uploadResult.data.id } };
 }
 
+// Resolves the header media param for sending a template message, preferring
+// Meta's own permanently-hosted copy of an approved template's header image
+// over anything stored locally. Local uploads vanish on any server restart
+// (Render wipes disk), but once a template is approved, Meta keeps its own
+// CDN copy of the header media forever - so this is what makes header images
+// on already-approved templates actually reliable to send, long after the
+// original local file is gone.
+async function resolveTemplateHeaderParams(
+  template: { name: string; metaTemplateId: string | null; status: string; components: unknown },
+  activeAccount: { businessAccountId: string | null; accessToken: string | null; phoneNumberId: string | null },
+  fallbackMediaUrl?: string,
+): Promise<any[] | undefined> {
+  const components = (template.components as any[]) || [];
+  const headerComp = components.find((c: any) => c.type === "HEADER");
+  if (!headerComp || !["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format || "")) {
+    return undefined;
+  }
+  const mediaType = headerComp.format === "IMAGE" ? "image" : headerComp.format === "VIDEO" ? "video" : "document";
+
+  if (template.metaTemplateId && activeAccount.businessAccountId && activeAccount.accessToken) {
+    try {
+      const metaLink = await whatsappApi.getTemplateHeaderMediaLink(
+        activeAccount.businessAccountId, activeAccount.accessToken, template.name
+      );
+      if (metaLink) {
+        return [{ type: mediaType, [mediaType]: { link: metaLink } }];
+      }
+    } catch (e: any) {
+      console.warn(`Failed to fetch Meta-hosted header media for "${template.name}", falling back:`, e.message);
+    }
+  }
+
+  const mediaUrl = headerComp.mediaUrl || fallbackMediaUrl;
+  if (!mediaUrl) {
+    throw new Error(`This template requires a ${mediaType} in the header, and no media is available. Please provide one.`);
+  }
+  return [await resolveHeaderMediaParam(mediaUrl, mediaType, activeAccount.phoneNumberId!, activeAccount.accessToken!)];
+}
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
@@ -2448,15 +2487,13 @@ export async function registerRoutes(
         if (req.body.type === "template" && req.body.templateName) {
           const template = await storage.getTemplateByName(req.body.templateName, activeAccount.id);
           const lang = template?.language || "en";
-          const components = (template?.components as any[]) || [];
-          const headerComp = components.find((c: any) => c.type === "HEADER");
 
           let headerParams: any[] | undefined;
-          if (headerComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format || "")) {
-            const mediaUrl = headerComp.mediaUrl;
-            if (mediaUrl) {
-              const mediaType = headerComp.format === "IMAGE" ? "image" : headerComp.format === "VIDEO" ? "video" : "document";
-              headerParams = [await resolveHeaderMediaParam(mediaUrl, mediaType, activeAccount.phoneNumberId, activeAccount.accessToken)];
+          if (template) {
+            try {
+              headerParams = await resolveTemplateHeaderParams(template, activeAccount);
+            } catch (mediaErr: any) {
+              return res.status(400).json({ error: mediaErr.message || "Failed to prepare header media for sending" });
             }
           }
 
@@ -2859,24 +2896,12 @@ export async function registerRoutes(
       const bodyComp = components.find((c: any) => c.type === "BODY");
 
       let headerParams: any[] | undefined;
-      if (headerComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format || "")) {
-        // Prefer the template's own approved header media - it's what Meta
-        // reviewed and approved. Only fall back to a manually-attached
-        // notification image when the template itself has none.
-        const mediaUrl = headerComp.mediaUrl || notification.headerMediaUrl;
-        if (!mediaUrl) {
-          return res.status(400).json({
-            error: `This template requires a ${headerComp.format.toLowerCase()} in the header. Please provide a media URL in the notification editor.`,
-          });
-        }
-        const mediaType = headerComp.format === "IMAGE" ? "image" :
-                         headerComp.format === "VIDEO" ? "video" : "document";
-        try {
-          headerParams = [await resolveHeaderMediaParam(mediaUrl, mediaType, activeAccount.phoneNumberId, activeAccount.accessToken)];
-        } catch (mediaErr: any) {
-          return res.status(400).json({ error: mediaErr.message || "Failed to prepare header media for sending" });
-        }
-      } else if (headerComp && headerComp.format === "TEXT" && headerComp.text?.includes("{{")) {
+      try {
+        headerParams = await resolveTemplateHeaderParams(template, activeAccount, notification.headerMediaUrl || undefined);
+      } catch (mediaErr: any) {
+        return res.status(400).json({ error: mediaErr.message || "Failed to prepare header media for sending" });
+      }
+      if (headerComp && headerComp.format === "TEXT" && headerComp.text?.includes("{{")) {
         const varCount = (headerComp.text.match(/\{\{\d+\}\}/g) || []).length;
         if (varCount > 0) {
           const templateVars = notification.templateVariables || {};
@@ -2976,17 +3001,12 @@ export async function registerRoutes(
       const bodyComp = components.find((c: any) => c.type === "BODY");
 
       let headerParams: any[] | undefined;
-      if (headerComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format || "")) {
-        const mediaUrl = headerComp.mediaUrl || notification.headerMediaUrl;
-        if (mediaUrl) {
-          const mediaType = headerComp.format === "IMAGE" ? "image" : headerComp.format === "VIDEO" ? "video" : "document";
-          try {
-            headerParams = [await resolveHeaderMediaParam(mediaUrl, mediaType, activeAccount.phoneNumberId, activeAccount.accessToken)];
-          } catch (mediaErr: any) {
-            return res.status(400).json({ error: mediaErr.message || "Failed to prepare header media for sending" });
-          }
-        }
-      } else if (headerComp && headerComp.format === "TEXT" && headerComp.text?.includes("{{")) {
+      try {
+        headerParams = await resolveTemplateHeaderParams(template, activeAccount, notification.headerMediaUrl || undefined);
+      } catch (mediaErr: any) {
+        return res.status(400).json({ error: mediaErr.message || "Failed to prepare header media for sending" });
+      }
+      if (headerComp && headerComp.format === "TEXT" && headerComp.text?.includes("{{")) {
         const varCount = (headerComp.text.match(/\{\{\d+\}\}/g) || []).length;
         if (varCount > 0) {
           const templateVars = notification.templateVariables || {};

@@ -364,6 +364,32 @@ export async function getTemplates(
   );
 }
 
+// Meta permanently hosts the header media of any APPROVED template at a CDN
+// URL of its own - fetching it lets us send header media without ever
+// depending on our own local disk, which can be wiped by a server restart
+// long after the template was approved.
+export async function getTemplateHeaderMediaLink(
+  wabaId: string,
+  accessToken: string,
+  templateName: string
+): Promise<string | null> {
+  const result = await metaApiRequest<{ data: any[] }>(
+    `${META_API_BASE}/${wabaId}/message_templates?name=${encodeURIComponent(templateName)}&fields=id,name,status,components`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!result.success || !result.data?.data?.length) return null;
+
+  // Meta's `name` filter does a prefix match, not an exact one - it will
+  // also return e.g. "hero_04_copy_xyz" for a query of "hero_04" - so filter
+  // to an exact name match ourselves before picking one.
+  const exactMatches = result.data.data.filter((t: any) => t.name === templateName);
+  const approved = exactMatches.find((t: any) => t.status === "APPROVED") || exactMatches[0];
+  if (!approved) return null;
+  const headerComp = (approved.components || []).find((c: any) => c.type === "HEADER");
+  const link = headerComp?.example?.header_handle?.[0];
+  return typeof link === "string" && /^https?:\/\//i.test(link) ? link : null;
+}
+
 export async function sendTemplateMessage(
   phoneNumberId: string,
   accessToken: string,
