@@ -10,6 +10,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { useRealtimeSync } from "@/hooks/use-realtime-sync";
 import { usePageTracking } from "@/hooks/use-page-tracking";
 import { TrialStatusBadge } from "@/components/trial-status-badge";
+import { EmailVerifyBanner } from "@/components/email-verify-banner";
 import { useAuth } from "@/hooks/use-auth";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
@@ -123,6 +124,7 @@ function AuthenticatedApp() {
           apiStatus={metrics?.apiStatus || "disconnected"}
         />
         <SidebarInset className="flex flex-col flex-1 min-w-0">
+          <EmailVerifyBanner />
           <header className="flex h-16 shrink-0 items-center justify-between gap-2 border-b px-4">
             <div className="flex items-center gap-2">
               <SidebarTrigger data-testid="button-sidebar-toggle" />

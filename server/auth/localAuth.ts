@@ -1,12 +1,14 @@
 import passport from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import type { Express, RequestHandler } from "express";
 import { db } from "@db";
 import { users } from "@shared/models/auth";
 import { eq } from "drizzle-orm";
 import { authStorage } from "./storage";
 import { getSession } from "./session";
+import { sendVerificationEmail } from "../email";
 
 interface SessionUser {
   claims: {
@@ -77,6 +79,7 @@ export async function setupAuth(app: Express) {
 
       const passwordHash = await bcrypt.hash(password, 10);
       const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      const emailVerificationToken = crypto.randomBytes(32).toString("hex");
       const [user] = await db
         .insert(users)
         .values({
@@ -86,8 +89,13 @@ export async function setupAuth(app: Express) {
           lastName: lastName || undefined,
           subscriptionStatus: "trial",
           trialEndsAt,
+          emailVerificationToken,
         })
         .returning();
+
+      sendVerificationEmail(normalizedEmail, emailVerificationToken, firstName).catch((err) => {
+        console.error("Failed to send verification email:", err);
+      });
 
       req.login(toSessionUser(user) as Express.User, (err) => {
         if (err) {

@@ -8,9 +8,11 @@ import { eq, and, desc, gte, sql as sqlOp } from "drizzle-orm";
 import { z } from "zod";
 import { authStorage } from "./auth/storage";
 import { isAuthenticated } from "./auth/localAuth";
-import { requireActiveSubscription, hasActiveSubscription, SUBSCRIPTION_REQUIRED_MESSAGE } from "./subscriptionGate";
+import { requireActiveSubscription, hasActiveSubscription, SUBSCRIPTION_REQUIRED_MESSAGE, requireVerifiedEmail, EMAIL_VERIFICATION_REQUIRED_MESSAGE } from "./subscriptionGate";
 import { pageViews, users } from "@shared/models/auth";
 import * as razorpayApi from "./razorpay";
+import { sendVerificationEmail } from "./email";
+import crypto from "crypto";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -1007,7 +1009,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/campaigns/:id/execute", isAuthenticated as RequestHandler, requireActiveSubscription, async (req: any, res) => {
+  app.post("/api/campaigns/:id/execute", isAuthenticated as RequestHandler, requireVerifiedEmail, requireActiveSubscription, async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
       if (!active) return res.status(401).json({ error: "No active account" });
@@ -2346,8 +2348,14 @@ export async function registerRoutes(
       const activeAccount = accounts.find(a => a.id === conversation.accountId);
       const isOutbound = req.body.direction === "outbound" || req.body.direction === "outgoing";
 
-      if (isOutbound && userId && !(await hasActiveSubscription(userId))) {
-        return res.status(402).json({ error: "subscription_required", message: SUBSCRIPTION_REQUIRED_MESSAGE });
+      if (isOutbound && userId) {
+        const sender = await authStorage.getUser(userId);
+        if (sender && sender.role !== "super_admin" && !sender.emailVerified) {
+          return res.status(403).json({ error: "email_verification_required", message: EMAIL_VERIFICATION_REQUIRED_MESSAGE });
+        }
+        if (!(await hasActiveSubscription(userId))) {
+          return res.status(402).json({ error: "subscription_required", message: SUBSCRIPTION_REQUIRED_MESSAGE });
+        }
       }
 
       if (isOutbound && (!activeAccount?.accessToken || !activeAccount?.phoneNumberId)) {
@@ -2580,7 +2588,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/notifications/:id/send", isAuthenticated as RequestHandler, requireActiveSubscription, async (req: any, res) => {
+  app.post("/api/notifications/:id/send", isAuthenticated as RequestHandler, requireVerifiedEmail, requireActiveSubscription, async (req: any, res) => {
     try {
       const notification = await storage.getNotification(req.params.id);
       if (!notification) {
@@ -3332,6 +3340,46 @@ export async function registerRoutes(
     }
   });
 
+  // ============== Email Verification ==============
+  app.get("/api/verify-email", async (req, res) => {
+    try {
+      const token = req.query.token as string;
+      if (!token) {
+        return res.redirect("/?verify=missing-token");
+      }
+      const [user] = await db.select().from(users).where(eq(users.emailVerificationToken, token));
+      if (!user) {
+        return res.redirect("/?verify=invalid");
+      }
+      await authStorage.updateUserSubscription(user.id, {
+        emailVerified: true,
+        emailVerificationToken: null,
+      } as any);
+      res.redirect("/?verify=success");
+    } catch (error) {
+      console.error("Email verification error:", error);
+      res.redirect("/?verify=error");
+    }
+  });
+
+  app.post("/api/resend-verification", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await authStorage.getUser(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      if (user.emailVerified) {
+        return res.json({ message: "Email already verified" });
+      }
+      const token = crypto.randomBytes(32).toString("hex");
+      await authStorage.updateUserSubscription(userId, { emailVerificationToken: token } as any);
+      await sendVerificationEmail(user.email || "", token, user.firstName || undefined);
+      res.json({ message: "Verification email sent" });
+    } catch (error) {
+      console.error("Resend verification error:", error);
+      res.status(500).json({ error: "Failed to resend verification email" });
+    }
+  });
+
   // ============== Subscription / Razorpay ==============
   app.get("/api/subscription/status", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
@@ -3343,6 +3391,7 @@ export async function registerRoutes(
         hasPaid: user.hasPaid,
         grantedFreeAccess: user.grantedFreeAccess,
         trialEndsAt: user.trialEndsAt,
+        emailVerified: user.emailVerified,
         isActive: await hasActiveSubscription(userId),
       });
     } catch (error) {

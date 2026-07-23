@@ -38,4 +38,32 @@ export const requireActiveSubscription: RequestHandler = async (req: any, res, n
   });
 };
 
-export { SUBSCRIPTION_REQUIRED_MESSAGE };
+const EMAIL_VERIFICATION_REQUIRED_MESSAGE =
+  "Please verify your email address before sending messages. Check your inbox for the verification link.";
+
+// A trial account that never verifies its email can register but can never
+// actually send - this is what keeps a bogus/throwaway signup from consuming
+// messaging resources, without hard-blocking their ability to log in and look
+// around first.
+export const requireVerifiedEmail: RequestHandler = async (req: any, res, next) => {
+  const userId = req.user?.claims?.sub;
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const user = await authStorage.getUser(userId);
+  if (!user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  if (user.role === "super_admin" || user.emailVerified) {
+    return next();
+  }
+
+  return res.status(403).json({
+    error: "email_verification_required",
+    message: EMAIL_VERIFICATION_REQUIRED_MESSAGE,
+  });
+};
+
+export { SUBSCRIPTION_REQUIRED_MESSAGE, EMAIL_VERIFICATION_REQUIRED_MESSAGE };
