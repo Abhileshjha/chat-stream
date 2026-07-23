@@ -38,6 +38,7 @@ export const templateComponentSchema = z.object({
     text: z.string(),
     url: z.string().optional(),
     phoneNumber: z.string().optional(),
+    phone_number: z.string().optional(),
   })).optional(),
 });
 

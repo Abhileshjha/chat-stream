@@ -194,7 +194,7 @@ function buildMetaComponents(components: TemplateComponent[], mediaHandle?: stri
             return {
               type: "PHONE_NUMBER",
               text: btn.text,
-              phone_number: btn.phoneNumber,
+              phone_number: (btn as any).phone_number || btn.phoneNumber,
             };
           }
           return { type: btn.type, text: btn.text };
