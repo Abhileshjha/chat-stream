@@ -18,7 +18,7 @@ import {
   type QualityScore,
 } from "@shared/schema";
 import { db } from "@db";
-import { eq, desc, and, or, isNull, inArray, sql as dsql } from "drizzle-orm";
+import { eq, desc, and, or, isNull, inArray, gte, sql as dsql } from "drizzle-orm";
 
 export interface IStorage {
   getTemplates(accountId?: string): Promise<Template[]>;
@@ -35,6 +35,7 @@ export interface IStorage {
   deleteCampaign(id: string): Promise<boolean>;
 
   getMessages(accountId?: string): Promise<Message[]>;
+  getMessageCountsByAccount(): Promise<Array<{ accountId: string | null; total: number; failed: number }>>;
   getMessage(id: string): Promise<Message | undefined>;
   getMessagesByWhatsappId(whatsappId: string): Promise<Message | undefined>;
   getMessagesByCampaign(campaignId: string): Promise<Message[]>;
@@ -210,6 +211,31 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(messages).orderBy(desc(messages.queuedAt));
   }
 
+  // Aggregated in SQL rather than pulling every message row into the app -
+  // the admin usage dashboard polls this every 30s, and this table grows to
+  // tens of thousands of rows per bulk campaign, so a naive SELECT * here
+  // would repeatedly transfer the whole table over the wire for no reason.
+  async getMessageCountsByAccount(): Promise<Array<{ accountId: string | null; total: number; failed: number }>> {
+    const rows = await db
+      .select({
+        accountId: messages.accountId,
+        status: messages.status,
+        count: dsql<number>`count(*)`,
+      })
+      .from(messages)
+      .groupBy(messages.accountId, messages.status);
+
+    const byAccount = new Map<string | null, { total: number; failed: number }>();
+    for (const row of rows) {
+      const entry = byAccount.get(row.accountId) || { total: 0, failed: 0 };
+      const count = Number(row.count);
+      entry.total += count;
+      if (row.status === "failed") entry.failed += count;
+      byAccount.set(row.accountId, entry);
+    }
+    return Array.from(byAccount.entries()).map(([accountId, { total, failed }]) => ({ accountId, total, failed }));
+  }
+
   async getMessage(id: string): Promise<Message | undefined> {
     const rows = await db.select().from(messages).where(eq(messages.id, id));
     return rows[0];
@@ -258,25 +284,39 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Dashboard
+  // This used to fetch every message/template/campaign row for the account
+  // just to count them - the dashboard is polled every ~8s by the client's
+  // real-time sync, so on an account with tens of thousands of messages that
+  // repeatedly pulled the entire table across the wire from Neon for no
+  // reason. Aggregating with COUNT/SUM/GROUP BY in SQL instead means only a
+  // handful of summary rows ever leave the database.
   async getDashboardMetrics(accountId?: string): Promise<DashboardMetrics> {
-    const allMessages = accountId
-      ? await db.select().from(messages).where(eq(messages.accountId, accountId))
-      : await db.select().from(messages);
-    const allTemplates = accountId
-      ? await db.select().from(templates).where(eq(templates.accountId, accountId))
-      : await db.select().from(templates);
-    const allCampaigns = accountId
-      ? await db.select().from(campaigns).where(eq(campaigns.accountId, accountId))
-      : await db.select().from(campaigns);
+    const messageStatusCounts = accountId
+      ? await db.select({ status: messages.status, count: dsql<number>`count(*)`, costSum: dsql<string>`coalesce(sum(${messages.cost}), 0)` })
+          .from(messages).where(eq(messages.accountId, accountId)).groupBy(messages.status)
+      : await db.select({ status: messages.status, count: dsql<number>`count(*)`, costSum: dsql<string>`coalesce(sum(${messages.cost}), 0)` })
+          .from(messages).groupBy(messages.status);
+
+    const templateStatusCounts = accountId
+      ? await db.select({ status: templates.status, count: dsql<number>`count(*)` }).from(templates).where(eq(templates.accountId, accountId)).groupBy(templates.status)
+      : await db.select({ status: templates.status, count: dsql<number>`count(*)` }).from(templates).groupBy(templates.status);
+
+    const campaignStatusCounts = accountId
+      ? await db.select({ status: campaigns.status, count: dsql<number>`count(*)` }).from(campaigns).where(eq(campaigns.accountId, accountId)).groupBy(campaigns.status)
+      : await db.select({ status: campaigns.status, count: dsql<number>`count(*)` }).from(campaigns).groupBy(campaigns.status);
+
     const allAccounts = accountId
       ? await db.select().from(whatsappAccounts).where(eq(whatsappAccounts.id, accountId))
       : await db.select().from(whatsappAccounts);
 
-    const localSent = allMessages.filter(m => m.status === "sent" || m.status === "delivered" || m.status === "read").length;
-    const localDelivered = allMessages.filter(m => m.status === "delivered" || m.status === "read").length;
-    const readCount = allMessages.filter(m => m.status === "read").length;
-    const failedCount = allMessages.filter(m => m.status === "failed").length;
-    const localCost = allMessages.reduce((sum, m) => sum + parseFloat(m.cost || "0"), 0);
+    const countFor = (rows: { status: string | null; count: number }[], status: string) =>
+      Number(rows.find(r => r.status === status)?.count || 0);
+    const totalMessageRows = messageStatusCounts.reduce((sum, r) => sum + Number(r.count), 0);
+    const localSent = countFor(messageStatusCounts, "sent") + countFor(messageStatusCounts, "delivered") + countFor(messageStatusCounts, "read");
+    const localDelivered = countFor(messageStatusCounts, "delivered") + countFor(messageStatusCounts, "read");
+    const readCount = countFor(messageStatusCounts, "read");
+    const failedCount = countFor(messageStatusCounts, "failed");
+    const localCost = messageStatusCounts.reduce((sum, r) => sum + parseFloat(r.costSum || "0"), 0);
 
     const metaSent = allAccounts.reduce((sum, a) => sum + (a.metaSentCount || 0), 0);
     const metaDelivered = allAccounts.reduce((sum, a) => sum + (a.metaDeliveredCount || 0), 0);
@@ -291,7 +331,7 @@ export class DatabaseStorage implements IStorage {
     const lastSync = allAccounts[0]?.lastSyncedAt;
 
     return {
-      totalMessages: Math.max(allMessages.length, sentCount + failedCount),
+      totalMessages: Math.max(totalMessageRows, sentCount + failedCount),
       sentCount,
       deliveredCount,
       readCount,
@@ -299,11 +339,11 @@ export class DatabaseStorage implements IStorage {
       deliveryRate: sentCount > 0 ? (deliveredCount / sentCount) * 100 : 0,
       readRate: deliveredCount > 0 ? (readCount / deliveredCount) * 100 : 0,
       totalCost,
-      activeCampaigns: allCampaigns.filter(c => c.status === "running").length,
-      approvedTemplates: allTemplates.filter(t => t.status === "APPROVED").length,
-      pendingTemplates: allTemplates.filter(t => t.status === "PENDING").length,
+      activeCampaigns: countFor(campaignStatusCounts, "running"),
+      approvedTemplates: countFor(templateStatusCounts, "APPROVED"),
+      pendingTemplates: countFor(templateStatusCounts, "PENDING"),
       messagingLimit: totalMessagingLimit,
-      messagingUsed: Math.max(allMessages.length, sentCount),
+      messagingUsed: Math.max(totalMessageRows, sentCount),
       throughputLevel: allAccounts[0]?.throughputLevel || null,
       qualityRating: (allAccounts[0]?.qualityRating as QualityScore) || "GREEN",
       apiStatus: allAccounts.length > 0 ? "connected" : "disconnected",
@@ -312,9 +352,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getDashboardChartData(accountId: string): Promise<{ messageVolume: any[]; statusDistribution: any[] }> {
-    const allMessages = await db.select().from(messages).where(eq(messages.accountId, accountId));
-
     const now = new Date();
+    // The volume chart only ever shows the last 24h, so only pull rows (and
+    // only the 3 columns actually used) from that window instead of the
+    // account's entire message history every time this is polled.
+    const windowStart = new Date(now.getTime() - 25 * 60 * 60 * 1000);
+    const recentMessages = await db
+      .select({ sentAt: messages.sentAt, queuedAt: messages.queuedAt, status: messages.status })
+      .from(messages)
+      .where(and(eq(messages.accountId, accountId), gte(messages.queuedAt, windowStart)));
+
     const hourlyMap = new Map<string, { time: string; sent: number; delivered: number; read: number }>();
     for (let i = 23; i >= 0; i--) {
       const h = new Date(now);
@@ -323,7 +370,7 @@ export class DatabaseStorage implements IStorage {
       hourlyMap.set(label, { time: label, sent: 0, delivered: 0, read: 0 });
     }
 
-    for (const msg of allMessages) {
+    for (const msg of recentMessages) {
       const sentTime = msg.sentAt || msg.queuedAt;
       if (!sentTime) continue;
       const msgDate = new Date(sentTime);
@@ -340,15 +387,19 @@ export class DatabaseStorage implements IStorage {
 
     const messageVolume = Array.from(hourlyMap.values());
 
-    const sentOnly = allMessages.filter(m => m.status === "sent").length;
-    const delivered = allMessages.filter(m => m.status === "delivered").length;
-    const read = allMessages.filter(m => m.status === "read").length;
-    const failed = allMessages.filter(m => m.status === "failed").length;
+    // Status distribution reflects all-time totals, not just the 24h window
+    // - aggregate that in SQL too instead of fetching every row to count them.
+    const statusCounts = await db
+      .select({ status: messages.status, count: dsql<number>`count(*)` })
+      .from(messages)
+      .where(eq(messages.accountId, accountId))
+      .groupBy(messages.status);
+    const countFor = (status: string) => Number(statusCounts.find(r => r.status === status)?.count || 0);
     const statusDistribution = [
-      { name: "Delivered", value: delivered },
-      { name: "Read", value: read },
-      { name: "Sent", value: sentOnly },
-      { name: "Failed", value: failed },
+      { name: "Delivered", value: countFor("delivered") },
+      { name: "Read", value: countFor("read") },
+      { name: "Sent", value: countFor("sent") },
+      { name: "Failed", value: countFor("failed") },
     ].filter(s => s.value > 0);
 
     return { messageVolume, statusDistribution };
