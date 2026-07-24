@@ -1,7 +1,5 @@
 import type { TemplateComponent } from "@shared/schema";
-import fs from "fs";
-import path from "path";
-import { resolveUploadedFilePath } from "./uploadStorage";
+import { getUploadedMediaBuffer } from "./uploadStorage";
 
 const META_API_VERSION = "v21.0";
 const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`;
@@ -207,6 +205,53 @@ function buildMetaComponents(components: TemplateComponent[], mediaHandle?: stri
   return metaComponents;
 }
 
+// Shared by createTemplate and updateTemplateOnMeta: resolves the header's
+// media handle (pre-uploaded at file-upload time, or freshly uploaded from
+// the stored file) or returns an error response if that fails.
+async function resolveTemplateMediaHandle(
+  components: TemplateComponent[],
+  accessToken: string,
+  effectiveAppId: string,
+): Promise<{ mediaHandle?: string; error?: MetaApiResponse }> {
+  const headerComp = components.find(c => c.type === "HEADER");
+  if (!headerComp || !["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format || "")) {
+    return {};
+  }
+
+  if ((headerComp as any).mediaHandle) {
+    console.log("Using pre-uploaded media handle:", (headerComp as any).mediaHandle);
+    return { mediaHandle: (headerComp as any).mediaHandle };
+  }
+
+  if (!headerComp.mediaUrl) return {};
+
+  const file = await getUploadedMediaBuffer(headerComp.mediaUrl);
+  if (!file) {
+    console.warn("Media file not found, submitting template without media sample:", headerComp.mediaUrl);
+    return {};
+  }
+
+  console.log(`Uploading media to Meta for template header: ${headerComp.mediaUrl}`);
+  const uploadResult = await uploadSessionMedia(effectiveAppId, accessToken, file.buffer, file.mimeType, file.originalName || "header");
+
+  if (uploadResult.success && uploadResult.data?.handle) {
+    console.log("Media uploaded successfully, handle:", uploadResult.data.handle);
+    return { mediaHandle: uploadResult.data.handle };
+  }
+
+  console.error("Media upload to Meta failed:", uploadResult.error);
+  return {
+    error: {
+      success: false,
+      error: {
+        message: `Failed to upload media to Meta: ${uploadResult.error?.message || "Unknown error"}. Please try again or use a different media file.`,
+        type: "MediaUploadError",
+        code: -1,
+      },
+    },
+  };
+}
+
 export async function createTemplate(
   wabaId: string,
   accessToken: string,
@@ -216,58 +261,8 @@ export async function createTemplate(
   components: TemplateComponent[],
   appId?: string
 ): Promise<MetaApiResponse> {
-  let mediaHandle: string | undefined;
-
-  const headerComp = components.find(c => c.type === "HEADER");
-  if (headerComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format || "")) {
-    if ((headerComp as any).mediaHandle) {
-      // Already uploaded to Meta at file-upload time - skip local disk
-      // entirely, since it may no longer exist (ephemeral hosting storage).
-      mediaHandle = (headerComp as any).mediaHandle;
-      console.log("Using pre-uploaded media handle:", mediaHandle);
-    } else if (headerComp.mediaUrl) {
-      const localFilePath = resolveUploadedFilePath(headerComp.mediaUrl);
-
-      if (localFilePath && fs.existsSync(localFilePath)) {
-        const fileBuffer = fs.readFileSync(localFilePath);
-        const ext = path.extname(localFilePath).toLowerCase();
-        const mimeMap: Record<string, string> = {
-          ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
-          ".mp4": "video/mp4", ".3gp": "video/3gpp",
-          ".pdf": "application/pdf", ".doc": "application/msword",
-          ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        };
-        const mimeType = mimeMap[ext] || "application/octet-stream";
-        const effectiveAppId = appId || wabaId;
-
-        console.log(`Uploading media to Meta for template header: ${localFilePath}`);
-        const uploadResult = await uploadSessionMedia(
-          effectiveAppId,
-          accessToken,
-          fileBuffer,
-          mimeType,
-          path.basename(localFilePath)
-        );
-
-        if (uploadResult.success && uploadResult.data?.handle) {
-          mediaHandle = uploadResult.data.handle;
-          console.log("Media uploaded successfully, handle:", mediaHandle);
-        } else {
-          console.error("Media upload to Meta failed:", uploadResult.error);
-          return {
-            success: false,
-            error: {
-              message: `Failed to upload media to Meta: ${uploadResult.error?.message || "Unknown error"}. Please try again or use a different media file.`,
-              type: "MediaUploadError",
-              code: -1,
-            },
-          };
-        }
-      } else {
-        console.warn("Media file not found locally, submitting template without media sample:", headerComp.mediaUrl);
-      }
-    }
-  }
+  const { mediaHandle, error } = await resolveTemplateMediaHandle(components, accessToken, appId || wabaId);
+  if (error) return error;
 
   const metaComponents = buildMetaComponents(components, mediaHandle);
 
@@ -331,6 +326,47 @@ export async function createTemplate(
   }
 
   return lastResult;
+}
+
+// Edits an already-submitted template on Meta's side (name and language can't
+// be changed once submitted - only category/components). This is what
+// actually needs to run when a user edits an approved/rejected/paused
+// template's content: previously nothing called Meta at all on edit, so
+// changes only ever touched the local copy while Meta kept sending the
+// original approved version. Editing resets the template to PENDING review.
+// Meta also enforces a small daily limit on how many times a template can be
+// edited - that surfaces here as a normal API error.
+export async function updateTemplateOnMeta(
+  metaTemplateId: string,
+  wabaId: string,
+  accessToken: string,
+  category: string,
+  components: TemplateComponent[],
+  appId?: string
+): Promise<MetaApiResponse> {
+  const { mediaHandle, error } = await resolveTemplateMediaHandle(components, accessToken, appId || wabaId);
+  if (error) return error;
+
+  const metaComponents = buildMetaComponents(components, mediaHandle);
+  const hasBody = metaComponents.some(c => c.type === "BODY" && c.text && c.text.trim());
+  if (!hasBody) {
+    return {
+      success: false,
+      error: { message: "Template body text is required.", type: "ValidationError", code: -1 },
+    };
+  }
+
+  const payload = { category: category.toUpperCase(), components: metaComponents };
+  console.log("Updating template on Meta API:", metaTemplateId, JSON.stringify(payload, null, 2));
+
+  return metaApiRequest(`${META_API_BASE}/${metaTemplateId}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function deleteTemplate(

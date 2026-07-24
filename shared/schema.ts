@@ -70,6 +70,27 @@ export const insertTemplateSchema = createInsertSchema(templates).omit({
 export type InsertTemplate = z.infer<typeof insertTemplateSchema>;
 export type Template = typeof templates.$inferSelect;
 
+// Header media (images/videos/documents for templates and per-send
+// attachments) stored in the database rather than local disk - Render (and
+// most hosts without a paid persistent-disk add-on) wipes local disk on
+// every restart, redeploy, or crash recovery, which was silently deleting
+// template header images and breaking in-flight sends. Data is stored as
+// base64 text rather than raw bytea for simpler round-tripping through the
+// Neon serverless driver.
+export const uploadedFiles = pgTable("uploaded_files", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id"),
+  phoneNumberId: varchar("phone_number_id"),
+  originalName: varchar("original_name", { length: 255 }),
+  mimeType: varchar("mime_type", { length: 100 }).notNull(),
+  size: integer("size").notNull(),
+  data: text("data").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type UploadedFile = typeof uploadedFiles.$inferSelect;
+export type InsertUploadedFile = typeof uploadedFiles.$inferInsert;
+
 // Campaigns
 export const campaigns = pgTable("campaigns", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

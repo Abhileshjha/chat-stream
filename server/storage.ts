@@ -14,6 +14,7 @@ import {
   type ConversationMessage, type InsertConversationMessage, conversationMessages,
   type Notification, type InsertNotification, notifications,
   type TeamMember, type InsertTeamMember, teamMembers,
+  type UploadedFile, uploadedFiles,
   activeAccounts,
   type QualityScore,
 } from "@shared/schema";
@@ -111,6 +112,10 @@ export interface IStorage {
 
   getApiSettings(): Promise<ApiSettings | undefined>;
   deleteApiSettings(): Promise<boolean>;
+
+  saveUploadedFile(file: { userId?: string; phoneNumberId?: string; originalName?: string; mimeType: string; size: number; data: string }): Promise<UploadedFile>;
+  getUploadedFile(id: string): Promise<UploadedFile | undefined>;
+  deleteUploadedFile(id: string): Promise<boolean>;
 
   getTeamMembers(accountId: string): Promise<TeamMember[]>;
   addTeamMember(member: InsertTeamMember): Promise<TeamMember>;
@@ -441,6 +446,21 @@ export class DatabaseStorage implements IStorage {
     const existing = await this.getSettings();
     if (!existing) return false;
     const result = await db.delete(apiSettings).where(eq(apiSettings.id, existing.id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async saveUploadedFile(file: { userId?: string; phoneNumberId?: string; originalName?: string; mimeType: string; size: number; data: string }): Promise<UploadedFile> {
+    const [row] = await db.insert(uploadedFiles).values(file).returning();
+    return row;
+  }
+
+  async getUploadedFile(id: string): Promise<UploadedFile | undefined> {
+    const rows = await db.select().from(uploadedFiles).where(eq(uploadedFiles.id, id));
+    return rows[0];
+  }
+
+  async deleteUploadedFile(id: string): Promise<boolean> {
+    const result = await db.delete(uploadedFiles).where(eq(uploadedFiles.id, id));
     return (result.rowCount ?? 0) > 0;
   }
 

@@ -17,7 +17,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import * as whatsappApi from "./whatsapp-api";
-import { uploadDir, getAccountUploadDir, resolveUploadedFilePath, toUploadUrl } from "./uploadStorage";
+import { saveUploadedMedia, getUploadedMediaBuffer, deleteUploadedMedia } from "./uploadStorage";
 
 // WhatsApp media type limits
 const whatsappMediaLimits: Record<string, number> = {
@@ -60,8 +60,8 @@ function renderTemplatePreview(template: { name: string; components: unknown } |
 }
 
 // Meta requires header media to be either a publicly-reachable URL or an
-// uploaded media ID - a locally-stored /uploads/... path is neither, so
-// resolve it to a real Meta media ID before it's ever used in a send call.
+// uploaded media ID - a database-stored /uploads/db/... reference is neither,
+// so resolve it to a real Meta media ID before it's ever used in a send call.
 async function resolveHeaderMediaParam(
   mediaUrl: string,
   mediaType: "image" | "video" | "document",
@@ -72,23 +72,12 @@ async function resolveHeaderMediaParam(
     return { type: mediaType, [mediaType]: { link: mediaUrl } };
   }
 
-  const localPath = resolveUploadedFilePath(mediaUrl);
-
-  if (!localPath || !fs.existsSync(localPath)) {
+  const file = await getUploadedMediaBuffer(mediaUrl);
+  if (!file) {
     throw new Error(`Header media file not found: ${mediaUrl}`);
   }
 
-  const fileBuffer = fs.readFileSync(localPath);
-  const ext = path.extname(localPath).toLowerCase();
-  const mimeMap: Record<string, string> = {
-    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp",
-    ".mp4": "video/mp4", ".mov": "video/quicktime",
-    ".pdf": "application/pdf", ".doc": "application/msword",
-    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  };
-  const mimeType = mimeMap[ext] || "application/octet-stream";
-
-  const uploadResult = await whatsappApi.uploadMedia(phoneNumberId, accessToken, fileBuffer, mimeType, path.basename(localPath));
+  const uploadResult = await whatsappApi.uploadMedia(phoneNumberId, accessToken, file.buffer, file.mimeType, file.originalName || "header");
   if (!uploadResult.success || !uploadResult.data?.id) {
     throw new Error(`Failed to upload header media to Meta: ${uploadResult.error?.message || "Unknown error"}`);
   }
@@ -96,22 +85,16 @@ async function resolveHeaderMediaParam(
   return { type: mediaType, [mediaType]: { id: uploadResult.data.id } };
 }
 
-// Resolves the header media param for sending a template message, preferring
-// Meta's own permanently-hosted copy of an approved template's header image
-// over anything stored locally. Local uploads vanish on any server restart
-// (Render wipes disk), but once a template is approved, Meta keeps its own
-// CDN copy of the header media forever - so this is what makes header images
-// on already-approved templates actually reliable to send, long after the
-// original local file is gone.
+// Resolves the header media param for sending a template message.
 // WhatsApp only requires a *sample* media file at template submission time,
 // for Meta's review - it never has to be the exact file sent at runtime.
 // Every send is resolved in this priority order:
 //   1. Media attached to THIS specific notification/campaign (fresh upload,
 //      uploaded straight to Meta's /media endpoint right before sending -
-//      this is the most reliable path, since it doesn't depend on anything
-//      Meta cached earlier or any file that might have been wiped off local
-//      disk by a redeploy).
-//   2. The template's own sample file, if it's still on local disk.
+//      the most reliable path, since it doesn't depend on anything Meta
+//      cached earlier).
+//   2. The template's own sample file (database-stored, so it survives
+//      restarts/redeploys - see the `uploadedFiles` table).
 //   3. Meta's own CDN copy of the approved template's header (last resort -
 //      confirmed directly that this link is short-lived/paced and can fail
 //      mid-send on a large batch, see git history for the incident).
@@ -178,31 +161,11 @@ async function resolveTemplateHeaderParams(
   throw new Error(`This template requires a ${mediaType} in the header, and no usable media is available. Please attach one to this send.`);
 }
 
+// Uploaded files are held in memory only long enough to validate and store
+// them in the database (see uploadStorage.ts) - never written to local disk,
+// which Render wipes on every restart/redeploy/crash recovery.
 const upload = multer({
-  storage: multer.diskStorage({
-    // Files land in uploads/{userId}/{phoneNumberId}/ so media for different
-    // users and different connected numbers never mixes together, and stays
-    // easy to find/clean up per number.
-    destination: async (req: any, file, cb) => {
-      try {
-        const userId = req.user?.claims?.sub || req.user?.id;
-        if (!userId) {
-          cb(null, getAccountUploadDir("anonymous", null));
-          return;
-        }
-        const accountId = await storage.getActiveAccountId(userId);
-        const account = accountId ? await storage.getAccount(accountId) : undefined;
-        cb(null, getAccountUploadDir(userId, account?.phoneNumberId));
-      } catch (err: any) {
-        cb(err, uploadDir);
-      }
-    },
-    filename: (req, file, cb) => {
-      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-      const ext = path.extname(file.originalname).toLowerCase();
-      cb(null, uniqueSuffix + ext);
-    },
-  }),
+  storage: multer.memoryStorage(),
   limits: {
     fileSize: 100 * 1024 * 1024, // 100MB max (documents), actual check done in fileFilter
   },
@@ -598,12 +561,21 @@ export async function registerRoutes(
   });
 
   // ============== File Uploads ==============
-  // Serve uploaded files statically
-  const express = await import("express");
-  app.use("/uploads", (req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    next();
-  }, express.default.static(uploadDir));
+  // Serves database-stored header media (see uploadStorage.ts) - kept at the
+  // same /uploads/... URL prefix clients and Meta-submission code already
+  // expect, just backed by the database instead of local disk.
+  app.get("/uploads/db/:id", async (req, res) => {
+    try {
+      const file = await storage.getUploadedFile(req.params.id);
+      if (!file) return res.status(404).send("Not found");
+      res.header("Access-Control-Allow-Origin", "*");
+      res.setHeader("Content-Type", file.mimeType);
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.send(Buffer.from(file.data, "base64"));
+    } catch (error) {
+      res.status(500).send("Error loading file");
+    }
+  });
 
   // File upload endpoint
   app.post("/api/upload", isAuthenticated as RequestHandler, upload.single("file"), async (req: any, res) => {
@@ -615,63 +587,53 @@ export async function registerRoutes(
       // Enforce per-type size limits on server side
       const maxSize = whatsappMediaLimits[req.file.mimetype];
       if (maxSize && req.file.size > maxSize) {
-        // Delete the uploaded file since it exceeds the limit
-        if (fs.existsSync(req.file.path)) {
-          fs.unlinkSync(req.file.path);
-        }
         const limitMB = Math.round(maxSize / (1024 * 1024));
         return res.status(400).json({
           error: `File too large. Maximum size for ${req.file.mimetype.split('/')[0]}s is ${limitMB}MB.`
         });
       }
 
-      // Store upload metadata with user association
       const user = (req as any).user;
       const userId = user?.id || user?.claims?.sub || "anonymous";
+      const active = await getActiveAccount(req);
 
-      const fileUrl = toUploadUrl(req.file.path);
-      const relativePath = fileUrl.slice("/uploads/".length);
-
-      // Track this upload for ownership verification, keyed by its full
-      // relative path (uploads/{userId}/{phoneNumberId}/{file}) now that
-      // files are namespaced per account and number instead of all sitting
-      // in one flat folder.
-      uploadMetadata.set(relativePath, {
+      const saved = await saveUploadedMedia({
+        buffer: req.file.buffer,
+        mimeType: req.file.mimetype,
+        originalName: req.file.originalname,
         userId,
-        uploadedAt: new Date(),
+        phoneNumberId: active?.account?.phoneNumberId,
       });
+      uploadMetadata.set(saved.url, { userId, uploadedAt: new Date() });
 
       // Immediately push this to Meta's resumable upload API and keep the
-      // resulting handle, so template submission never depends on the local
-      // file still existing later - hosts like Render wipe local disk on
-      // every restart/redeploy, which otherwise silently breaks header media
-      // between upload and submit time.
+      // resulting handle, so template submission never depends on this
+      // upload being re-fetched later.
       let mediaHandle: string | undefined;
       try {
-        const active = await getActiveAccount(req);
         const facebookAppId = process.env.FACEBOOK_APP_ID;
         if (active?.account?.accessToken && facebookAppId) {
           const uploadResult = await whatsappApi.uploadSessionMedia(
             facebookAppId,
             active.account.accessToken,
-            req.file.buffer || fs.readFileSync(req.file.path),
+            req.file.buffer,
             req.file.mimetype,
             req.file.originalname
           );
           if (uploadResult.success && uploadResult.data?.handle) {
             mediaHandle = uploadResult.data.handle;
           } else {
-            console.warn("[Upload] Meta media pre-upload failed, will retry from local disk at submit time:", uploadResult.error?.message);
+            console.warn("[Upload] Meta media pre-upload failed, will retry at submit time:", uploadResult.error?.message);
           }
         }
       } catch (metaUploadErr: any) {
-        console.warn("[Upload] Meta media pre-upload error, will retry from local disk at submit time:", metaUploadErr.message);
+        console.warn("[Upload] Meta media pre-upload error, will retry at submit time:", metaUploadErr.message);
       }
 
       const fileInfo = {
-        url: fileUrl,
+        url: saved.url,
         mediaHandle,
-        filename: relativePath,
+        filename: saved.url,
         originalName: req.file.originalname,
         mimetype: req.file.mimetype,
         size: req.file.size,
@@ -686,39 +648,26 @@ export async function registerRoutes(
     }
   });
 
-  // Delete uploaded file. Takes the relative path (uploads/{userId}/{phoneNumberId}/{file},
-  // as returned by /api/upload's `filename`) as a query param rather than a
-  // route segment, since it now contains slashes.
-  app.delete("/api/upload", isAuthenticated as RequestHandler, (req, res) => {
+  // Delete uploaded file. Takes the full media URL (as returned by
+  // /api/upload's `filename`) as a query param.
+  app.delete("/api/upload", isAuthenticated as RequestHandler, async (req, res) => {
     try {
-      const relativePath = String(req.query.path || "");
+      const mediaUrl = String(req.query.path || "");
       const user = (req as any).user;
       const currentUserId = user?.id || user?.claims?.sub;
       const isSuperAdmin = user?.role === "super_admin";
 
-      const filePath = resolveUploadedFilePath(`/uploads/${relativePath}`);
-      if (!filePath) {
-        return res.status(400).json({ error: "Invalid file path" });
-      }
-
-      // Validate the leaf filename format (timestamp-random.ext)
-      if (!/^\d+-\d+\.\w+$/.test(path.basename(filePath))) {
-        return res.status(400).json({ error: "Invalid filename format" });
-      }
-
       // Check ownership (super_admin can delete any file)
-      const metadata = uploadMetadata.get(relativePath);
+      const metadata = uploadMetadata.get(mediaUrl);
       if (metadata && !isSuperAdmin && metadata.userId !== currentUserId) {
         return res.status(403).json({ error: "Not authorized to delete this file" });
       }
 
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-        uploadMetadata.delete(relativePath); // Clean up metadata
+      const deleted = await deleteUploadedMedia(mediaUrl);
+      uploadMetadata.delete(mediaUrl);
+      if (deleted) {
         res.json({ message: "File deleted successfully" });
       } else {
-        // Also clean up stale metadata
-        uploadMetadata.delete(relativePath);
         res.status(404).json({ error: "File not found" });
       }
     } catch (error) {
@@ -780,17 +729,17 @@ export async function registerRoutes(
             details: "WhatsApp requires a sample media file for media headers - please upload one before submitting.",
           });
         }
-        // Uploaded files live on local disk, which can be wiped by a server
-        // restart/redeploy between upload and submission - fail clearly here
-        // instead of silently submitting to Meta with no media at all. Not
-        // needed if a mediaHandle was already captured at upload time, since
-        // that's a stable Meta-side reference that never touches local disk.
+        // Not needed if a mediaHandle was already captured at upload time,
+        // since that's a stable Meta-side reference. Otherwise confirm the
+        // database-stored upload this template points to still exists (it
+        // may be an old local-disk reference from before uploads moved to
+        // the database, which is no longer resolvable).
         if (!headerComp.mediaHandle && headerComp.mediaUrl.startsWith("/uploads/")) {
-          const localPath = resolveUploadedFilePath(headerComp.mediaUrl);
-          if (!localPath || !fs.existsSync(localPath)) {
+          const file = await getUploadedMediaBuffer(headerComp.mediaUrl);
+          if (!file) {
             return res.status(400).json({
               error: "Uploaded image is no longer available",
-              details: "The server storage was reset since you uploaded this file. Please re-upload the header image and submit again right away.",
+              details: "Please re-upload the header image and submit again.",
             });
           }
         }
@@ -886,7 +835,66 @@ export async function registerRoutes(
         });
       }
 
-      const template = await storage.updateTemplate(req.params.id, updates);
+      // Editing body/header/buttons here used to only ever touch the local
+      // copy - Meta's actual approved template never changed, so an "edited"
+      // template kept sending its old content, and the "Re-submit for
+      // Approval" button on an already-submitted template did nothing to
+      // WhatsApp at all. Push the change to Meta whenever content changed and
+      // an account is connected: edit the existing template if it was already
+      // submitted (this resets it to PENDING review), or submit it for the
+      // first time if it was only ever saved as a local draft.
+      const activeAccount = active.account;
+      const contentChanged = updates.components !== undefined || updates.category !== undefined;
+      let metaTemplateId = existing.metaTemplateId;
+      let statusOverride: string | undefined;
+
+      if (contentChanged && activeAccount?.accessToken && activeAccount?.businessAccountId) {
+        const mergedComponents = (updates.components ?? existing.components) as any[];
+        const mergedCategory = updates.category ?? existing.category;
+        const facebookAppId = process.env.FACEBOOK_APP_ID || undefined;
+
+        if (existing.metaTemplateId) {
+          const metaResult = await whatsappApi.updateTemplateOnMeta(
+            existing.metaTemplateId,
+            activeAccount.businessAccountId,
+            activeAccount.accessToken,
+            mergedCategory,
+            mergedComponents,
+            facebookAppId
+          );
+          if (!metaResult.success) {
+            return res.status(400).json({
+              error: "Failed to update template on WhatsApp",
+              details: metaResult.error?.message,
+            });
+          }
+          statusOverride = "PENDING";
+        } else {
+          const metaResult = await whatsappApi.createTemplate(
+            activeAccount.businessAccountId,
+            activeAccount.accessToken,
+            existing.name,
+            mergedCategory,
+            existing.language || "en",
+            mergedComponents,
+            facebookAppId
+          );
+          if (!metaResult.success || !metaResult.data?.id) {
+            return res.status(400).json({
+              error: "Failed to submit template to WhatsApp",
+              details: metaResult.error?.message,
+            });
+          }
+          metaTemplateId = metaResult.data.id;
+          statusOverride = metaResult.data.status || "PENDING";
+        }
+      }
+
+      const template = await storage.updateTemplate(req.params.id, {
+        ...updates,
+        metaTemplateId,
+        ...(statusOverride ? { status: statusOverride, lastSyncedAt: new Date() } : {}),
+      });
       if (!template) {
         return res.status(404).json({ error: "Template not found" });
       }
@@ -899,6 +907,7 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Invalid update data", details: error.errors });
       }
+      console.error("Template update error:", error);
       res.status(500).json({ error: "Failed to update template" });
     }
   });
@@ -950,7 +959,10 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Template not found" });
       }
 
-      if (template.metaTemplateId) {
+      // A template that was already submitted still has a metaTemplateId even
+      // after Meta rejects/disables/pauses it - only block resubmission for
+      // templates genuinely awaiting review or already live.
+      if (template.metaTemplateId && ["PENDING", "APPROVED"].includes(template.status)) {
         return res.status(400).json({ error: "Template is already submitted to Meta" });
       }
 
@@ -964,23 +976,35 @@ export async function registerRoutes(
       }
 
       const facebookAppId = process.env.FACEBOOK_APP_ID || undefined;
-      const metaResult = await whatsappApi.createTemplate(
-        account.businessAccountId,
-        account.accessToken,
-        template.name,
-        template.category,
-        template.language || "en",
-        (template.components || []) as any[],
-        facebookAppId
-      );
+      // A rejected/paused/disabled template already exists on Meta's side
+      // under the same name - resubmitting via create would just collide.
+      // Edit it in place instead, which resets it to PENDING review.
+      const metaResult = template.metaTemplateId
+        ? await whatsappApi.updateTemplateOnMeta(
+            template.metaTemplateId,
+            account.businessAccountId,
+            account.accessToken,
+            template.category,
+            (template.components || []) as any[],
+            facebookAppId
+          )
+        : await whatsappApi.createTemplate(
+            account.businessAccountId,
+            account.accessToken,
+            template.name,
+            template.category,
+            template.language || "en",
+            (template.components || []) as any[],
+            facebookAppId
+          );
 
-      if (metaResult.success && metaResult.data?.id) {
+      if (metaResult.success) {
         const updated = await storage.updateTemplate(template.id, {
-          metaTemplateId: metaResult.data.id,
-          status: metaResult.data.status || "PENDING",
+          metaTemplateId: metaResult.data?.id || template.metaTemplateId,
+          status: metaResult.data?.status || "PENDING",
           lastSyncedAt: new Date(),
         });
-        console.log(`[Template] Draft "${template.name}" submitted to Meta: ${metaResult.data.id}`);
+        console.log(`[Template] "${template.name}" (re)submitted to Meta`);
         broadcast("template-updated", { template: updated });
         res.json(updated);
       } else {
