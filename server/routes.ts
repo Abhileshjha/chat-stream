@@ -2475,14 +2475,19 @@ export async function registerRoutes(
       const active = await getActiveAccount(req);
       if (!active) return res.status(401).json({ error: "No active account" });
       const filter = req.query.filter as string;
-      const allConversations = await storage.getConversations(active.accountId);
 
       if (filter === "replied") {
+        // Only fetch the (much smaller) set of conversations that actually
+        // have an inbound reply, instead of loading every conversation ever
+        // created (one gets created per campaign recipient, even one-way
+        // broadcasts) just to filter it down in memory.
         const repliedIds = await storage.getRepliedConversationIds(active.accountId);
-        return res.json(allConversations.filter((conv) => repliedIds.has(conv.id)));
+        const replied = await storage.getConversationsByIds(active.accountId, Array.from(repliedIds));
+        return res.json(replied);
       }
 
-      res.json(allConversations);
+      const recentConversations = await storage.getConversations(active.accountId, 200);
+      res.json(recentConversations);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch conversations" });
     }

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, decimal, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, decimal, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -287,7 +287,13 @@ export const conversations = pgTable("conversations", {
   status: varchar("status", { length: 20 }).notNull().default("open"),
   windowEndsAt: timestamp("window_ends_at"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => [
+  // The Inbox listing always filters by account and sorts by recency - one
+  // conversation row exists per campaign recipient, so this table gets huge
+  // fast (28k+ rows on one account already) and was a full sequential scan
+  // without this.
+  index("IDX_conversations_account_last_message").on(table.accountId, table.lastMessageAt),
+]);
 
 export const insertConversationSchema = createInsertSchema(conversations).omit({
   id: true,

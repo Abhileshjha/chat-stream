@@ -90,7 +90,8 @@ export interface IStorage {
   deleteContactTag(id: string): Promise<boolean>;
   getContactTagsByAccount(accountId: string): Promise<ContactTag[]>;
 
-  getConversations(accountId: string): Promise<Conversation[]>;
+  getConversations(accountId: string, limit?: number): Promise<Conversation[]>;
+  getConversationsByIds(accountId: string, ids: string[]): Promise<Conversation[]>;
   getConversation(id: string): Promise<Conversation | undefined>;
   getConversationByPhone(phone: string, accountId: string): Promise<Conversation | undefined>;
   createConversation(phone: string, name: string | undefined, accountId: string): Promise<Conversation>;
@@ -838,9 +839,22 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Conversations
-  async getConversations(accountId: string): Promise<Conversation[]> {
-    return db.select().from(conversations)
+  // A "conversation" row gets created for every campaign recipient (even a
+  // one-way broadcast with no reply), so this table grows enormous fast -
+  // one account already has 28k+ rows. The Inbox only ever needs the most
+  // recent slice for its own listing; unbounded callers (like account
+  // deletion cleanup) pass no limit and still get everything.
+  async getConversations(accountId: string, limit?: number): Promise<Conversation[]> {
+    const query = db.select().from(conversations)
       .where(eq(conversations.accountId, accountId))
+      .orderBy(desc(conversations.lastMessageAt));
+    return limit ? query.limit(limit) : query;
+  }
+
+  async getConversationsByIds(accountId: string, ids: string[]): Promise<Conversation[]> {
+    if (ids.length === 0) return [];
+    return db.select().from(conversations)
+      .where(and(eq(conversations.accountId, accountId), inArray(conversations.id, ids)))
       .orderBy(desc(conversations.lastMessageAt));
   }
 

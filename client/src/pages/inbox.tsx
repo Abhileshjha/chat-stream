@@ -70,7 +70,7 @@ export default function Inbox() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
-  const { data: allConversations = [], isLoading } = useQuery<Conversation[]>({
+  const { data: allConversations = [], isLoading: isLoadingAll } = useQuery<Conversation[]>({
     queryKey: ["/api/conversations"],
     queryFn: async () => {
       const res = await fetch("/api/conversations", { credentials: "include" });
@@ -80,7 +80,7 @@ export default function Inbox() {
     refetchInterval: 10000,
   });
 
-  const { data: repliedConversations = [] } = useQuery<Conversation[]>({
+  const { data: repliedConversations = [], isLoading: isLoadingReplied } = useQuery<Conversation[]>({
     queryKey: ["/api/conversations", { filter: "replied" }],
     queryFn: async () => {
       const res = await fetch("/api/conversations?filter=replied", { credentials: "include" });
@@ -92,6 +92,10 @@ export default function Inbox() {
 
   const repliedIds = new Set(repliedConversations.map(c => c.id));
   const conversations = filterTab === "active" ? repliedConversations : allConversations;
+  // "closed" still needs the recent-window "all" list to check each
+  // conversation against repliedIds, so it only counts as loading once that
+  // query (not just whichever tab happens to be selected) has data.
+  const isLoading = filterTab === "active" ? isLoadingReplied : isLoadingAll;
 
   const avatarPalette = [
     { bg: "bg-[#141A46]", text: "text-white" },
