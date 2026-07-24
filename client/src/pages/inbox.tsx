@@ -70,8 +70,11 @@ export default function Inbox() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
+  const allConversationsKey = ["/api/conversations"];
+  const repliedConversationsKey = ["/api/conversations", { filter: "replied" }];
+
   const { data: allConversations = [], isLoading: isLoadingAll } = useQuery<Conversation[]>({
-    queryKey: ["/api/conversations"],
+    queryKey: allConversationsKey,
     queryFn: async () => {
       const res = await fetch("/api/conversations", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch");
@@ -81,7 +84,7 @@ export default function Inbox() {
   });
 
   const { data: repliedConversations = [], isLoading: isLoadingReplied } = useQuery<Conversation[]>({
-    queryKey: ["/api/conversations", { filter: "replied" }],
+    queryKey: repliedConversationsKey,
     queryFn: async () => {
       const res = await fetch("/api/conversations?filter=replied", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch");
@@ -187,8 +190,26 @@ export default function Inbox() {
     mutationFn: async (conversationId: string) => {
       return apiRequest("PATCH", `/api/conversations/${conversationId}`, { unreadCount: 0 });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
+    // Update the Active count and the bold->regular font the instant you
+    // click a conversation, instead of waiting on a network round trip -
+    // rolled back automatically if the request actually fails.
+    onMutate: async (conversationId: string) => {
+      await queryClient.cancelQueries({ queryKey: allConversationsKey });
+      await queryClient.cancelQueries({ queryKey: repliedConversationsKey });
+      const previousAll = queryClient.getQueryData<Conversation[]>(allConversationsKey);
+      const previousReplied = queryClient.getQueryData<Conversation[]>(repliedConversationsKey);
+      const markRead = (list?: Conversation[]) =>
+        list?.map((c) => (c.id === conversationId ? { ...c, unreadCount: 0 } : c));
+      queryClient.setQueryData(allConversationsKey, markRead(previousAll));
+      queryClient.setQueryData(repliedConversationsKey, markRead(previousReplied));
+      return { previousAll, previousReplied };
+    },
+    onError: (_err, _conversationId, context) => {
+      if (context?.previousAll) queryClient.setQueryData(allConversationsKey, context.previousAll);
+      if (context?.previousReplied) queryClient.setQueryData(repliedConversationsKey, context.previousReplied);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: allConversationsKey });
     },
   });
 
@@ -291,7 +312,11 @@ export default function Inbox() {
   };
 
   const totalUnread = allConversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0);
-  const activeCount = repliedConversations.filter(c => !isMissedReply(c)).length;
+  // The Active badge counts unread replies specifically (like an inbox
+  // unread count), not the total number of active conversations - opening
+  // one and marking it read should visibly decrement this number, while the
+  // conversation itself stays in the Active list.
+  const activeCount = repliedConversations.filter(c => !isMissedReply(c) && (c.unreadCount ?? 0) > 0).length;
   const closedCount = allConversations.filter(c => isMissedReply(c)).length;
 
   return (
