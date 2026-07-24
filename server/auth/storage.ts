@@ -1,4 +1,4 @@
-import { users, type User, type UpsertUser } from "@shared/models/auth";
+import { users, adminAuditLog, type User, type UpsertUser, type AdminAuditLogEntry } from "@shared/models/auth";
 import { db } from "@db";
 import { eq, desc } from "drizzle-orm";
 
@@ -11,6 +11,15 @@ export interface IAuthStorage {
   updateUserSubscription(userId: string, updates: Partial<User>): Promise<User | undefined>;
   getUserStats(userId: string): Promise<{ contactsCount: number; messagesCount: number; notificationsCount: number }>;
   deleteUser(userId: string): Promise<boolean>;
+  addAuditLogEntry(entry: {
+    actorUserId: string;
+    actorLabel: string;
+    action: string;
+    targetUserId?: string;
+    targetLabel?: string;
+    description: string;
+  }): Promise<AdminAuditLogEntry>;
+  getAuditLog(limit?: number): Promise<AdminAuditLogEntry[]>;
 }
 
 // Never let the password hash leave this module - every method below strips it
@@ -71,6 +80,22 @@ class AuthStorage implements IAuthStorage {
   async deleteUser(userId: string): Promise<boolean> {
     const result = await db.delete(users).where(eq(users.id, userId)).returning();
     return result.length > 0;
+  }
+
+  async addAuditLogEntry(entry: {
+    actorUserId: string;
+    actorLabel: string;
+    action: string;
+    targetUserId?: string;
+    targetLabel?: string;
+    description: string;
+  }): Promise<AdminAuditLogEntry> {
+    const [row] = await db.insert(adminAuditLog).values(entry).returning();
+    return row;
+  }
+
+  async getAuditLog(limit = 100): Promise<AdminAuditLogEntry[]> {
+    return db.select().from(adminAuditLog).orderBy(desc(adminAuditLog.timestamp)).limit(limit);
   }
 }
 

@@ -66,3 +66,25 @@ export const pageViews = pgTable(
 
 export type PageView = typeof pageViews.$inferSelect;
 export type InsertPageView = typeof pageViews.$inferInsert;
+
+// Records real admin actions (role changes, access grants/revokes) for the
+// admin dashboard's audit log - who did what, to whom, when. Never
+// synthesized; only written by the admin routes that actually perform these
+// actions.
+export const adminAuditLog = pgTable(
+  "admin_audit_log",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    actorUserId: varchar("actor_user_id").notNull(),
+    actorLabel: varchar("actor_label", { length: 200 }).notNull(),
+    action: varchar("action", { length: 40 }).notNull(),
+    targetUserId: varchar("target_user_id"),
+    targetLabel: varchar("target_label", { length: 200 }),
+    description: varchar("description", { length: 500 }).notNull(),
+    timestamp: timestamp("timestamp").defaultNow(),
+  },
+  (table) => [index("IDX_admin_audit_log_timestamp").on(table.timestamp)]
+);
+
+export type AdminAuditLogEntry = typeof adminAuditLog.$inferSelect;
+export type InsertAdminAuditLogEntry = typeof adminAuditLog.$inferInsert;

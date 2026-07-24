@@ -6,10 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { cn } from "@/lib/utils";
 import {
   Users,
   UserCheck,
@@ -23,7 +23,11 @@ import {
   Clock,
   ChevronDown,
   Eye,
-  Globe
+  Globe,
+  LayoutDashboard,
+  ScrollText,
+  LogOut,
+  AlertTriangle,
 } from "lucide-react";
 import type { User } from "@shared/models/auth";
 import {
@@ -32,6 +36,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+
+const MONTHLY_PLAN_PRICE_INR = 799;
 
 interface AdminStats {
   totalUsers: number;
@@ -55,14 +61,36 @@ interface VisitorAnalytics {
   }>;
 }
 
+interface WorkspaceUsage {
+  id: string;
+  name: string;
+  phoneNumber: string;
+  messageCount: number;
+  failedCount: number;
+  failureRate: number;
+  status: string;
+  lastSyncedAt: string | null;
+}
+
+interface AuditLogEntry {
+  id: string;
+  actorLabel: string;
+  action: string;
+  targetLabel: string | null;
+  description: string;
+  timestamp: string;
+}
+
+type AdminTab = "dashboard" | "visitors" | "users" | "audit";
+
 export default function Admin() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [tab, setTab] = useState<AdminTab>("dashboard");
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
-  // Check if bootstrap is available (no super admin exists yet)
   const { data: bootstrapData } = useQuery<{ available: boolean }>({
     queryKey: ["/api/admin/bootstrap-available"],
   });
@@ -83,7 +111,7 @@ export default function Admin() {
     },
   });
 
-  const { data: stats, isLoading: statsLoading } = useQuery<AdminStats>({
+  const { data: stats } = useQuery<AdminStats>({
     queryKey: ["/api/admin/stats"],
   });
 
@@ -91,9 +119,23 @@ export default function Admin() {
     queryKey: ["/api/admin/users"],
   });
 
+  // Only actively poll while the relevant tab is open (the visitors count
+  // still loads once for the sidebar badge on every tab, but there's no
+  // reason to keep re-querying the database every 30s in the background
+  // while the admin is looking at a different tab entirely).
   const { data: visitors } = useQuery<VisitorAnalytics>({
     queryKey: ["/api/admin/visitors"],
-    refetchInterval: 30000,
+    refetchInterval: tab === "visitors" ? 30000 : false,
+  });
+
+  const { data: workspaceUsage = [] } = useQuery<WorkspaceUsage[]>({
+    queryKey: ["/api/admin/workspace-usage"],
+    refetchInterval: tab === "dashboard" ? 30000 : false,
+  });
+
+  const { data: auditLog = [] } = useQuery<AuditLogEntry[]>({
+    queryKey: ["/api/admin/audit-log"],
+    enabled: tab === "audit",
   });
 
   const updateRoleMutation = useMutation({
@@ -103,6 +145,7 @@ export default function Admin() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/audit-log"] });
       toast({ title: "Success", description: "User role updated" });
     },
     onError: () => {
@@ -122,6 +165,7 @@ export default function Admin() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/audit-log"] });
       toast({ title: "Success", description: "User access updated" });
     },
     onError: () => {
@@ -130,23 +174,25 @@ export default function Admin() {
   });
 
   const filteredUsers = users.filter((user) => {
-    const matchesSearch = 
+    const matchesSearch =
       user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       user.firstName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       user.lastName?.toLowerCase().includes(searchTerm.toLowerCase());
-    
+
     const matchesRole = roleFilter === "all" || user.role === roleFilter;
     const matchesStatus = statusFilter === "all" || user.subscriptionStatus === statusFilter;
-    
+
     return matchesSearch && matchesRole && matchesStatus;
   });
 
+  const pendingUsers = users.filter(u => u.subscriptionStatus === "inactive" && !u.grantedFreeAccess);
+
   const getStatusBadge = (user: User) => {
     if (user.grantedFreeAccess) {
-      return <Badge variant="default" className="bg-green-600">Free Access</Badge>;
+      return <Badge className="bg-accent text-accent-foreground border-accent">Free Access</Badge>;
     }
     if (user.subscriptionStatus === "active") {
-      return <Badge variant="default" className="bg-green-600">Active</Badge>;
+      return <Badge className="bg-accent text-accent-foreground border-accent">Active</Badge>;
     }
     if (user.subscriptionStatus === "trial") {
       return <Badge variant="secondary">Trial</Badge>;
@@ -159,10 +205,10 @@ export default function Admin() {
 
   const getRoleBadge = (role: string) => {
     if (role === "super_admin") {
-      return <Badge className="bg-purple-600">Super Admin</Badge>;
+      return <Badge className="bg-primary text-primary-foreground">Super Admin</Badge>;
     }
     if (role === "admin") {
-      return <Badge className="bg-blue-600">Admin</Badge>;
+      return <Badge variant="secondary">Admin</Badge>;
     }
     return <Badge variant="outline">User</Badge>;
   };
@@ -171,9 +217,8 @@ export default function Admin() {
     const errorMessage = (usersError as Error).message || "";
     const isForbidden = errorMessage.includes("403") || errorMessage.includes("Forbidden");
     const isUnauthorized = errorMessage.includes("401") || errorMessage.includes("Unauthorized");
-    
+
     if (isForbidden || isUnauthorized) {
-      // Show bootstrap option if no super admin exists yet
       if (bootstrapData?.available) {
         return (
           <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
@@ -181,7 +226,7 @@ export default function Admin() {
             <h2 className="text-2xl font-semibold">Claim Super Admin Role</h2>
             <p className="text-muted-foreground">No super admin has been set up yet.</p>
             <p className="text-sm text-muted-foreground">As the first user, you can claim the super admin role to manage the platform.</p>
-            <Button 
+            <Button
               onClick={() => bootstrapMutation.mutate()}
               disabled={bootstrapMutation.isPending}
               data-testid="button-claim-super-admin"
@@ -199,7 +244,7 @@ export default function Admin() {
           </div>
         );
       }
-      
+
       return (
         <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
           <Shield className="h-16 w-16 text-muted-foreground" />
@@ -209,13 +254,13 @@ export default function Admin() {
         </div>
       );
     }
-    
+
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
         <XCircle className="h-16 w-16 text-destructive" />
         <h2 className="text-2xl font-semibold">Error Loading Admin Dashboard</h2>
         <p className="text-muted-foreground">Failed to load user data. Please try again.</p>
-        <Button 
+        <Button
           onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] })}
           data-testid="button-retry"
         >
@@ -225,314 +270,507 @@ export default function Admin() {
     );
   }
 
+  const paidUsers = stats?.paidUsers ?? 0;
+  const trialUsers = stats?.trialUsers ?? 0;
+  const totalUsers = stats?.totalUsers ?? 0;
+  const pendingApproval = stats?.pendingApproval ?? 0;
+  const mrr = paidUsers * MONTHLY_PLAN_PRICE_INR;
+  const trialToPaidPct = totalUsers > 0 ? Math.round((paidUsers / totalUsers) * 100) : 0;
+
+  const navItems: { id: AdminTab; label: string; icon: typeof LayoutDashboard; badge?: number }[] = [
+    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "visitors", label: "Visitors", icon: Eye, badge: visitors?.visitors24h },
+    { id: "users", label: "User management", icon: Users, badge: pendingApproval || undefined },
+    { id: "audit", label: "Audit log", icon: ScrollText },
+  ];
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold" data-testid="text-admin-title">Admin Dashboard</h1>
-        <p className="text-muted-foreground">Manage users, subscriptions, and platform access</p>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Users</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold" data-testid="text-total-users">{stats?.totalUsers || 0}</div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Users</CardTitle>
-            <UserCheck className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600" data-testid="text-active-users">{stats?.activeUsers || 0}</div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Trial Users</CardTitle>
-            <Clock className="h-4 w-4 text-yellow-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-yellow-600" data-testid="text-trial-users">{stats?.trialUsers || 0}</div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Paid Users</CardTitle>
-            <CreditCard className="h-4 w-4 text-blue-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-blue-600" data-testid="text-paid-users">{stats?.paidUsers || 0}</div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pending Approval</CardTitle>
-            <UserX className="h-4 w-4 text-orange-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-orange-600" data-testid="text-pending-users">{stats?.pendingApproval || 0}</div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Visitors (24h)</CardTitle>
-            <Eye className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold" data-testid="text-visitors-24h">{visitors?.visitors24h ?? 0}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Visitors (7d)</CardTitle>
-            <Globe className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold" data-testid="text-visitors-7d">{visitors?.visitors7d ?? 0}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Visitors (All Time)</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold" data-testid="text-visitors-all-time">{visitors?.visitorsAllTime ?? 0}</div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent Visitor Activity</CardTitle>
-          <CardDescription>Live feed of page visits across the site, refreshes every 30s</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="rounded-md border max-h-80 overflow-y-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Path</TableHead>
-                  <TableHead>User</TableHead>
-                  <TableHead>Referrer</TableHead>
-                  <TableHead className="text-right">Time</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {!visitors?.recentViews?.length ? (
-                  <TableRow>
-                    <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
-                      No visitor activity recorded yet
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  visitors.recentViews.map((view) => (
-                    <TableRow key={view.id} data-testid={`row-visitor-${view.id}`}>
-                      <TableCell className="font-mono text-xs">{view.path}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {view.userId ? "Logged in" : "Anonymous"}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground truncate max-w-[200px]">
-                        {view.referrer || "Direct"}
-                      </TableCell>
-                      <TableCell className="text-right text-xs text-muted-foreground">
-                        {new Date(view.timestamp).toLocaleTimeString()}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>User Management</CardTitle>
-          <CardDescription>View and manage all registered users</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col sm:flex-row gap-4 mb-6">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search by name or email..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-                data-testid="input-search-users"
-              />
+    <div className="flex min-h-screen -m-4 md:-m-6">
+      {/* Admin-specific navy sidebar - visually distinct from the regular app sidebar */}
+      <div className="w-60 shrink-0 bg-primary text-primary-foreground flex flex-col py-5 sticky top-0 h-screen">
+        <div className="flex items-center gap-2.5 px-5 pb-5">
+          <div className="relative h-8 w-8 shrink-0">
+            <div className="absolute inset-0 translate-x-[-3px] translate-y-[3px] rounded-lg bg-[hsl(var(--chart-2))]" />
+            <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-white font-heading text-base font-bold text-primary">
+              c
             </div>
-            <Select value={roleFilter} onValueChange={setRoleFilter}>
-              <SelectTrigger className="w-[150px]" data-testid="select-role-filter">
-                <SelectValue placeholder="Role" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Roles</SelectItem>
-                <SelectItem value="super_admin">Super Admin</SelectItem>
-                <SelectItem value="admin">Admin</SelectItem>
-                <SelectItem value="user">User</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[150px]" data-testid="select-status-filter">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="trial">Trial</SelectItem>
-                <SelectItem value="inactive">Inactive</SelectItem>
-                <SelectItem value="cancelled">Cancelled</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => {
-                queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
-                queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
-              }}
-              data-testid="button-refresh-users"
+          </div>
+          <div>
+            <div className="font-heading font-bold text-[15px]">convora<span className="text-[hsl(var(--chart-2))]">.tech</span></div>
+            <div className="text-[10px] tracking-widest uppercase text-primary-foreground/50">Admin panel</div>
+          </div>
+        </div>
+        <div className="px-5 pb-2 text-[10px] tracking-widest uppercase text-primary-foreground/50">Menu</div>
+        <div className="flex flex-col gap-0.5 px-3">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setTab(item.id)}
+              className={cn(
+                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-colors",
+                tab === item.id ? "bg-white/10" : "hover:bg-white/5 text-primary-foreground/80"
+              )}
+              data-testid={`admin-nav-${item.id}`}
             >
-              <RefreshCw className="h-4 w-4" />
-            </Button>
+              <item.icon className="h-4 w-4 shrink-0" />
+              <span className="flex-1">{item.label}</span>
+              {!!item.badge && (
+                <span className="bg-[hsl(var(--chart-2))] text-[#0B1030] rounded-full text-[11px] font-bold px-1.5 min-w-5 text-center">
+                  {item.badge}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+        <div className="mt-auto px-5 pt-3.5 border-t border-white/10 mx-3.5">
+          <div className="flex items-center gap-2 text-xs text-primary-foreground/60">
+            <span className="w-2 h-2 rounded-full bg-[hsl(var(--chart-2))]" />
+            Live &middot; refreshes 30s
           </div>
-
-          {usersLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+          <div className="flex items-center justify-between mt-2.5">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-full bg-[hsl(var(--chart-2))] text-[#0B1030] flex items-center justify-center font-bold text-xs">SA</div>
+              <div className="text-xs font-medium">Admin</div>
             </div>
-          ) : (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>User</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Joined</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredUsers.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                        No users found
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredUsers.map((user) => (
-                      <TableRow key={user.id} data-testid={`row-user-${user.id}`}>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-9 w-9">
-                              <AvatarImage src={user.profileImageUrl || undefined} />
-                              <AvatarFallback>
-                                {user.firstName?.[0] || user.email?.[0] || "U"}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <p className="font-medium">
-                                {user.firstName} {user.lastName}
-                              </p>
-                              <p className="text-sm text-muted-foreground">{user.email}</p>
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>{getRoleBadge(user.role)}</TableCell>
-                        <TableCell>{getStatusBadge(user)}</TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "N/A"}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="outline" size="sm" data-testid={`button-role-${user.id}`}>
-                                  Role <ChevronDown className="ml-1 h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem 
-                                  onClick={() => updateRoleMutation.mutate({ userId: user.id, role: "user" })}
-                                >
-                                  Set as User
-                                </DropdownMenuItem>
-                                <DropdownMenuItem 
-                                  onClick={() => updateRoleMutation.mutate({ userId: user.id, role: "admin" })}
-                                >
-                                  Set as Admin
-                                </DropdownMenuItem>
-                                <DropdownMenuItem 
-                                  onClick={() => updateRoleMutation.mutate({ userId: user.id, role: "super_admin" })}
-                                >
-                                  Set as Super Admin
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                            
-                            <Button
-                              variant={user.grantedFreeAccess ? "destructive" : "default"}
-                              size="sm"
-                              onClick={() => updateAccessMutation.mutate({
-                                userId: user.id,
-                                grantedFreeAccess: !user.grantedFreeAccess,
-                                subscriptionStatus: !user.grantedFreeAccess ? "active" : "inactive"
-                              })}
-                              disabled={updateAccessMutation.isPending}
-                              data-testid={`button-access-${user.id}`}
-                            >
-                              {user.grantedFreeAccess ? (
-                                <>
-                                  <XCircle className="h-4 w-4 mr-1" /> Revoke
-                                </>
-                              ) : (
-                                <>
-                                  <CheckCircle2 className="h-4 w-4 mr-1" /> Approve
-                                </>
-                              )}
-                            </Button>
+            <a href="/api/logout" className="text-xs font-semibold text-[hsl(var(--chart-2))] flex items-center gap-1">
+              <LogOut className="h-3 w-3" /> Log out
+            </a>
+          </div>
+        </div>
+      </div>
 
-                            <Button
-                              variant={user.hasPaid ? "destructive" : "outline"}
-                              size="sm"
-                              onClick={() => updateAccessMutation.mutate({
-                                userId: user.id,
-                                hasPaid: !user.hasPaid,
-                                subscriptionStatus: !user.hasPaid ? "active" : "inactive",
-                              })}
-                              disabled={updateAccessMutation.isPending}
-                              data-testid={`button-premium-${user.id}`}
-                            >
-                              <CreditCard className="h-4 w-4 mr-1" />
-                              {user.hasPaid ? "Remove Premium" : "Mark Premium"}
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
+      {/* Main content */}
+      <div className="flex-1 min-w-0 p-6 space-y-6">
+        {tab === "dashboard" && (
+          <>
+            <div>
+              <h1 className="font-heading text-2xl font-bold" data-testid="text-admin-title">Admin dashboard</h1>
+              <p className="text-sm text-muted-foreground">Manage users, subscriptions, and platform access</p>
+            </div>
+
+            <div className="grid gap-3 grid-cols-2 lg:grid-cols-5">
+              <Card className="border-t-[3px] border-t-foreground">
+                <CardContent className="p-4">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider">Total users</div>
+                  <div className="font-heading text-3xl font-bold mt-1" data-testid="text-total-users">{totalUsers}</div>
+                </CardContent>
+              </Card>
+              <Card className="border-t-[3px] border-t-[hsl(var(--chart-2))]">
+                <CardContent className="p-4">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider">Active</div>
+                  <div className="font-heading text-3xl font-bold mt-1" data-testid="text-active-users">{stats?.activeUsers ?? 0}</div>
+                </CardContent>
+              </Card>
+              <Card className="border-t-[3px] border-t-[hsl(var(--chart-3))]">
+                <CardContent className="p-4">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider">Trial</div>
+                  <div className="font-heading text-3xl font-bold mt-1" data-testid="text-trial-users">{trialUsers}</div>
+                </CardContent>
+              </Card>
+              <Card className="border-t-[3px] border-t-foreground">
+                <CardContent className="p-4">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider">Paid</div>
+                  <div className="font-heading text-3xl font-bold mt-1" data-testid="text-paid-users">{paidUsers}</div>
+                </CardContent>
+              </Card>
+              <Card className={cn("border-t-[3px]", pendingApproval > 0 ? "border-t-destructive" : "border-t-[hsl(var(--chart-4))]")}>
+                <CardContent className="p-4">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider">Pending</div>
+                  <div className={cn("font-heading text-3xl font-bold mt-1", pendingApproval > 0 && "text-destructive")} data-testid="text-pending-users">{pendingApproval}</div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-3">
+              <Card>
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Users by status</CardTitle></CardHeader>
+                <CardContent className="flex items-center gap-4">
+                  <div
+                    className="w-20 h-20 rounded-full shrink-0"
+                    style={{
+                      background: totalUsers > 0
+                        ? `conic-gradient(hsl(var(--chart-2)) 0 ${(stats!.activeUsers / totalUsers) * 360}deg, hsl(var(--chart-3)) 0 360deg)`
+                        : "hsl(var(--muted))",
+                    }}
+                  />
+                  <div className="flex flex-col gap-1.5 text-xs flex-1">
+                    <div className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-sm bg-[hsl(var(--chart-2))]" /><span className="text-muted-foreground">Active</span><span className="ml-auto font-semibold">{stats?.activeUsers ?? 0}</span></div>
+                    <div className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-sm bg-[hsl(var(--chart-3))]" /><span className="text-muted-foreground">Trial</span><span className="ml-auto font-semibold">{trialUsers}</span></div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Subscriptions</CardTitle></CardHeader>
+                <CardContent className="space-y-3">
+                  <div>
+                    <div className="flex justify-between text-xs mb-1"><span className="text-muted-foreground">Paid</span><span className="font-semibold">{paidUsers} of {totalUsers}</span></div>
+                    <div className="h-2 rounded-full bg-muted overflow-hidden"><div className="h-full bg-foreground rounded-full" style={{ width: `${totalUsers > 0 ? (paidUsers / totalUsers) * 100 : 0}%` }} /></div>
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-xs mb-1"><span className="text-muted-foreground">Trial</span><span className="font-semibold">{trialUsers} of {totalUsers}</span></div>
+                    <div className="h-2 rounded-full bg-muted overflow-hidden"><div className="h-full bg-[hsl(var(--chart-3))] rounded-full" style={{ width: `${totalUsers > 0 ? (trialUsers / totalUsers) * 100 : 0}%` }} /></div>
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-xs mb-1"><span className="text-muted-foreground">Pending approval</span><span className="font-semibold">{pendingApproval}</span></div>
+                    <div className="h-2 rounded-full bg-muted overflow-hidden"><div className="h-full bg-destructive rounded-full" style={{ width: `${totalUsers > 0 ? (pendingApproval / totalUsers) * 100 : 0}%` }} /></div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="bg-primary text-primary-foreground">
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Quick actions</CardTitle></CardHeader>
+                <CardContent className="flex flex-col gap-2">
+                  <button onClick={() => setTab("users")} className="border border-white/25 rounded-lg px-3.5 py-2.5 text-sm font-semibold text-left flex justify-between hover:border-[hsl(var(--chart-2))] transition-colors">
+                    Review pending users <span>&rarr;</span>
+                  </button>
+                  <button onClick={() => setTab("visitors")} className="border border-white/25 rounded-lg px-3.5 py-2.5 text-sm font-semibold text-left flex justify-between hover:border-[hsl(var(--chart-2))] transition-colors">
+                    View visitor activity <span>&rarr;</span>
+                  </button>
+                  <button onClick={() => setTab("audit")} className="border border-white/25 rounded-lg px-3.5 py-2.5 text-sm font-semibold text-left flex justify-between hover:border-[hsl(var(--chart-2))] transition-colors">
+                    View audit log <span>&rarr;</span>
+                  </button>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-semibold">Pending approvals</CardTitle>
+                  {pendingUsers.length > 0 && (
+                    <Badge className="bg-[hsl(var(--chart-4))] text-white border-transparent">{pendingUsers.length} waiting</Badge>
+                  )}
+                </CardHeader>
+                <CardContent className="space-y-1">
+                  {pendingUsers.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-4 text-center">No users waiting for approval</p>
+                  ) : (
+                    pendingUsers.slice(0, 5).map((user) => (
+                      <div key={user.id} className="flex items-center gap-3 py-2.5 border-b last:border-0" data-testid={`pending-user-${user.id}`}>
+                        <Avatar className="h-9 w-9"><AvatarFallback>{user.firstName?.[0] || user.email?.[0] || "U"}</AvatarFallback></Avatar>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-sm truncate">{user.firstName || user.email}</div>
+                          <div className="text-xs text-muted-foreground">Requested {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "—"}</div>
+                        </div>
+                        <Button size="sm" onClick={() => updateAccessMutation.mutate({ userId: user.id, grantedFreeAccess: true, subscriptionStatus: "active" })} disabled={updateAccessMutation.isPending}>
+                          Approve
+                        </Button>
+                      </div>
                     ))
                   )}
-                </TableBody>
-              </Table>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-semibold">Revenue</CardTitle>
+                  <span className="text-xs text-muted-foreground">Based on ₹{MONTHLY_PLAN_PRICE_INR}/mo plan</span>
+                </CardHeader>
+                <CardContent className="flex gap-8 flex-wrap">
+                  <div>
+                    <div className="text-xs text-muted-foreground uppercase tracking-wider">MRR (est.)</div>
+                    <div className="font-heading text-2xl font-bold mt-1">₹{mrr.toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground uppercase tracking-wider">Paid plans</div>
+                    <div className="font-heading text-2xl font-bold mt-1">{paidUsers}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground uppercase tracking-wider">Users on paid</div>
+                    <div className="font-heading text-2xl font-bold mt-1">{trialToPaidPct}%</div>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
-          )}
-        </CardContent>
-      </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-semibold">Workspace usage &amp; API health</CardTitle>
+                <CardDescription>Message volume and delivery failures per connected WhatsApp account</CardDescription>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Workspace</TableHead>
+                      <TableHead>Messages</TableHead>
+                      <TableHead>Failure rate</TableHead>
+                      <TableHead>Last synced</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {workspaceUsage.length === 0 ? (
+                      <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No connected workspaces yet</TableCell></TableRow>
+                    ) : (
+                      workspaceUsage.map((w) => (
+                        <TableRow key={w.id} data-testid={`workspace-row-${w.id}`}>
+                          <TableCell>
+                            <div className="font-medium text-sm">{w.name}</div>
+                            <div className="text-xs text-muted-foreground font-mono">{w.phoneNumber}</div>
+                          </TableCell>
+                          <TableCell className="tabular-nums">{w.messageCount.toLocaleString()}</TableCell>
+                          <TableCell>
+                            {w.messageCount === 0 ? (
+                              <span className="text-muted-foreground">—</span>
+                            ) : (
+                              <span className={cn("font-semibold", w.failureRate > 20 ? "text-destructive" : "text-foreground")}>
+                                {w.failureRate.toFixed(1)}%
+                                {w.failureRate > 20 && <AlertTriangle className="inline h-3.5 w-3.5 ml-1 -mt-0.5" />}
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {w.lastSyncedAt ? new Date(w.lastSyncedAt).toLocaleString() : "never"}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="secondary" className={w.status === "connected" ? "bg-accent text-accent-foreground" : ""}>
+                              {w.status}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </>
+        )}
+
+        {tab === "visitors" && (
+          <>
+            <div className="flex items-end justify-between gap-4 flex-wrap">
+              <div>
+                <h1 className="font-heading text-2xl font-bold">Visitors</h1>
+                <p className="text-sm text-muted-foreground">Live feed of page visits across the site</p>
+              </div>
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-accent-foreground bg-accent rounded-full px-3 py-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--chart-2))]" /> LIVE &middot; refreshes every 30s
+              </span>
+            </div>
+            <div className="grid gap-3 grid-cols-2 lg:grid-cols-3">
+              <Card><CardContent className="p-4 flex items-center justify-between">
+                <div><div className="text-xs text-muted-foreground">Visitors &middot; 24h</div><div className="font-heading text-2xl font-bold mt-1" data-testid="text-visitors-24h">{visitors?.visitors24h ?? 0}</div></div>
+                <div className="w-10 h-10 rounded-lg bg-accent text-accent-foreground flex items-center justify-center"><Eye className="h-4 w-4" /></div>
+              </CardContent></Card>
+              <Card><CardContent className="p-4 flex items-center justify-between">
+                <div><div className="text-xs text-muted-foreground">Visitors &middot; 7 days</div><div className="font-heading text-2xl font-bold mt-1" data-testid="text-visitors-7d">{visitors?.visitors7d ?? 0}</div></div>
+                <div className="w-10 h-10 rounded-lg bg-accent text-accent-foreground flex items-center justify-center"><Globe className="h-4 w-4" /></div>
+              </CardContent></Card>
+              <Card><CardContent className="p-4 flex items-center justify-between">
+                <div><div className="text-xs text-muted-foreground">Visitors &middot; all time</div><div className="font-heading text-2xl font-bold mt-1" data-testid="text-visitors-all-time">{visitors?.visitorsAllTime ?? 0}</div></div>
+                <div className="w-10 h-10 rounded-lg bg-accent text-accent-foreground flex items-center justify-center"><Users className="h-4 w-4" /></div>
+              </CardContent></Card>
+            </div>
+            <Card>
+              <CardHeader>
+                <CardTitle>Recent visitor activity</CardTitle>
+                <CardDescription>Live feed of page visits across the site, refreshes every 30s</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-md border max-h-96 overflow-y-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Path</TableHead>
+                        <TableHead>User</TableHead>
+                        <TableHead>Referrer</TableHead>
+                        <TableHead className="text-right">Time</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {!visitors?.recentViews?.length ? (
+                        <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">No visitor activity recorded yet</TableCell></TableRow>
+                      ) : (
+                        visitors.recentViews.map((view) => (
+                          <TableRow key={view.id} data-testid={`row-visitor-${view.id}`}>
+                            <TableCell className="font-mono text-xs">{view.path}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{view.userId ? "Logged in" : "Anonymous"}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground truncate max-w-[200px]">{view.referrer || "Direct"}</TableCell>
+                            <TableCell className="text-right text-xs text-muted-foreground">{new Date(view.timestamp).toLocaleTimeString()}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        )}
+
+        {tab === "users" && (
+          <>
+            <div className="flex items-end justify-between gap-4 flex-wrap">
+              <div>
+                <h1 className="font-heading text-2xl font-bold">User management</h1>
+                <p className="text-sm text-muted-foreground">View and manage all registered users</p>
+              </div>
+            </div>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex flex-col sm:flex-row gap-4 mb-6">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search by name or email..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-10"
+                      data-testid="input-search-users"
+                    />
+                  </div>
+                  <Select value={roleFilter} onValueChange={setRoleFilter}>
+                    <SelectTrigger className="w-[150px]" data-testid="select-role-filter"><SelectValue placeholder="Role" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Roles</SelectItem>
+                      <SelectItem value="super_admin">Super Admin</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="user">User</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="w-[150px]" data-testid="select-status-filter"><SelectValue placeholder="Status" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Status</SelectItem>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="trial">Trial</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => {
+                      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+                      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+                    }}
+                    data-testid="button-refresh-users"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                {usersLoading ? (
+                  <div className="flex items-center justify-center py-12"><RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" /></div>
+                ) : (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>User</TableHead>
+                          <TableHead>Role</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Joined</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredUsers.length === 0 ? (
+                          <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No users found</TableCell></TableRow>
+                        ) : (
+                          filteredUsers.map((user) => (
+                            <TableRow key={user.id} data-testid={`row-user-${user.id}`}>
+                              <TableCell>
+                                <div className="flex items-center gap-3">
+                                  <Avatar className="h-9 w-9">
+                                    <AvatarImage src={user.profileImageUrl || undefined} />
+                                    <AvatarFallback>{user.firstName?.[0] || user.email?.[0] || "U"}</AvatarFallback>
+                                  </Avatar>
+                                  <div>
+                                    <p className="font-medium">{user.firstName} {user.lastName}</p>
+                                    <p className="text-sm text-muted-foreground">{user.email}</p>
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell>{getRoleBadge(user.role)}</TableCell>
+                              <TableCell>{getStatusBadge(user)}</TableCell>
+                              <TableCell className="text-muted-foreground">{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "N/A"}</TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button variant="outline" size="sm" data-testid={`button-role-${user.id}`}>Role <ChevronDown className="ml-1 h-4 w-4" /></Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuItem onClick={() => updateRoleMutation.mutate({ userId: user.id, role: "user" })}>Set as User</DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => updateRoleMutation.mutate({ userId: user.id, role: "admin" })}>Set as Admin</DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => updateRoleMutation.mutate({ userId: user.id, role: "super_admin" })}>Set as Super Admin</DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+
+                                  <Button
+                                    variant={user.grantedFreeAccess ? "destructive" : "default"}
+                                    size="sm"
+                                    onClick={() => updateAccessMutation.mutate({
+                                      userId: user.id,
+                                      grantedFreeAccess: !user.grantedFreeAccess,
+                                      subscriptionStatus: !user.grantedFreeAccess ? "active" : "inactive"
+                                    })}
+                                    disabled={updateAccessMutation.isPending}
+                                    data-testid={`button-access-${user.id}`}
+                                  >
+                                    {user.grantedFreeAccess ? (<><XCircle className="h-4 w-4 mr-1" /> Revoke</>) : (<><CheckCircle2 className="h-4 w-4 mr-1" /> Approve</>)}
+                                  </Button>
+
+                                  <Button
+                                    variant={user.hasPaid ? "destructive" : "outline"}
+                                    size="sm"
+                                    onClick={() => updateAccessMutation.mutate({
+                                      userId: user.id,
+                                      hasPaid: !user.hasPaid,
+                                      subscriptionStatus: !user.hasPaid ? "active" : "inactive",
+                                    })}
+                                    disabled={updateAccessMutation.isPending}
+                                    data-testid={`button-premium-${user.id}`}
+                                  >
+                                    <CreditCard className="h-4 w-4 mr-1" />
+                                    {user.hasPaid ? "Remove Premium" : "Mark Premium"}
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </>
+        )}
+
+        {tab === "audit" && (
+          <>
+            <div>
+              <h1 className="font-heading text-2xl font-bold">Audit log</h1>
+              <p className="text-sm text-muted-foreground">Every admin action, who did it, and when</p>
+            </div>
+            <Card>
+              <CardContent className="p-0">
+                {auditLog.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-12 text-center">No admin actions recorded yet</p>
+                ) : (
+                  auditLog.map((entry) => (
+                    <div key={entry.id} className="flex items-center gap-3.5 flex-wrap px-6 py-3.5 border-b last:border-0" data-testid={`audit-entry-${entry.id}`}>
+                      <div className="w-9 h-9 rounded-full bg-[hsl(var(--chart-2))] text-[#0B1030] flex items-center justify-center font-bold text-xs shrink-0">
+                        {entry.actorLabel[0]?.toUpperCase() || "A"}
+                      </div>
+                      <div className="flex-1 min-w-[240px] text-sm">
+                        <span className="font-semibold">{entry.actorLabel}</span>{" "}
+                        <span className="text-muted-foreground">{entry.description}</span>
+                      </div>
+                      <Badge variant="secondary" className="uppercase text-[11px] tracking-wide">{entry.action.replace("_", " ")}</Badge>
+                      <div className="text-xs text-muted-foreground font-mono">{new Date(entry.timestamp).toLocaleString()}</div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </>
+        )}
+      </div>
     </div>
   );
 }
