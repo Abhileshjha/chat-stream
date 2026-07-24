@@ -1,6 +1,7 @@
 import type { TemplateComponent } from "@shared/schema";
 import fs from "fs";
 import path from "path";
+import { resolveUploadedFilePath } from "./uploadStorage";
 
 const META_API_VERSION = "v21.0";
 const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`;
@@ -225,9 +226,7 @@ export async function createTemplate(
       mediaHandle = (headerComp as any).mediaHandle;
       console.log("Using pre-uploaded media handle:", mediaHandle);
     } else if (headerComp.mediaUrl) {
-      const localFilePath = headerComp.mediaUrl.startsWith("/uploads/")
-        ? path.join(process.cwd(), "uploads", path.basename(headerComp.mediaUrl))
-        : null;
+      const localFilePath = resolveUploadedFilePath(headerComp.mediaUrl);
 
       if (localFilePath && fs.existsSync(localFilePath)) {
         const fileBuffer = fs.readFileSync(localFilePath);

@@ -69,7 +69,12 @@ export default function NotificationEditor() {
   const selectedTemplateHeader = selectedTemplateComponents.find((c: any) => c.type === "HEADER");
   const hasMediaHeader = selectedTemplateHeader && ["IMAGE", "VIDEO", "DOCUMENT"].includes(selectedTemplateHeader.format || "");
   const templateMediaUrl = selectedTemplateHeader?.mediaUrl || "";
-  const needsMediaUrl = hasMediaHeader && !templateMediaUrl;
+  // A media header can always be swapped out per-send - reusing the
+  // template's original sample isn't required, and doing a fresh upload for
+  // each campaign is the more reliable option (it doesn't depend on Meta's
+  // template-preview CDN link, which is short-lived, or on the original file
+  // still existing on disk after a redeploy).
+  const needsMediaUrl = hasMediaHeader && !headerMediaUrl && !templateMediaUrl;
   const headerMediaType = selectedTemplateHeader?.format === "IMAGE" ? "image" :
     selectedTemplateHeader?.format === "VIDEO" ? "video" : "document";
 
@@ -120,7 +125,7 @@ export default function NotificationEditor() {
   const handleRemoveMedia = async () => {
     if (headerMediaFilename) {
       try {
-        await fetch(`/api/upload/${headerMediaFilename}`, { method: "DELETE", credentials: "include" });
+        await fetch(`/api/upload?path=${encodeURIComponent(headerMediaFilename)}`, { method: "DELETE", credentials: "include" });
       } catch {}
     }
     setHeaderMediaUrl("");
@@ -437,20 +442,14 @@ export default function NotificationEditor() {
                 </div>
               )}
 
-              {hasMediaHeader && templateMediaUrl && (
-                <div className="rounded-lg border p-3 bg-muted/30">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Check className="h-4 w-4 text-green-500" />
-                    <span className="text-sm font-medium">Media from template</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    This template already has {selectedTemplateHeader?.format?.toLowerCase()} media attached. It will be used automatically.
-                  </p>
-                </div>
-              )}
-              {needsMediaUrl && (
+              {hasMediaHeader && (
                 <div>
                   <Label>Header Media</Label>
+                  <p className="text-sm text-muted-foreground mb-1.5">
+                    Attach the {headerMediaType} to send with this notification. This doesn't have to match the
+                    sample used when the template was submitted for approval - WhatsApp only required a sample for
+                    review, so you can send a different {headerMediaType} with every campaign.
+                  </p>
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -474,6 +473,24 @@ export default function NotificationEditor() {
                       <div className="flex-1 text-sm text-muted-foreground">Media attached, will be sent with this notification.</div>
                       <Button type="button" variant="ghost" size="icon" onClick={handleRemoveMedia} data-testid="button-remove-header-media">
                         <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ) : templateMediaUrl ? (
+                    <div className="mt-1.5 flex items-center gap-3 rounded-lg border p-3 bg-muted/30">
+                      <Check className="h-4 w-4 text-green-500 shrink-0" />
+                      <div className="flex-1 text-sm text-muted-foreground">
+                        No media attached for this send - the template's original {headerMediaType} will be reused.
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploading}
+                        data-testid="button-upload-header-media"
+                      >
+                        {isUploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
+                        {isUploading ? "Uploading..." : "Attach different media"}
                       </Button>
                     </div>
                   ) : (
@@ -530,7 +547,7 @@ export default function NotificationEditor() {
               <Button
                 className="w-full"
                 onClick={() => sendMutation.mutate()}
-                disabled={sendMutation.isPending || !name || !selectedTemplateId || selectedListIds.length === 0 || (needsMediaUrl && !headerMediaUrl && !templateMediaUrl)}
+                disabled={sendMutation.isPending || !name || !selectedTemplateId || selectedListIds.length === 0 || needsMediaUrl}
                 data-testid="button-send-now"
               >
                 <Send className="h-4 w-4 mr-2" />

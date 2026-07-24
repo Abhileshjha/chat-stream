@@ -351,7 +351,7 @@ export default function TemplateEditor() {
   const handleRemoveMedia = async () => {
     if (headerMediaFilename) {
       try {
-        const response = await fetch(`/api/upload/${headerMediaFilename}`, {
+        const response = await fetch(`/api/upload?path=${encodeURIComponent(headerMediaFilename)}`, {
           method: "DELETE",
           credentials: "include",
         });
@@ -604,7 +604,7 @@ export default function TemplateEditor() {
                             </div>
                           )}
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{headerMediaFilename}</p>
+                            <p className="text-sm font-medium truncate">{headerMediaFilename.split("/").pop()}</p>
                             <p className="text-xs text-muted-foreground">
                               {mediaType === "image" ? "Image" : mediaType === "video" ? "Video" : "Document"} uploaded
                             </p>

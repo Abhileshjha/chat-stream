@@ -49,6 +49,7 @@ import {
   Tag,
   RefreshCw,
   Filter,
+  Download,
 } from "lucide-react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
@@ -276,6 +277,13 @@ export default function Inbox() {
       default:
         return <Clock className="h-3 w-3 text-muted-foreground" />;
     }
+  };
+
+  const getMediaKind = (url: string): "image" | "video" | "document" => {
+    const ext = url.split(".").pop()?.toLowerCase().split("?")[0] || "";
+    if (["jpg", "jpeg", "png", "webp", "gif"].includes(ext)) return "image";
+    if (["mp4", "mov", "3gp"].includes(ext)) return "video";
+    return "document";
   };
 
   const totalUnread = allConversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0);
@@ -518,6 +526,31 @@ export default function Inbox() {
                                         <FileText className="h-3 w-3" />
                                         Template
                                       </div>
+                                    )}
+                                    {msg.mediaUrl && (
+                                      getMediaKind(msg.mediaUrl) === "image" ? (
+                                        <img
+                                          src={msg.mediaUrl}
+                                          alt="Attachment"
+                                          className="rounded-md max-h-56 max-w-full mb-1.5 object-cover"
+                                        />
+                                      ) : getMediaKind(msg.mediaUrl) === "video" ? (
+                                        <video src={msg.mediaUrl} controls className="rounded-md max-h-56 max-w-full mb-1.5" />
+                                      ) : (
+                                        <a
+                                          href={msg.mediaUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className={cn(
+                                            "flex items-center gap-2 rounded-md border px-2.5 py-2 mb-1.5 text-xs",
+                                            msg.direction === "outbound" ? "border-primary-foreground/30" : "border-border"
+                                          )}
+                                        >
+                                          <FileText className="h-4 w-4 shrink-0" />
+                                          <span className="truncate flex-1">{msg.mediaUrl.split("/").pop()}</span>
+                                          <Download className="h-3.5 w-3.5 shrink-0" />
+                                        </a>
+                                      )
                                     )}
                                     <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                                     <div className={cn(

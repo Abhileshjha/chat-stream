@@ -17,12 +17,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import * as whatsappApi from "./whatsapp-api";
-
-// Configure multer for file uploads
-const uploadDir = path.join(process.cwd(), "uploads");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+import { uploadDir, getAccountUploadDir, resolveUploadedFilePath, toUploadUrl } from "./uploadStorage";
 
 // WhatsApp media type limits
 const whatsappMediaLimits: Record<string, number> = {
@@ -77,9 +72,7 @@ async function resolveHeaderMediaParam(
     return { type: mediaType, [mediaType]: { link: mediaUrl } };
   }
 
-  const localPath = mediaUrl.startsWith("/uploads/")
-    ? path.join(uploadDir, path.basename(mediaUrl))
-    : null;
+  const localPath = resolveUploadedFilePath(mediaUrl);
 
   if (!localPath || !fs.existsSync(localPath)) {
     throw new Error(`Header media file not found: ${mediaUrl}`);
@@ -110,6 +103,18 @@ async function resolveHeaderMediaParam(
 // CDN copy of the header media forever - so this is what makes header images
 // on already-approved templates actually reliable to send, long after the
 // original local file is gone.
+// WhatsApp only requires a *sample* media file at template submission time,
+// for Meta's review - it never has to be the exact file sent at runtime.
+// Every send is resolved in this priority order:
+//   1. Media attached to THIS specific notification/campaign (fresh upload,
+//      uploaded straight to Meta's /media endpoint right before sending -
+//      this is the most reliable path, since it doesn't depend on anything
+//      Meta cached earlier or any file that might have been wiped off local
+//      disk by a redeploy).
+//   2. The template's own sample file, if it's still on local disk.
+//   3. Meta's own CDN copy of the approved template's header (last resort -
+//      confirmed directly that this link is short-lived/paced and can fail
+//      mid-send on a large batch, see git history for the incident).
 async function resolveTemplateHeaderParams(
   template: { name: string; metaTemplateId: string | null; status: string; components: unknown },
   activeAccount: { businessAccountId: string | null; accessToken: string | null; phoneNumberId: string | null },
@@ -122,19 +127,31 @@ async function resolveTemplateHeaderParams(
   }
   const mediaType = headerComp.format === "IMAGE" ? "image" : headerComp.format === "VIDEO" ? "video" : "document";
 
+  // Tier 1: media attached specifically to this send.
+  if (fallbackMediaUrl) {
+    try {
+      return [await resolveHeaderMediaParam(fallbackMediaUrl, mediaType, activeAccount.phoneNumberId!, activeAccount.accessToken!)];
+    } catch (e: any) {
+      console.warn(`Failed to use the media attached to this send for "${template.name}", falling back:`, e.message);
+    }
+  }
+
+  // Tier 2: the template's own sample file, if still on disk.
+  if (headerComp.mediaUrl) {
+    try {
+      return [await resolveHeaderMediaParam(headerComp.mediaUrl, mediaType, activeAccount.phoneNumberId!, activeAccount.accessToken!)];
+    } catch (e: any) {
+      console.warn(`Template's own sample media unavailable for "${template.name}", falling back:`, e.message);
+    }
+  }
+
+  // Tier 3: re-fetch Meta's own CDN copy of the approved template's header.
   if (template.metaTemplateId && activeAccount.businessAccountId && activeAccount.accessToken) {
     try {
       const metaLink = await whatsappApi.getTemplateHeaderMediaLink(
         activeAccount.businessAccountId, activeAccount.accessToken, template.name
       );
       if (metaLink) {
-        // This CDN link is short-lived (it's Meta's template-preview link, not
-        // meant for reuse across a send) - confirmed directly: a bulk send
-        // reusing the same fetched link sent fine for the first ~130
-        // recipients, then failed with "131053 Media upload error" for the
-        // remaining thousands once it expired. Download it once and
-        // re-upload to Meta's own media store to get a stable media ID that
-        // doesn't expire mid-send.
         const fileRes = await fetch(metaLink);
         if (!fileRes.ok) throw new Error(`HTTP ${fileRes.status} downloading header media from Meta`);
         const buffer = Buffer.from(await fileRes.arrayBuffer());
@@ -151,24 +168,34 @@ async function resolveTemplateHeaderParams(
         if (uploadResult.success && uploadResult.data?.id) {
           return [{ type: mediaType, [mediaType]: { id: uploadResult.data.id } }];
         }
-        console.warn(`Failed to re-upload Meta-hosted header media for "${template.name}", falling back:`, uploadResult.error?.message);
+        console.warn(`Failed to re-upload Meta-hosted header media for "${template.name}":`, uploadResult.error?.message);
       }
     } catch (e: any) {
-      console.warn(`Failed to fetch Meta-hosted header media for "${template.name}", falling back:`, e.message);
+      console.warn(`Failed to fetch Meta-hosted header media for "${template.name}":`, e.message);
     }
   }
 
-  const mediaUrl = headerComp.mediaUrl || fallbackMediaUrl;
-  if (!mediaUrl) {
-    throw new Error(`This template requires a ${mediaType} in the header, and no media is available. Please provide one.`);
-  }
-  return [await resolveHeaderMediaParam(mediaUrl, mediaType, activeAccount.phoneNumberId!, activeAccount.accessToken!)];
+  throw new Error(`This template requires a ${mediaType} in the header, and no usable media is available. Please attach one to this send.`);
 }
 
 const upload = multer({
   storage: multer.diskStorage({
-    destination: (req, file, cb) => {
-      cb(null, uploadDir);
+    // Files land in uploads/{userId}/{phoneNumberId}/ so media for different
+    // users and different connected numbers never mixes together, and stays
+    // easy to find/clean up per number.
+    destination: async (req: any, file, cb) => {
+      try {
+        const userId = req.user?.claims?.sub || req.user?.id;
+        if (!userId) {
+          cb(null, getAccountUploadDir("anonymous", null));
+          return;
+        }
+        const accountId = await storage.getActiveAccountId(userId);
+        const account = accountId ? await storage.getAccount(accountId) : undefined;
+        cb(null, getAccountUploadDir(userId, account?.phoneNumberId));
+      } catch (err: any) {
+        cb(err, uploadDir);
+      }
     },
     filename: (req, file, cb) => {
       const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
@@ -589,9 +616,8 @@ export async function registerRoutes(
       const maxSize = whatsappMediaLimits[req.file.mimetype];
       if (maxSize && req.file.size > maxSize) {
         // Delete the uploaded file since it exceeds the limit
-        const filePath = path.join(uploadDir, req.file.filename);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
+        if (fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
         }
         const limitMB = Math.round(maxSize / (1024 * 1024));
         return res.status(400).json({
@@ -603,13 +629,17 @@ export async function registerRoutes(
       const user = (req as any).user;
       const userId = user?.id || user?.claims?.sub || "anonymous";
 
-      // Track this upload for ownership verification
-      uploadMetadata.set(req.file.filename, {
+      const fileUrl = toUploadUrl(req.file.path);
+      const relativePath = fileUrl.slice("/uploads/".length);
+
+      // Track this upload for ownership verification, keyed by its full
+      // relative path (uploads/{userId}/{phoneNumberId}/{file}) now that
+      // files are namespaced per account and number instead of all sitting
+      // in one flat folder.
+      uploadMetadata.set(relativePath, {
         userId,
         uploadedAt: new Date(),
       });
-
-      const fileUrl = `/uploads/${req.file.filename}`;
 
       // Immediately push this to Meta's resumable upload API and keep the
       // resulting handle, so template submission never depends on the local
@@ -624,7 +654,7 @@ export async function registerRoutes(
           const uploadResult = await whatsappApi.uploadSessionMedia(
             facebookAppId,
             active.account.accessToken,
-            req.file.buffer || fs.readFileSync(path.join(uploadDir, req.file.filename)),
+            req.file.buffer || fs.readFileSync(req.file.path),
             req.file.mimetype,
             req.file.originalname
           );
@@ -641,7 +671,7 @@ export async function registerRoutes(
       const fileInfo = {
         url: fileUrl,
         mediaHandle,
-        filename: req.file.filename,
+        filename: relativePath,
         originalName: req.file.originalname,
         mimetype: req.file.mimetype,
         size: req.file.size,
@@ -656,47 +686,39 @@ export async function registerRoutes(
     }
   });
 
-  // Delete uploaded file
-  app.delete("/api/upload/:filename", isAuthenticated as RequestHandler, (req, res) => {
+  // Delete uploaded file. Takes the relative path (uploads/{userId}/{phoneNumberId}/{file},
+  // as returned by /api/upload's `filename`) as a query param rather than a
+  // route segment, since it now contains slashes.
+  app.delete("/api/upload", isAuthenticated as RequestHandler, (req, res) => {
     try {
-      const filename = req.params.filename as string;
+      const relativePath = String(req.query.path || "");
       const user = (req as any).user;
       const currentUserId = user?.id || user?.claims?.sub;
       const isSuperAdmin = user?.role === "super_admin";
-      
-      // Sanitize filename - prevent path traversal attacks
-      const sanitizedFilename = path.basename(filename);
-      if (sanitizedFilename !== filename || filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
-        return res.status(400).json({ error: "Invalid filename" });
-      }
-      
-      // Validate filename format (timestamp-random.ext)
-      if (!/^\d+-\d+\.\w+$/.test(sanitizedFilename)) {
-        return res.status(400).json({ error: "Invalid filename format" });
-      }
-      
-      const filePath = path.join(uploadDir, sanitizedFilename);
-      
-      // Ensure the resolved path is still within uploadDir
-      const resolvedPath = path.resolve(filePath);
-      const resolvedUploadDir = path.resolve(uploadDir);
-      if (!resolvedPath.startsWith(resolvedUploadDir)) {
+
+      const filePath = resolveUploadedFilePath(`/uploads/${relativePath}`);
+      if (!filePath) {
         return res.status(400).json({ error: "Invalid file path" });
       }
-      
+
+      // Validate the leaf filename format (timestamp-random.ext)
+      if (!/^\d+-\d+\.\w+$/.test(path.basename(filePath))) {
+        return res.status(400).json({ error: "Invalid filename format" });
+      }
+
       // Check ownership (super_admin can delete any file)
-      const metadata = uploadMetadata.get(sanitizedFilename);
+      const metadata = uploadMetadata.get(relativePath);
       if (metadata && !isSuperAdmin && metadata.userId !== currentUserId) {
         return res.status(403).json({ error: "Not authorized to delete this file" });
       }
-      
+
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
-        uploadMetadata.delete(sanitizedFilename); // Clean up metadata
+        uploadMetadata.delete(relativePath); // Clean up metadata
         res.json({ message: "File deleted successfully" });
       } else {
         // Also clean up stale metadata
-        uploadMetadata.delete(sanitizedFilename);
+        uploadMetadata.delete(relativePath);
         res.status(404).json({ error: "File not found" });
       }
     } catch (error) {
@@ -760,10 +782,12 @@ export async function registerRoutes(
         }
         // Uploaded files live on local disk, which can be wiped by a server
         // restart/redeploy between upload and submission - fail clearly here
-        // instead of silently submitting to Meta with no media at all.
-        if (headerComp.mediaUrl.startsWith("/uploads/")) {
-          const localPath = path.join(uploadDir, path.basename(headerComp.mediaUrl));
-          if (!fs.existsSync(localPath)) {
+        // instead of silently submitting to Meta with no media at all. Not
+        // needed if a mediaHandle was already captured at upload time, since
+        // that's a stable Meta-side reference that never touches local disk.
+        if (!headerComp.mediaHandle && headerComp.mediaUrl.startsWith("/uploads/")) {
+          const localPath = resolveUploadedFilePath(headerComp.mediaUrl);
+          if (!localPath || !fs.existsSync(localPath)) {
             return res.status(400).json({
               error: "Uploaded image is no longer available",
               details: "The server storage was reset since you uploaded this file. Please re-upload the header image and submit again right away.",
@@ -2528,6 +2552,18 @@ export async function registerRoutes(
             lang,
             headerParams
           );
+
+          // Show what was actually sent in the inbox thread instead of a raw
+          // "[Template: name]" placeholder, and carry along the header media
+          // (if any) so the thread shows the same image/document Meta sent.
+          if (template) {
+            req.body.content = renderTemplatePreview(template);
+            const components = (template.components as any[]) || [];
+            const headerComp = components.find((c: any) => c.type === "HEADER");
+            if (headerComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format || "")) {
+              req.body.mediaUrl = headerComp.mediaUrl || undefined;
+            }
+          }
         } else {
           metaResult = await whatsappApi.sendTextMessage(
             activeAccount.phoneNumberId,
@@ -2746,6 +2782,16 @@ export async function registerRoutes(
     let sentCount = 0;
     let failedCount = 0;
 
+    // Whatever media was actually resolved for this send (per-send upload,
+    // else the template's own sample) - stored on the conversation message so
+    // the inbox can display the same image/document that was sent, instead
+    // of a text-only bubble with no way to tell what the header looked like.
+    const components = (template.components as any[]) || [];
+    const headerComp = components.find((c: any) => c.type === "HEADER");
+    const conversationMediaUrl = headerComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format || "")
+      ? (notification.headerMediaUrl || headerComp.mediaUrl || undefined)
+      : undefined;
+
     const phoneArray = Array.from(recipientPhones);
     for (const recipientPhone of phoneArray) {
       try {
@@ -2788,6 +2834,8 @@ export async function registerRoutes(
               content: outboundMsg,
               direction: "outbound",
               type: "template",
+              mediaUrl: conversationMediaUrl,
+              templateName: template.name,
               status: "sent",
             });
             broadcast("conversation-updated", { conversationId: conv.id });
@@ -3205,6 +3253,11 @@ export async function registerRoutes(
         const lastMsg = msgs.sort((a: any, b: any) => (b.sentAt?.getTime() || 0) - (a.sentAt?.getTime() || 0))[0];
         const template = lastMsg.templateId ? await storage.getTemplate(lastMsg.templateId) : null;
         const outboundMsg = renderTemplatePreview(template);
+        const templateComponents = (template?.components as any[]) || [];
+        const templateHeaderComp = templateComponents.find((c: any) => c.type === "HEADER");
+        const backfillMediaUrl = templateHeaderComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(templateHeaderComp.format || "")
+          ? templateHeaderComp.mediaUrl || undefined
+          : undefined;
 
         let conv = await storage.getConversationByPhone(phone, active.accountId);
         if (!conv) {
@@ -3219,6 +3272,8 @@ export async function registerRoutes(
             content: outboundMsg,
             direction: "outbound",
             type: "template",
+            mediaUrl: backfillMediaUrl,
+            templateName: template?.name,
             status: "sent",
           });
           created++;
@@ -3450,28 +3505,41 @@ export async function registerRoutes(
   });
 
   // Update user role (super_admin only)
-  app.patch("/api/admin/users/:id/role", requireSuperAdmin, async (req, res) => {
+  app.patch("/api/admin/users/:id/role", requireSuperAdmin, async (req: any, res) => {
     try {
       const { role } = req.body;
       const userId = req.params.id as string;
       if (!["super_admin", "admin", "user"].includes(role)) {
         return res.status(400).json({ error: "Invalid role" });
       }
-      
+
       // Prevent demoting the last super_admin
       if (role !== "super_admin") {
         const allUsers = await authStorage.getAllUsers();
         const superAdmins = allUsers.filter(u => u.role === "super_admin");
         const targetUser = allUsers.find(u => u.id === userId);
-        
+
         if (targetUser?.role === "super_admin" && superAdmins.length <= 1) {
           return res.status(400).json({ error: "Cannot demote the last super admin" });
         }
       }
-      
+
       const user = await authStorage.updateUserRole(userId, role);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
+      }
+      try {
+        const actor = await authStorage.getUser(req.user?.claims?.sub);
+        await authStorage.addAuditLogEntry({
+          actorUserId: req.user?.claims?.sub || "unknown",
+          actorLabel: actor?.email || "Admin",
+          action: "role_change",
+          targetUserId: user.id,
+          targetLabel: user.email || user.id,
+          description: `Changed role of ${user.email || user.id} to ${role}`,
+        });
+      } catch (auditErr: any) {
+        console.error("Failed to write audit log entry:", auditErr.message);
       }
       res.json(user);
     } catch (error) {
@@ -3480,7 +3548,7 @@ export async function registerRoutes(
   });
 
   // Grant/revoke free access (super_admin only)
-  app.patch("/api/admin/users/:id/access", requireSuperAdmin, async (req, res) => {
+  app.patch("/api/admin/users/:id/access", requireSuperAdmin, async (req: any, res) => {
     try {
       const { grantedFreeAccess, subscriptionStatus, hasPaid } = req.body;
       const userId = req.params.id as string;
@@ -3505,9 +3573,64 @@ export async function registerRoutes(
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
+      try {
+        const actor = await authStorage.getUser(req.user?.claims?.sub);
+        const changeDescs: string[] = [];
+        if (typeof grantedFreeAccess === "boolean") changeDescs.push(grantedFreeAccess ? "granted free access" : "revoked free access");
+        if (typeof hasPaid === "boolean") changeDescs.push(hasPaid ? "marked premium" : "removed premium");
+        await authStorage.addAuditLogEntry({
+          actorUserId: req.user?.claims?.sub || "unknown",
+          actorLabel: actor?.email || "Admin",
+          action: "access_change",
+          targetUserId: user.id,
+          targetLabel: user.email || user.id,
+          description: `${changeDescs.join(", ") || "Updated access"} for ${user.email || user.id}`,
+        });
+      } catch (auditErr: any) {
+        console.error("Failed to write audit log entry:", auditErr.message);
+      }
       res.json(user);
     } catch (error) {
       res.status(500).json({ error: "Failed to update user access" });
+    }
+  });
+
+  // Real admin action history - who did what, to whom, when. Only populated
+  // by the routes above; never fabricated.
+  app.get("/api/admin/audit-log", requireSuperAdmin, async (req, res) => {
+    try {
+      const entries = await authStorage.getAuditLog(200);
+      res.json(entries);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch audit log" });
+    }
+  });
+
+  // Per-workspace (WhatsApp account) message volume and failure rate, across
+  // all tenants - lets the super admin spot a customer whose sends are
+  // failing without digging through their individual dashboard.
+  app.get("/api/admin/workspace-usage", requireSuperAdmin, async (req, res) => {
+    try {
+      const accounts = await storage.getAccounts();
+      const counts = await storage.getMessageCountsByAccount();
+      const usage = accounts.map((account) => {
+        const row = counts.find(c => c.accountId === account.id);
+        const total = row?.total ?? 0;
+        const failedCount = row?.failed ?? 0;
+        return {
+          id: account.id,
+          name: account.name,
+          phoneNumber: account.phoneNumber,
+          messageCount: total,
+          failedCount,
+          failureRate: total > 0 ? (failedCount / total) * 100 : 0,
+          status: account.status,
+          lastSyncedAt: account.lastSyncedAt,
+        };
+      }).sort((a, b) => b.messageCount - a.messageCount);
+      res.json(usage);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch workspace usage" });
     }
   });
 
