@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -45,6 +45,12 @@ function AppRouter() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
+      <Route path="/login">
+        <Redirect to="/" />
+      </Route>
+      <Route path="/admin-login">
+        <Redirect to="/" />
+      </Route>
       <Route path="/inbox" component={Inbox} />
       <Route path="/templates" component={Templates} />
       <Route path="/templates/new" component={TemplateEditor} />
