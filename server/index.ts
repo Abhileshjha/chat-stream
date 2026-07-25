@@ -5,6 +5,23 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { setupAuth, registerAuthRoutes } from "./auth";
 
+// Without these, a single unhandled error anywhere in the app - a bad
+// webhook payload, a failed Meta API call in a fire-and-forget send loop,
+// anything - crashes the entire Node process for every tenant at once
+// (Node 15+ terminates the process on an unhandled promise rejection by
+// default). Logging and staying up trades "possibly-inconsistent state
+// after one bad async path" for "no more full-app outages from one bug" -
+// worth it while running multiple paying customers on a single instance.
+// Watch these logs: each one here is a real bug that should still get
+// fixed at its source, this just stops it taking the whole app down.
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled promise rejection:", reason);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught exception:", err);
+});
+
 const app = express();
 const httpServer = createServer(app);
 

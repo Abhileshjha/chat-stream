@@ -746,6 +746,24 @@ export async function registerRoutes(
       }
 
       const normalizedName = data.name.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+
+      // WhatsApp template names are unique per WABA+language, and nothing
+      // here previously checked for a local collision - a failed Meta
+      // submission (network blip, transient error) still created a local
+      // DRAFT row, so retrying the same name created a second orphaned row
+      // instead of reusing the first, leaving two rows with the same name
+      // and no way to reconcile them (this is how duplicate template rows
+      // like "hero_chat" showing up twice with different statuses happen).
+      const nameCollision = (await storage.getTemplates(active.accountId))
+        .find(t => t.name === normalizedName && t.language === (data.language || "en"));
+      if (nameCollision) {
+        return res.status(409).json({
+          error: `A template named "${normalizedName}" already exists`,
+          details: "Edit or resubmit the existing template instead of creating a new one with the same name.",
+          existingTemplateId: nameCollision.id,
+        });
+      }
+
       let metaTemplateId: string | null = null;
       let templateStatus = "DRAFT";
       let metaError: string | null = null;
