@@ -25,6 +25,15 @@ process.on("uncaughtException", (err) => {
 const app = express();
 const httpServer = createServer(app);
 
+// Dedicated health check target for Render (Settings -> Health Check Path).
+// Registered before any other middleware so it never waits on auth/session
+// setup and does no DB work - Render polls this on the new instance before
+// cutting traffic over during a deploy, which is what eliminates the
+// ~30-90s window of 502s every deploy currently causes.
+app.get("/healthz", (_req, res) => {
+  res.status(200).send("ok");
+});
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;

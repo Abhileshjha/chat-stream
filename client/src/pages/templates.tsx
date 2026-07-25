@@ -40,29 +40,8 @@ import { StatusBadge } from "@/components/status-badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { parseApiError } from "@/lib/errors";
 import type { Template } from "@shared/schema";
-
-function parseApiError(error: any, fallback: string): string {
-  try {
-    if (error?.message) {
-      // Locally-thrown validation errors are plain JSON. Errors from
-      // apiRequest are formatted as "<status>: <json>" - a naive split on
-      // the first colon breaks the JSON itself (e.g. {"error":"..."}), so
-      // try parsing the whole message first before falling back to that.
-      try {
-        const parsed = JSON.parse(error.message);
-        return parsed.details || parsed.error || fallback;
-      } catch {}
-      const colonIdx = error.message.indexOf(":");
-      if (colonIdx !== -1) {
-        const jsonPart = error.message.slice(colonIdx + 1).trim();
-        const parsed = JSON.parse(jsonPart);
-        return parsed.details || parsed.error || fallback;
-      }
-    }
-  } catch {}
-  return error?.message || fallback;
-}
 
 export default function Templates() {
   const [searchQuery, setSearchQuery] = useState("");

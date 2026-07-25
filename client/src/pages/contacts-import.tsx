@@ -15,27 +15,10 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Upload, Download, FileText, Check, AlertCircle, HelpCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { parseApiError } from "@/lib/errors";
 import type { ContactList, ContactTag, Contact } from "@shared/schema";
 
 type ImportStep = 1 | 2 | 3;
-
-function parseApiError(error: any, fallback: string): string {
-  try {
-    if (error?.message) {
-      try {
-        const parsed = JSON.parse(error.message);
-        return parsed.details || parsed.error || fallback;
-      } catch {}
-      const colonIdx = error.message.indexOf(":");
-      if (colonIdx !== -1) {
-        const jsonPart = error.message.slice(colonIdx + 1).trim();
-        const parsed = JSON.parse(jsonPart);
-        return parsed.details || parsed.error || fallback;
-      }
-    }
-  } catch {}
-  return error?.message || fallback;
-}
 
 export default function ContactsImport() {
   const [step, setStep] = useState<ImportStep>(1);

@@ -18,6 +18,7 @@ import {
 import { Trash2, Plus, Phone, ExternalLink, MessageSquare, Image, FileText, Video, Upload, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { parseApiError } from "@/lib/errors";
 import type { Template } from "@shared/schema";
 
 type HeaderType = "none" | "text" | "media";
@@ -218,28 +219,10 @@ export default function TemplateEditor() {
       apiRequest("POST", "/api/templates/sync").catch(() => {});
       navigate("/templates");
     },
-    onError: async (error: any) => {
-      let errorMsg = "Failed to save template. Please try again.";
-      try {
-        if (error?.message) {
-          // Locally-thrown validation errors are plain JSON. Errors from
-          // apiRequest are formatted as "<status>: <json>" - a naive split on
-          // the first colon breaks the JSON itself (e.g. {"error":"..."}), so
-          // try parsing the whole message first before falling back to that.
-          let parsed;
-          try {
-            parsed = JSON.parse(error.message);
-          } catch {
-            const colonIdx = error.message.indexOf(":");
-            const jsonPart = colonIdx !== -1 ? error.message.slice(colonIdx + 1).trim() : error.message;
-            parsed = JSON.parse(jsonPart);
-          }
-          errorMsg = parsed.details || parsed.error || errorMsg;
-        }
-      } catch {}
+    onError: (error: any) => {
       toast({
         title: "Template Submission Failed",
-        description: errorMsg,
+        description: parseApiError(error, "Failed to save template. Please try again."),
         variant: "destructive",
       });
     },
