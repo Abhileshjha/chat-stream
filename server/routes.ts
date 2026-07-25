@@ -17,7 +17,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import * as whatsappApi from "./whatsapp-api";
-import { saveUploadedMedia, getUploadedMediaBuffer, deleteUploadedMedia } from "./uploadStorage";
+import { saveUploadedMedia, getUploadedMediaBuffer, deleteUploadedMedia, getUploadedMediaOwner } from "./uploadStorage";
 
 // WhatsApp media type limits
 const whatsappMediaLimits: Record<string, number> = {
@@ -192,10 +192,6 @@ const upload = multer({
 
 // WebSocket clients for real-time updates
 const wsClients = new Set<WebSocket>();
-
-// In-memory upload metadata tracking (maps filename to userId)
-// Note: In production, this should be stored in the database
-const uploadMetadata = new Map<string, { userId: string; uploadedAt: Date }>();
 
 // Broadcast to all connected clients
 function broadcast(event: string, data: any) {
@@ -604,7 +600,6 @@ export async function registerRoutes(
         userId,
         phoneNumberId: active?.account?.phoneNumberId,
       });
-      uploadMetadata.set(saved.url, { userId, uploadedAt: new Date() });
 
       // Immediately push this to Meta's resumable upload API and keep the
       // resulting handle, so template submission never depends on this
@@ -658,13 +653,12 @@ export async function registerRoutes(
       const isSuperAdmin = user?.role === "super_admin";
 
       // Check ownership (super_admin can delete any file)
-      const metadata = uploadMetadata.get(mediaUrl);
-      if (metadata && !isSuperAdmin && metadata.userId !== currentUserId) {
+      const ownerId = await getUploadedMediaOwner(mediaUrl);
+      if (ownerId && !isSuperAdmin && ownerId !== currentUserId) {
         return res.status(403).json({ error: "Not authorized to delete this file" });
       }
 
       const deleted = await deleteUploadedMedia(mediaUrl);
-      uploadMetadata.delete(mediaUrl);
       if (deleted) {
         res.json({ message: "File deleted successfully" });
       } else {

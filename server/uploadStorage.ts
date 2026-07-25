@@ -56,3 +56,17 @@ export async function deleteUploadedMedia(mediaUrl: string): Promise<boolean> {
   if (!id) return false;
   return storage.deleteUploadedFile(id);
 }
+
+// Looks up who uploaded a file, straight from the database row - not an
+// in-memory cache. An in-memory map of every upload's owner grows forever
+// for the life of the process (never freed until restart) and resets on
+// every deploy/restart anyway, which silently disabled the ownership check
+// for any file uploaded before the last restart. Returns undefined for
+// URLs that aren't database-backed uploads (legacy local-disk paths, which
+// have no ownership record to check), null if the row doesn't exist.
+export async function getUploadedMediaOwner(mediaUrl: string): Promise<string | null | undefined> {
+  const id = dbUploadIdFromUrl(mediaUrl);
+  if (!id) return undefined;
+  const row = await storage.getUploadedFile(id);
+  return row ? row.userId ?? null : null;
+}
