@@ -56,6 +56,7 @@ Fill in:
 - `DATABASE_URL` — your Neon Postgres connection string (Dashboard → Connection Details)
 - `SESSION_SECRET` — generate with `openssl rand -hex 32`
 - `FACEBOOK_APP_ID` / `FACEBOOK_APP_SECRET` — from your existing Meta App (Settings → Basic)
+- `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET_NAME` — optional, from Cloudflare R2 (see comments in `.env.example`); uploaded media falls back to Postgres storage if left unset
 
 ## 5. Install, build, migrate
 

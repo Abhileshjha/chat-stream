@@ -1,12 +1,17 @@
+import { randomUUID } from "crypto";
 import { storage } from "./storage";
+import * as objectStorage from "./objectStorage";
 
-// Header media (template samples and per-send attachments) is stored in the
-// database (see the `uploadedFiles` table), not local disk - Render (and
-// most hosts without a paid persistent-disk add-on) wipes local disk on
-// every restart, redeploy, or crash recovery. That was silently deleting
-// template header images and per-notification attachments, breaking resumed
-// sends and template resubmission. Every URL of this shape resolves to a
-// database row instead of a filesystem path.
+// Header media (template samples and per-send attachments) is served at the
+// same /uploads/db/<id> URL prefix regardless of where the bytes actually
+// live - a database row (legacy, or R2 unconfigured/unreachable) or object
+// storage (R2, once configured - see objectStorage.ts). Every persisted
+// mediaUrl string (template components, conversation messages, notification
+// header overrides) stays valid across that switch since the URL shape
+// never changes; only the `storageKey` column on the row says where the
+// bytes are. New uploads try R2 first when configured and fall back to the
+// database on any error, so a botched migration or an R2 outage can never
+// block a customer from uploading media or sending a campaign.
 const DB_UPLOAD_PREFIX = "/uploads/db/";
 
 export function isDbUploadUrl(mediaUrl: string): boolean {
@@ -28,6 +33,26 @@ export async function saveUploadedMedia(params: {
   userId?: string;
   phoneNumberId?: string | null;
 }): Promise<{ id: string; url: string }> {
+  if (objectStorage.isR2Configured()) {
+    try {
+      const id = randomUUID();
+      const key = objectStorage.objectKeyForId(id);
+      await objectStorage.uploadObject({ key, buffer: params.buffer, mimeType: params.mimeType });
+      const row = await storage.saveUploadedFile({
+        id,
+        userId: params.userId,
+        phoneNumberId: params.phoneNumberId || undefined,
+        originalName: params.originalName,
+        mimeType: params.mimeType,
+        size: params.buffer.length,
+        storageKey: key,
+      });
+      return { id: row.id, url: dbUploadUrl(row.id) };
+    } catch (err: any) {
+      console.error("[uploadStorage] R2 upload failed, falling back to database storage:", err.message);
+    }
+  }
+
   const row = await storage.saveUploadedFile({
     userId: params.userId,
     phoneNumberId: params.phoneNumberId || undefined,
@@ -39,8 +64,9 @@ export async function saveUploadedMedia(params: {
   return { id: row.id, url: dbUploadUrl(row.id) };
 }
 
-// Resolves any header media URL (database-backed, or legacy local-disk path
-// from before this fix) back to raw bytes, or null if it's not resolvable.
+// Resolves any header media URL (R2-backed, database-backed, or legacy
+// local-disk path from before the original database-storage fix) back to
+// raw bytes, or null if it's not resolvable.
 export async function getUploadedMediaBuffer(
   mediaUrl: string
 ): Promise<{ buffer: Buffer; mimeType: string; originalName: string | null } | null> {
@@ -48,12 +74,24 @@ export async function getUploadedMediaBuffer(
   if (!id) return null;
   const row = await storage.getUploadedFile(id);
   if (!row) return null;
+  if (row.storageKey) {
+    const buffer = await objectStorage.getObjectBuffer(row.storageKey);
+    return { buffer, mimeType: row.mimeType, originalName: row.originalName };
+  }
+  if (!row.data) return null;
   return { buffer: Buffer.from(row.data, "base64"), mimeType: row.mimeType, originalName: row.originalName };
 }
 
 export async function deleteUploadedMedia(mediaUrl: string): Promise<boolean> {
   const id = dbUploadIdFromUrl(mediaUrl);
   if (!id) return false;
+  const row = await storage.getUploadedFile(id);
+  if (row?.storageKey) {
+    // Delete the object before the row, so if this fails the row (and the
+    // ability to retry the delete) is still there instead of leaving an
+    // orphaned object in the bucket with nothing pointing at it.
+    await objectStorage.deleteObject(row.storageKey);
+  }
   return storage.deleteUploadedFile(id);
 }
 

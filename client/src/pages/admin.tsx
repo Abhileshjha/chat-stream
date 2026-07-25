@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +7,22 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
@@ -22,14 +38,21 @@ import {
   XCircle,
   Clock,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Eye,
   Globe,
   LayoutDashboard,
   ScrollText,
   LogOut,
   AlertTriangle,
+  FileText,
+  Contact as ContactIcon,
+  Trash2,
+  List as ListIcon,
 } from "lucide-react";
 import type { User } from "@shared/models/auth";
+import type { Contact, ContactList } from "@shared/schema";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -81,7 +104,51 @@ interface AuditLogEntry {
   timestamp: string;
 }
 
-type AdminTab = "dashboard" | "visitors" | "users" | "audit";
+type AdminTab = "dashboard" | "visitors" | "users" | "audit" | "files" | "contacts";
+
+interface AdminUploadFile {
+  id: string;
+  originalName: string | null;
+  mimeType: string;
+  size: number;
+  userId: string | null;
+  phoneNumberId: string | null;
+  backend: "r2" | "database";
+  createdAt: string | null;
+}
+
+interface AdminUploadsResponse {
+  files: AdminUploadFile[];
+  total: number;
+  totalSize: number;
+  page: number;
+  pageSize: number;
+}
+
+interface AdminContactsUsage {
+  id: string;
+  name: string;
+  phoneNumber: string;
+  contactCount: number;
+  listCount: number;
+}
+
+interface AdminAccountContactsResponse {
+  contacts: Contact[];
+  lists: ContactList[];
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex++;
+  }
+  return `${value.toFixed(1)} ${units[unitIndex]}`;
+}
 
 export default function Admin() {
   const { toast } = useToast();
@@ -137,6 +204,90 @@ export default function Admin() {
     queryKey: ["/api/admin/audit-log"],
     enabled: tab === "audit",
   });
+
+  // ---- Uploaded files tab ----
+  const [uploadsPage, setUploadsPage] = useState(1);
+  const UPLOADS_PAGE_SIZE = 50;
+
+  const { data: uploadsData, isFetching: uploadsFetching } = useQuery<AdminUploadsResponse>({
+    queryKey: ["/api/admin/uploads", { page: uploadsPage, pageSize: UPLOADS_PAGE_SIZE }],
+    queryFn: async ({ queryKey }) => {
+      const [, params] = queryKey as [string, { page: number; pageSize: number }];
+      const res = await apiRequest("GET", `/api/admin/uploads?page=${params.page}&pageSize=${params.pageSize}`);
+      return res.json();
+    },
+    enabled: tab === "files",
+    placeholderData: keepPreviousData,
+  });
+  const uploadFiles = uploadsData?.files ?? [];
+  const uploadsTotal = uploadsData?.total ?? 0;
+  const uploadsTotalPages = Math.max(1, Math.ceil(uploadsTotal / UPLOADS_PAGE_SIZE));
+
+  const deleteUploadMutation = useMutation({
+    mutationFn: async (id: string) => apiRequest("DELETE", `/api/admin/uploads/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/uploads"] });
+      toast({ title: "File deleted" });
+    },
+    onError: () => toast({ title: "Error", description: "Failed to delete file", variant: "destructive" }),
+  });
+
+  // ---- Contacts tab ----
+  const { data: contactsUsage = [] } = useQuery<AdminContactsUsage[]>({
+    queryKey: ["/api/admin/contacts-usage"],
+    enabled: tab === "contacts",
+  });
+
+  const [drilldownAccount, setDrilldownAccount] = useState<AdminContactsUsage | null>(null);
+
+  const { data: accountContacts } = useQuery<AdminAccountContactsResponse>({
+    queryKey: ["/api/admin/accounts", drilldownAccount?.id, "contacts"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/admin/accounts/${drilldownAccount!.id}/contacts`);
+      return res.json();
+    },
+    enabled: !!drilldownAccount,
+  });
+
+  const invalidateContactsAdmin = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/accounts", drilldownAccount?.id, "contacts"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/contacts-usage"] });
+  };
+
+  const deleteAdminContactMutation = useMutation({
+    mutationFn: async (contactId: string) => apiRequest("DELETE", `/api/admin/accounts/${drilldownAccount!.id}/contacts/${contactId}`),
+    onSuccess: () => {
+      invalidateContactsAdmin();
+      toast({ title: "Contact deleted" });
+    },
+    onError: () => toast({ title: "Error", description: "Failed to delete contact", variant: "destructive" }),
+  });
+
+  const deleteAdminListMutation = useMutation({
+    mutationFn: async (listId: string) => apiRequest("DELETE", `/api/admin/contact-lists/${listId}`),
+    onSuccess: () => {
+      invalidateContactsAdmin();
+      toast({ title: "List deleted" });
+    },
+    onError: () => toast({ title: "Error", description: "Failed to delete list", variant: "destructive" }),
+  });
+
+  // Shared confirm-delete dialog for the Files/Contacts tabs, instead of one
+  // AlertDialog instance per row.
+  const [confirmAction, setConfirmAction] = useState<
+    | null
+    | { type: "file"; id: string; label: string }
+    | { type: "contact"; id: string; label: string }
+    | { type: "list"; id: string; label: string }
+  >(null);
+
+  const runConfirmedAction = () => {
+    if (!confirmAction) return;
+    if (confirmAction.type === "file") deleteUploadMutation.mutate(confirmAction.id);
+    if (confirmAction.type === "contact") deleteAdminContactMutation.mutate(confirmAction.id);
+    if (confirmAction.type === "list") deleteAdminListMutation.mutate(confirmAction.id);
+    setConfirmAction(null);
+  };
 
   const updateRoleMutation = useMutation({
     mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
@@ -281,6 +432,8 @@ export default function Admin() {
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "visitors", label: "Visitors", icon: Eye, badge: visitors?.visitors24h },
     { id: "users", label: "User management", icon: Users, badge: pendingApproval || undefined },
+    { id: "files", label: "Uploaded files", icon: FileText },
+    { id: "contacts", label: "Contacts", icon: ContactIcon },
     { id: "audit", label: "Audit log", icon: ScrollText },
   ];
 
@@ -770,7 +923,234 @@ export default function Admin() {
             </Card>
           </>
         )}
+
+        {tab === "files" && (
+          <>
+            <div className="flex items-end justify-between gap-4 flex-wrap">
+              <div>
+                <h1 className="font-heading text-2xl font-bold">Uploaded files</h1>
+                <p className="text-sm text-muted-foreground">Template and campaign media across every tenant</p>
+              </div>
+              <div className="rounded-md border px-4 py-2.5">
+                <p className="text-xs text-muted-foreground">Total storage used</p>
+                <p className="font-heading text-lg font-bold">
+                  {formatBytes(uploadsData?.totalSize || 0)}{" "}
+                  <span className="text-sm font-normal text-muted-foreground">({uploadsTotal} files)</span>
+                </p>
+              </div>
+            </div>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>File</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Size</TableHead>
+                        <TableHead>Storage</TableHead>
+                        <TableHead>Uploaded</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {uploadFiles.length === 0 ? (
+                        <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No uploaded files</TableCell></TableRow>
+                      ) : (
+                        uploadFiles.map((file) => (
+                          <TableRow key={file.id} data-testid={`row-upload-${file.id}`}>
+                            <TableCell className="max-w-[280px] truncate" title={file.originalName || file.id}>
+                              {file.originalName || file.id}
+                            </TableCell>
+                            <TableCell className="text-muted-foreground">{file.mimeType}</TableCell>
+                            <TableCell>{formatBytes(file.size)}</TableCell>
+                            <TableCell>
+                              <Badge variant={file.backend === "r2" ? "default" : "secondary"}>
+                                {file.backend === "r2" ? "R2" : "Database"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {file.createdAt ? new Date(file.createdAt).toLocaleDateString() : "N/A"}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => setConfirmAction({ type: "file", id: file.id, label: file.originalName || file.id })}
+                                data-testid={`button-delete-upload-${file.id}`}
+                              >
+                                <Trash2 className="h-4 w-4 mr-1" /> Delete
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+                <div className="flex items-center justify-between pt-4">
+                  <p className="text-sm text-muted-foreground">Page {uploadsPage} of {uploadsTotalPages}</p>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setUploadsPage((p) => Math.max(1, p - 1))}
+                      disabled={uploadsPage <= 1 || uploadsFetching}
+                      data-testid="button-uploads-prev"
+                    >
+                      <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setUploadsPage((p) => Math.min(uploadsTotalPages, p + 1))}
+                      disabled={uploadsPage >= uploadsTotalPages || uploadsFetching}
+                      data-testid="button-uploads-next"
+                    >
+                      Next <ChevronRight className="h-4 w-4 ml-1" />
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        )}
+
+        {tab === "contacts" && (
+          <>
+            <div>
+              <h1 className="font-heading text-2xl font-bold">Contacts</h1>
+              <p className="text-sm text-muted-foreground">Contact counts per tenant - drill in to view or delete</p>
+            </div>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Account</TableHead>
+                        <TableHead>Phone number</TableHead>
+                        <TableHead>Contacts</TableHead>
+                        <TableHead>Lists</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {contactsUsage.length === 0 ? (
+                        <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No accounts found</TableCell></TableRow>
+                      ) : (
+                        contactsUsage.map((account) => (
+                          <TableRow key={account.id} data-testid={`row-contacts-account-${account.id}`}>
+                            <TableCell className="font-medium">{account.name}</TableCell>
+                            <TableCell className="text-muted-foreground">{account.phoneNumber}</TableCell>
+                            <TableCell>{account.contactCount}</TableCell>
+                            <TableCell>{account.listCount}</TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setDrilldownAccount(account)}
+                                data-testid={`button-view-contacts-${account.id}`}
+                              >
+                                View
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
+
+      <Dialog open={!!drilldownAccount} onOpenChange={(open) => !open && setDrilldownAccount(null)}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{drilldownAccount?.name} &ndash; contacts</DialogTitle>
+          </DialogHeader>
+          {!!accountContacts?.lists?.length && (
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Lists</p>
+              <div className="flex flex-wrap gap-2">
+                {accountContacts.lists.map((list) => (
+                  <Badge key={list.id} variant="outline" className="flex items-center gap-1.5 pr-1.5">
+                    <ListIcon className="h-3 w-3" /> {list.name} ({list.contactCount || 0})
+                    <button
+                      type="button"
+                      onClick={() => setConfirmAction({ type: "list", id: list.id, label: list.name })}
+                      className="ml-1 text-destructive hover:opacity-70"
+                      data-testid={`button-delete-list-${list.id}`}
+                      aria-label={`Delete list ${list.name}`}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="rounded-md border mt-2">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Phone</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {!accountContacts?.contacts?.length ? (
+                  <TableRow><TableCell colSpan={3} className="text-center py-8 text-muted-foreground">No contacts</TableCell></TableRow>
+                ) : (
+                  accountContacts.contacts.map((contact) => (
+                    <TableRow key={contact.id} data-testid={`row-admin-contact-${contact.id}`}>
+                      <TableCell className="font-mono">{contact.phone}</TableCell>
+                      <TableCell>{contact.name || "-"}</TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => setConfirmAction({ type: "contact", id: contact.id, label: contact.name || contact.phone })}
+                          data-testid={`button-delete-admin-contact-${contact.id}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!confirmAction} onOpenChange={(open) => !open && setConfirmAction(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this {confirmAction?.type}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmAction?.type === "list"
+                ? `The list "${confirmAction.label}" will be deleted. Contacts in it are not deleted.`
+                : `"${confirmAction?.label}" will be permanently removed. This cannot be undone.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-admin-delete">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={runConfirmedAction}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="button-confirm-admin-delete"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

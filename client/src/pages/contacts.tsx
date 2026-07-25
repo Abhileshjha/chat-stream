@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,6 +46,8 @@ import {
   Trash2,
   Edit,
   List,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -59,8 +61,18 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Contact, ContactTag, ContactList } from "@shared/schema";
 
+const PAGE_SIZE_OPTIONS = [100, 200, 500, 1000] as const;
+
+interface ContactsPageResponse {
+  contacts: Contact[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export default function Contacts() {
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [addContactOpen, setAddContactOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
@@ -69,11 +81,41 @@ export default function Contacts() {
   const [newListName, setNewListName] = useState("");
   const [filterListId, setFilterListId] = useState<string>("all");
   const [filterTagId, setFilterTagId] = useState<string>("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(100);
   const { toast } = useToast();
 
-  const { data: contacts = [], isLoading } = useQuery<Contact[]>({
-    queryKey: ["/api/contacts"],
+  // Debounce free-text search so every keystroke doesn't trigger a refetch.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 400);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Any filter/page-size change invalidates the current page number - jump
+  // back to page 1 rather than risk landing past the end of a smaller result set.
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, filterListId, filterTagId, pageSize]);
+
+  const { data, isLoading, isFetching } = useQuery<ContactsPageResponse>({
+    queryKey: ["/api/contacts/paginated", { page, pageSize, search: debouncedSearch, listId: filterListId, tagId: filterTagId }],
+    queryFn: async ({ queryKey }) => {
+      const [, params] = queryKey as [string, { page: number; pageSize: number; search: string; listId: string; tagId: string }];
+      const qs = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) });
+      if (params.search) qs.set("search", params.search);
+      if (params.listId !== "all") qs.set("listId", params.listId);
+      if (params.tagId !== "all") qs.set("tagId", params.tagId);
+      const res = await apiRequest("GET", `/api/contacts/paginated?${qs.toString()}`);
+      return res.json();
+    },
+    // Keeps the previous page's rows on screen while the next page loads,
+    // instead of flashing an empty/loading table on every click.
+    placeholderData: keepPreviousData,
   });
+
+  const contacts = data?.contacts ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const { data: tags = [] } = useQuery<ContactTag[]>({
     queryKey: ["/api/tags"],
@@ -82,6 +124,11 @@ export default function Contacts() {
   const { data: lists = [] } = useQuery<ContactList[]>({
     queryKey: ["/api/lists"],
   });
+
+  const invalidateContacts = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/contacts/paginated"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
+  };
 
   const createListMutation = useMutation({
     mutationFn: async (data: { name: string }) => {
@@ -111,7 +158,7 @@ export default function Contacts() {
       setShowNewListInput(false);
       setNewListName("");
       contactForm.reset();
-      queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
+      invalidateContacts();
       queryClient.invalidateQueries({ queryKey: ["/api/lists"] });
     },
     onError: () => {
@@ -125,7 +172,7 @@ export default function Contacts() {
     },
     onSuccess: () => {
       toast({ title: "Contact deleted" });
-      queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
+      invalidateContacts();
     },
   });
 
@@ -137,7 +184,7 @@ export default function Contacts() {
       toast({ title: `${selectedIds.size} contact(s) deleted` });
       setSelectedIds(new Set());
       setConfirmDeleteOpen(false);
-      queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
+      invalidateContacts();
     },
     onError: () => {
       toast({ title: "Failed to delete contacts", variant: "destructive" });
@@ -158,26 +205,21 @@ export default function Contacts() {
     createListMutation.mutate({ name: newListName.trim() });
   };
 
-  const filteredContacts = contacts.filter((c) => {
-    const matchesSearch = c.phone.includes(searchQuery) || c.name?.toLowerCase().includes(searchQuery.toLowerCase());
-    const contactListIds = (c.listIds as string[] | null) || [];
-    const contactTagIds = (c.tagIds as string[] | null) || [];
-    const matchesList = filterListId === "all" || contactListIds.includes(filterListId);
-    const matchesTag = filterTagId === "all" || contactTagIds.includes(filterTagId);
-    return matchesSearch && matchesList && matchesTag;
-  });
-
-  const allFilteredSelected = filteredContacts.length > 0 && filteredContacts.every((c) => selectedIds.has(c.id));
-  const someFilteredSelected = filteredContacts.some((c) => selectedIds.has(c.id));
+  // "Select all" selects every contact on the current page - the same
+  // bounded set that's actually rendered, so it can never balloon into
+  // selecting (and then bulk-deleting) an entire tenant's contact list by
+  // accident. Change the page size to select more at once.
+  const allPageSelected = contacts.length > 0 && contacts.every((c) => selectedIds.has(c.id));
+  const somePageSelected = contacts.some((c) => selectedIds.has(c.id));
 
   const toggleSelectAll = () => {
-    if (allFilteredSelected) {
+    if (allPageSelected) {
       const newSet = new Set(selectedIds);
-      filteredContacts.forEach((c) => newSet.delete(c.id));
+      contacts.forEach((c) => newSet.delete(c.id));
       setSelectedIds(newSet);
     } else {
       const newSet = new Set(selectedIds);
-      filteredContacts.forEach((c) => newSet.add(c.id));
+      contacts.forEach((c) => newSet.add(c.id));
       setSelectedIds(newSet);
     }
   };
@@ -247,6 +289,18 @@ export default function Contacts() {
                 {tags.map((tag) => (
                   <SelectItem key={tag.id} value={tag.id} data-testid={`filter-tag-option-${tag.id}`}>
                     {tag.name} ({tag.contactCount || 0})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+              <SelectTrigger className="w-[130px]" data-testid="select-page-size">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <SelectItem key={size} value={String(size)} data-testid={`page-size-option-${size}`}>
+                    {size} / page
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -416,9 +470,9 @@ export default function Contacts() {
                 <TableRow>
                   <TableHead className="w-10">
                     <Checkbox
-                      checked={allFilteredSelected ? true : someFilteredSelected ? "indeterminate" : false}
+                      checked={allPageSelected ? true : somePageSelected ? "indeterminate" : false}
                       onCheckedChange={toggleSelectAll}
-                      aria-label="Select all contacts"
+                      aria-label="Select all contacts on this page"
                       data-testid="checkbox-select-all"
                     />
                   </TableHead>
@@ -435,14 +489,14 @@ export default function Contacts() {
                   <TableRow>
                     <TableCell colSpan={7} className="text-center">Loading...</TableCell>
                   </TableRow>
-                ) : filteredContacts.length === 0 ? (
+                ) : contacts.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center text-muted-foreground">
                       No contacts found
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredContacts.map((contact) => {
+                  contacts.map((contact) => {
                     const listNames = getListNamesForContact(contact);
                     return (
                       <TableRow key={contact.id} data-testid={`contact-row-${contact.id}`}>
@@ -527,6 +581,38 @@ export default function Contacts() {
               </TableBody>
             </Table>
           </ScrollArea>
+          <div className="flex items-center justify-between pt-4">
+            <p className="text-sm text-muted-foreground" data-testid="text-contacts-count">
+              {total === 0
+                ? "0 contacts"
+                : `Showing ${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, total)} of ${total} contacts`}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1 || isFetching}
+                data-testid="button-prev-page"
+              >
+                <ChevronLeft className="h-4 w-4 mr-1" />
+                Previous
+              </Button>
+              <span className="text-sm text-muted-foreground min-w-[90px] text-center" data-testid="text-page-indicator">
+                Page {page} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages || isFetching}
+                data-testid="button-next-page"
+              >
+                Next
+                <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

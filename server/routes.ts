@@ -17,7 +17,8 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import * as whatsappApi from "./whatsapp-api";
-import { saveUploadedMedia, getUploadedMediaBuffer, deleteUploadedMedia, getUploadedMediaOwner } from "./uploadStorage";
+import { saveUploadedMedia, getUploadedMediaBuffer, deleteUploadedMedia, getUploadedMediaOwner, dbUploadUrl } from "./uploadStorage";
+import * as objectStorage from "./objectStorage";
 
 // WhatsApp media type limits
 const whatsappMediaLimits: Record<string, number> = {
@@ -567,6 +568,19 @@ export async function registerRoutes(
       res.header("Access-Control-Allow-Origin", "*");
       res.setHeader("Content-Type", file.mimeType);
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+
+      if (file.storageKey) {
+        // R2-backed row: pipe the bytes straight through instead of
+        // buffering the whole file in memory first.
+        const { stream } = await objectStorage.getObjectStream(file.storageKey);
+        stream.on("error", () => {
+          if (!res.headersSent) res.status(502).send("Error loading file");
+        });
+        stream.pipe(res);
+        return;
+      }
+
+      if (!file.data) return res.status(404).send("Not found");
       res.send(Buffer.from(file.data, "base64"));
     } catch (error) {
       res.status(500).send("Error loading file");
@@ -2320,6 +2334,31 @@ export async function registerRoutes(
     }
   });
 
+  // Paginated + filtered contacts, for the Contacts page UI. Kept separate
+  // from GET /api/contacts above (which returns the full list and is relied
+  // on by the inbox and contact-import pages, plus broadcast send flows) -
+  // loading and rendering an entire tenant's contact list at once was
+  // hanging the Contacts page for accounts with large lists.
+  const CONTACTS_PAGE_SIZES = [100, 200, 500, 1000];
+  app.get("/api/contacts/paginated", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+
+      const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
+      const requestedPageSize = parseInt(String(req.query.pageSize || "100"), 10);
+      const pageSize = CONTACTS_PAGE_SIZES.includes(requestedPageSize) ? requestedPageSize : 100;
+      const search = typeof req.query.search === "string" ? req.query.search.trim() : undefined;
+      const listId = typeof req.query.listId === "string" && req.query.listId !== "all" ? req.query.listId : undefined;
+      const tagId = typeof req.query.tagId === "string" && req.query.tagId !== "all" ? req.query.tagId : undefined;
+
+      const result = await storage.getContactsPage(active.accountId, { page, pageSize, search, listId, tagId });
+      res.json({ ...result, page, pageSize });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch contacts" });
+    }
+  });
+
   app.post("/api/contacts", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
@@ -3672,6 +3711,119 @@ export async function registerRoutes(
       res.json(usage);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch workspace usage" });
+    }
+  });
+
+  // Uploaded files management (super_admin only) - every uploaded template/
+  // campaign media file across all tenants, with the ability to delete any
+  // of them. Deletes go through deleteUploadedMedia (uploadStorage.ts) so
+  // an R2-backed file's object is cleaned up too, not just the DB row.
+  app.get("/api/admin/uploads", requireSuperAdmin, async (req, res) => {
+    try {
+      const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
+      const pageSize = Math.min(200, Math.max(1, parseInt(String(req.query.pageSize || "50"), 10) || 50));
+      const [files, stats] = await Promise.all([
+        storage.listUploadedFiles({ limit: pageSize, offset: (page - 1) * pageSize }),
+        storage.getUploadedFilesStats(),
+      ]);
+      res.json({
+        files: files.map((f) => ({
+          id: f.id,
+          originalName: f.originalName,
+          mimeType: f.mimeType,
+          size: f.size,
+          userId: f.userId,
+          phoneNumberId: f.phoneNumberId,
+          backend: f.storageKey ? "r2" : "database",
+          createdAt: f.createdAt,
+        })),
+        total: stats.count,
+        totalSize: stats.totalSize,
+        page,
+        pageSize,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch uploaded files" });
+    }
+  });
+
+  app.delete("/api/admin/uploads/:id", requireSuperAdmin, async (req: any, res) => {
+    try {
+      const deleted = await deleteUploadedMedia(dbUploadUrl(req.params.id));
+      if (!deleted) return res.status(404).json({ error: "File not found" });
+      res.json({ message: "File deleted successfully" });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete file" });
+    }
+  });
+
+  // Contacts management (super_admin only) - per-tenant contact/list counts,
+  // with drill-down to view and delete a specific account's contacts. Regular
+  // /api/contacts routes always scope to the requesting user's own active
+  // account; these take an explicit accountId since a super admin isn't a
+  // member of the tenant they're inspecting.
+  app.get("/api/admin/contacts-usage", requireSuperAdmin, async (req, res) => {
+    try {
+      const accounts = await storage.getAccounts();
+      const counts = await storage.getContactCountsByAccount();
+      const usage = accounts.map((account) => {
+        const row = counts.find((c) => c.accountId === account.id);
+        return {
+          id: account.id,
+          name: account.name,
+          phoneNumber: account.phoneNumber,
+          contactCount: row?.contactCount ?? 0,
+          listCount: row?.listCount ?? 0,
+        };
+      }).sort((a, b) => b.contactCount - a.contactCount);
+      res.json(usage);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch contacts usage" });
+    }
+  });
+
+  app.get("/api/admin/accounts/:accountId/contacts", requireSuperAdmin, async (req: any, res) => {
+    try {
+      const [contacts, lists] = await Promise.all([
+        storage.getContacts(req.params.accountId),
+        storage.getLists(req.params.accountId),
+      ]);
+      res.json({ contacts, lists });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch account contacts" });
+    }
+  });
+
+  app.delete("/api/admin/accounts/:accountId/contacts/:contactId", requireSuperAdmin, async (req: any, res) => {
+    try {
+      const contact = await storage.getContact(req.params.contactId);
+      if (!contact || contact.accountId !== req.params.accountId) {
+        return res.status(404).json({ error: "Contact not found" });
+      }
+      await storage.deleteContact(req.params.contactId);
+      res.json({ message: "Contact deleted" });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete contact" });
+    }
+  });
+
+  app.post("/api/admin/accounts/:accountId/contacts/bulk-delete", requireSuperAdmin, async (req: any, res) => {
+    try {
+      const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+      const deletedCount = await storage.bulkDeleteContacts(ids, req.params.accountId);
+      res.json({ deleted: deletedCount });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete contacts" });
+    }
+  });
+
+  app.delete("/api/admin/contact-lists/:listId", requireSuperAdmin, async (req: any, res) => {
+    try {
+      const deleted = await storage.deleteContactList(req.params.listId);
+      if (!deleted) return res.status(404).json({ error: "List not found" });
+      res.json({ message: "List deleted" });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete list" });
     }
   });
 

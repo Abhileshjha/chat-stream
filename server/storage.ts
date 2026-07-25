@@ -19,7 +19,7 @@ import {
   type QualityScore,
 } from "@shared/schema";
 import { db } from "@db";
-import { eq, desc, and, or, isNull, inArray, gte, sql as dsql } from "drizzle-orm";
+import { eq, desc, and, or, isNull, isNotNull, inArray, gte, ilike, sql as dsql } from "drizzle-orm";
 
 export interface IStorage {
   getTemplates(accountId?: string): Promise<Template[]>;
@@ -68,6 +68,13 @@ export interface IStorage {
   getActiveAccountId(userId: string): Promise<string | undefined>;
 
   getContacts(accountId: string): Promise<Contact[]>;
+  // Paginated + filtered variant for the Contacts page UI - getContacts()
+  // above returns the full unpaginated list and is used by broadcast/
+  // notification send flows that genuinely need every contact; this one
+  // is for rendering a bounded page of rows without loading (and trying to
+  // render) an entire tenant's contact list at once, which was hanging the
+  // Contacts page for accounts with large lists.
+  getContactsPage(accountId: string, params: { page: number; pageSize: number; search?: string; listId?: string; tagId?: string }): Promise<{ contacts: Contact[]; total: number }>;
   getContact(id: string): Promise<Contact | undefined>;
   createContact(contact: InsertContact): Promise<Contact>;
   updateContact(id: string, updates: Partial<Contact>): Promise<Contact | undefined>;
@@ -114,9 +121,17 @@ export interface IStorage {
   getApiSettings(): Promise<ApiSettings | undefined>;
   deleteApiSettings(): Promise<boolean>;
 
-  saveUploadedFile(file: { userId?: string; phoneNumberId?: string; originalName?: string; mimeType: string; size: number; data: string }): Promise<UploadedFile>;
+  saveUploadedFile(file: { id?: string; userId?: string; phoneNumberId?: string; originalName?: string; mimeType: string; size: number; data?: string; storageKey?: string }): Promise<UploadedFile>;
   getUploadedFile(id: string): Promise<UploadedFile | undefined>;
   deleteUploadedFile(id: string): Promise<boolean>;
+  listUploadedFiles(params: { limit: number; offset: number }): Promise<UploadedFile[]>;
+  getUploadedFilesStats(): Promise<{ count: number; totalSize: number }>;
+  listUploadedFilesMissingStorageKey(params: { limit: number; afterId?: string }): Promise<UploadedFile[]>;
+  setUploadedFileStorageKey(id: string, storageKey: string): Promise<void>;
+  listUploadedFilesReadyToClear(params: { limit: number; afterId?: string }): Promise<UploadedFile[]>;
+  clearUploadedFileData(id: string): Promise<void>;
+
+  getContactCountsByAccount(): Promise<Array<{ accountId: string; contactCount: number; listCount: number }>>;
 
   getTeamMembers(accountId: string): Promise<TeamMember[]>;
   addTeamMember(member: InsertTeamMember): Promise<TeamMember>;
@@ -450,7 +465,7 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
-  async saveUploadedFile(file: { userId?: string; phoneNumberId?: string; originalName?: string; mimeType: string; size: number; data: string }): Promise<UploadedFile> {
+  async saveUploadedFile(file: { id?: string; userId?: string; phoneNumberId?: string; originalName?: string; mimeType: string; size: number; data?: string; storageKey?: string }): Promise<UploadedFile> {
     const [row] = await db.insert(uploadedFiles).values(file).returning();
     return row;
   }
@@ -463,6 +478,83 @@ export class DatabaseStorage implements IStorage {
   async deleteUploadedFile(id: string): Promise<boolean> {
     const result = await db.delete(uploadedFiles).where(eq(uploadedFiles.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  async listUploadedFiles(params: { limit: number; offset: number }): Promise<UploadedFile[]> {
+    return db
+      .select()
+      .from(uploadedFiles)
+      .orderBy(desc(uploadedFiles.createdAt))
+      .limit(params.limit)
+      .offset(params.offset);
+  }
+
+  async getUploadedFilesStats(): Promise<{ count: number; totalSize: number }> {
+    const rows = await db
+      .select({
+        count: dsql<number>`count(*)`,
+        totalSize: dsql<number>`coalesce(sum(${uploadedFiles.size}), 0)`,
+      })
+      .from(uploadedFiles);
+    return { count: Number(rows[0]?.count || 0), totalSize: Number(rows[0]?.totalSize || 0) };
+  }
+
+  // Keyset-paginated by id (not chronological, just a stable cursor) so the
+  // one-time R2 backfill script can walk every legacy row exactly once
+  // without loading the whole table into memory at once.
+  async listUploadedFilesMissingStorageKey(params: { limit: number; afterId?: string }): Promise<UploadedFile[]> {
+    const conditions = [isNull(uploadedFiles.storageKey)];
+    if (params.afterId) conditions.push(dsql`${uploadedFiles.id} > ${params.afterId}`);
+    return db
+      .select()
+      .from(uploadedFiles)
+      .where(and(...conditions))
+      .orderBy(uploadedFiles.id)
+      .limit(params.limit);
+  }
+
+  async setUploadedFileStorageKey(id: string, storageKey: string): Promise<void> {
+    await db.update(uploadedFiles).set({ storageKey }).where(eq(uploadedFiles.id, id));
+  }
+
+  // Rows the backfill script's Phase B (clear) can safely shrink: bytes are
+  // confirmed to live in object storage (storageKey set) and the legacy
+  // base64 fallback hasn't been cleared yet.
+  async listUploadedFilesReadyToClear(params: { limit: number; afterId?: string }): Promise<UploadedFile[]> {
+    const conditions = [isNotNull(uploadedFiles.storageKey), isNotNull(uploadedFiles.data)];
+    if (params.afterId) conditions.push(dsql`${uploadedFiles.id} > ${params.afterId}`);
+    return db
+      .select()
+      .from(uploadedFiles)
+      .where(and(...conditions))
+      .orderBy(uploadedFiles.id)
+      .limit(params.limit);
+  }
+
+  async clearUploadedFileData(id: string): Promise<void> {
+    await db.update(uploadedFiles).set({ data: null }).where(eq(uploadedFiles.id, id));
+  }
+
+  async getContactCountsByAccount(): Promise<Array<{ accountId: string; contactCount: number; listCount: number }>> {
+    const contactRows = await db
+      .select({ accountId: contacts.accountId, count: dsql<number>`count(*)` })
+      .from(contacts)
+      .groupBy(contacts.accountId);
+    const listRows = await db
+      .select({ accountId: contactLists.accountId, count: dsql<number>`count(*)` })
+      .from(contactLists)
+      .groupBy(contactLists.accountId);
+
+    const byAccount = new Map<string, { contactCount: number; listCount: number }>();
+    for (const row of contactRows) {
+      byAccount.set(row.accountId, { contactCount: Number(row.count), listCount: 0 });
+    }
+    for (const row of listRows) {
+      const entry = byAccount.get(row.accountId) || { contactCount: 0, listCount: 0 };
+      entry.listCount = Number(row.count);
+      byAccount.set(row.accountId, entry);
+    }
+    return Array.from(byAccount.entries()).map(([accountId, v]) => ({ accountId, ...v }));
   }
 
   // Analytics
@@ -651,6 +743,32 @@ export class DatabaseStorage implements IStorage {
   // Contacts
   async getContacts(accountId: string): Promise<Contact[]> {
     return db.select().from(contacts).where(eq(contacts.accountId, accountId)).orderBy(desc(contacts.createdAt));
+  }
+
+  async getContactsPage(accountId: string, params: { page: number; pageSize: number; search?: string; listId?: string; tagId?: string }): Promise<{ contacts: Contact[]; total: number }> {
+    const conditions = [eq(contacts.accountId, accountId)];
+    if (params.search) {
+      const term = `%${params.search}%`;
+      conditions.push(or(ilike(contacts.phone, term), ilike(contacts.name, term))!);
+    }
+    if (params.listId) {
+      conditions.push(dsql`${contacts.listIds} @> ${JSON.stringify([params.listId])}::jsonb`);
+    }
+    if (params.tagId) {
+      conditions.push(dsql`${contacts.tagIds} @> ${JSON.stringify([params.tagId])}::jsonb`);
+    }
+    const where = and(...conditions);
+
+    const [{ count }] = await db.select({ count: dsql<number>`count(*)` }).from(contacts).where(where);
+    const rows = await db
+      .select()
+      .from(contacts)
+      .where(where)
+      .orderBy(desc(contacts.createdAt))
+      .limit(params.pageSize)
+      .offset((params.page - 1) * params.pageSize);
+
+    return { contacts: rows, total: Number(count) };
   }
 
   async getContact(id: string): Promise<Contact | undefined> {

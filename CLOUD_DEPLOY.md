@@ -39,6 +39,7 @@ Because of that, the deployment mechanics are different from a VPS:
    - `SESSION_SECRET=` output of `openssl rand -hex 32`
    - `FACEBOOK_APP_ID` / `FACEBOOK_APP_SECRET` — from your Meta App
    - `NODE_ENV=production`
+   - `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET_NAME` — optional, from Cloudflare R2 (see comments in `.env.example`); uploaded media falls back to database storage if left unset
 
 ## 2. Upload the code
 

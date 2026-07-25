@@ -84,7 +84,13 @@ export const uploadedFiles = pgTable("uploaded_files", {
   originalName: varchar("original_name", { length: 255 }),
   mimeType: varchar("mime_type", { length: 100 }).notNull(),
   size: integer("size").notNull(),
-  data: text("data").notNull(),
+  // Base64 file bytes for legacy (pre-R2) rows. Null/empty once storageKey
+  // is set and the object storage backfill has cleared it - see
+  // server/objectStorage.ts and server/uploadStorage.ts.
+  data: text("data"),
+  // Set once this file's bytes live in object storage (R2) under this key
+  // instead of in `data`. Null means the row is still database-backed.
+  storageKey: varchar("storage_key", { length: 512 }),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
