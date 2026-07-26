@@ -2,6 +2,7 @@ import type { Express, RequestHandler } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
+import { normalizePhone } from "./phone";
 import { insertTemplateSchema, insertCampaignSchema, insertMessageSchema, type WhatsAppAccount, type Template, type Notification as NotificationRecord, teamMembers } from "@shared/schema";
 import { db } from "@db";
 import { eq, and, desc, gte, sql as sqlOp } from "drizzle-orm";
@@ -1273,7 +1274,8 @@ export async function registerRoutes(
       let sentCount = 0;
       let failedCount = 0;
 
-      for (const recipientPhone of recipients) {
+      for (const rawRecipientPhone of recipients) {
+        const recipientPhone = normalizePhone(rawRecipientPhone);
         try {
           const result = await whatsappApi.sendTemplateMessage(
             activeAccount.phoneNumberId,
@@ -1581,7 +1583,7 @@ export async function registerRoutes(
 
               for (const incoming of incomingMessages) {
                 const rawFrom = incoming.from;
-                const from = rawFrom.startsWith("+") ? rawFrom : `+${rawFrom}`;
+                const from = normalizePhone(rawFrom);
                 const contactInfo = contacts.find((c: any) => c.wa_id === rawFrom);
                 const contactName = contactInfo?.profile?.name || from;
                 console.log(`[Webhook] Incoming ${incoming.type} message from ${from} (${contactName}), phoneNumberId: ${phoneNumberId}`);
@@ -2872,7 +2874,7 @@ export async function registerRoutes(
       ? (notification.headerMediaUrl || headerComp.mediaUrl || undefined)
       : undefined;
 
-    const phoneArray = Array.from(recipientPhones);
+    const phoneArray = Array.from(new Set(recipientPhones.map(normalizePhone)));
     for (const recipientPhone of phoneArray) {
       try {
         const result = await whatsappApi.sendTemplateMessage(
@@ -3031,9 +3033,10 @@ export async function registerRoutes(
       for (const contact of allContacts) {
         const contactListIds = (contact.listIds as string[]) || [];
         if (contactListIds.some(lid => listIds.includes(lid))) {
-          if (contact.phone && contact.status === "subscribed" && !seen.has(contact.phone)) {
-            recipientPhones.push(contact.phone);
-            seen.add(contact.phone);
+          const phone = normalizePhone(contact.phone);
+          if (phone && contact.status === "subscribed" && !seen.has(phone)) {
+            recipientPhones.push(phone);
+            seen.add(phone);
           }
         }
       }
@@ -3124,14 +3127,15 @@ export async function registerRoutes(
       for (const contact of allContacts) {
         const contactListIds = (contact.listIds as string[]) || [];
         if (contactListIds.some(lid => listIds.includes(lid))) {
-          if (contact.phone && contact.status === "subscribed") {
-            targetPhones.add(contact.phone);
+          const phone = normalizePhone(contact.phone);
+          if (phone && contact.status === "subscribed") {
+            targetPhones.add(phone);
           }
         }
       }
 
       const alreadyAttempted = await storage.getMessagesByCampaign(notification.id);
-      const attemptedPhones = new Set(alreadyAttempted.map(m => m.recipientPhone));
+      const attemptedPhones = new Set(alreadyAttempted.map(m => normalizePhone(m.recipientPhone)));
       const remainingPhones = Array.from(targetPhones).filter(p => !attemptedPhones.has(p));
 
       if (remainingPhones.length === 0) {

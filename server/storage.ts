@@ -20,6 +20,7 @@ import {
 } from "@shared/schema";
 import { db } from "@db";
 import { eq, desc, and, or, isNull, isNotNull, inArray, gte, ilike, sql as dsql } from "drizzle-orm";
+import { normalizePhone } from "./phone";
 
 export interface IStorage {
   getTemplates(accountId?: string): Promise<Template[]>;
@@ -800,12 +801,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createContact(contact: InsertContact): Promise<Contact> {
-    const rows = await db.insert(contacts).values(contact as any).returning();
+    const normalized = contact.phone ? { ...contact, phone: normalizePhone(contact.phone) } : contact;
+    const rows = await db.insert(contacts).values(normalized as any).returning();
     return rows[0];
   }
 
   async updateContact(id: string, updates: Partial<Contact>): Promise<Contact | undefined> {
     const { id: _id, ...rest } = updates as any;
+    if (rest.phone) rest.phone = normalizePhone(rest.phone);
     const rows = await db.update(contacts).set({ ...rest, updatedAt: new Date() }).where(eq(contacts.id, id)).returning();
     return rows[0];
   }
@@ -837,12 +840,14 @@ export class DatabaseStorage implements IStorage {
 
   async deleteMessagesForPhones(accountId: string, phones: string[]): Promise<void> {
     if (phones.length === 0) return;
-    await db.delete(messages).where(and(eq(messages.accountId, accountId), inArray(messages.recipientPhone, phones)));
+    const normalizedPhones = Array.from(new Set(phones.map(normalizePhone).filter(Boolean)));
+    if (normalizedPhones.length === 0) return;
+    await db.delete(messages).where(and(eq(messages.accountId, accountId), inArray(messages.recipientPhone, normalizedPhones)));
 
     const matchingConversations = await db
       .select({ id: conversations.id })
       .from(conversations)
-      .where(and(eq(conversations.accountId, accountId), inArray(conversations.contactPhone, phones)));
+      .where(and(eq(conversations.accountId, accountId), inArray(conversations.contactPhone, normalizedPhones)));
 
     if (matchingConversations.length > 0) {
       const conversationIds = matchingConversations.map((c) => c.id);
@@ -856,9 +861,13 @@ export class DatabaseStorage implements IStorage {
 
     const accountId = contactsData[0].accountId!;
 
+    // Normalize before de-duping so "+91 87663-50093" and "8766350093" in the
+    // same CSV are recognized as the same contact instead of both importing.
+    const normalizedData = contactsData.map((c) => c.phone ? { ...c, phone: normalizePhone(c.phone) } : c);
+
     // De-dupe within the incoming batch itself (CSVs commonly contain repeats)
     const seenPhones = new Set<string>();
-    const uniqueIncoming = contactsData.filter((c) => {
+    const uniqueIncoming = normalizedData.filter((c) => {
       if (!c.phone || seenPhones.has(c.phone)) return false;
       seenPhones.add(c.phone);
       return true;
@@ -1034,25 +1043,22 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getConversationByPhone(phone: string, accountId: string): Promise<Conversation | undefined> {
-    const normalizedPhone = phone.startsWith("+") ? phone : `+${phone}`;
-    const withoutPlus = normalizedPhone.substring(1);
+    const normalizedPhone = normalizePhone(phone);
     const rows = await db.select().from(conversations)
-      .where(and(
-        or(eq(conversations.contactPhone, normalizedPhone), eq(conversations.contactPhone, withoutPlus)),
-        eq(conversations.accountId, accountId)
-      ));
+      .where(and(eq(conversations.contactPhone, normalizedPhone), eq(conversations.accountId, accountId)));
     return rows[0];
   }
 
   async createConversation(phone: string, name: string | undefined, accountId: string): Promise<Conversation> {
+    const normalizedPhone = normalizePhone(phone);
     const contactRows = await db.select().from(contacts)
-      .where(and(eq(contacts.phone, phone), eq(contacts.accountId, accountId)));
+      .where(and(eq(contacts.phone, normalizedPhone), eq(contacts.accountId, accountId)));
     const contact = contactRows[0];
 
     const rows = await db.insert(conversations).values({
       accountId,
       contactId: contact?.id || "",
-      contactPhone: phone,
+      contactPhone: normalizedPhone,
       contactName: name || contact?.name || undefined,
       unreadCount: 0,
       status: "open",
