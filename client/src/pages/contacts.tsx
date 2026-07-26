@@ -76,6 +76,7 @@ export default function Contacts() {
   const [addContactOpen, setAddContactOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [pendingDeleteContact, setPendingDeleteContact] = useState<Contact | null>(null);
   const [selectedListId, setSelectedListId] = useState<string>("");
   const [showNewListInput, setShowNewListInput] = useState(false);
   const [newListName, setNewListName] = useState("");
@@ -566,7 +567,8 @@ export default function Contacts() {
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 className="text-destructive"
-                                onClick={() => deleteContactMutation.mutate(contact.id)}
+                                onClick={() => setPendingDeleteContact(contact)}
+                                data-testid={`button-delete-contact-${contact.id}`}
                               >
                                 <Trash2 className="h-4 w-4 mr-2" />
                                 Delete
@@ -616,22 +618,42 @@ export default function Contacts() {
         </CardContent>
       </Card>
 
-      <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+      <AlertDialog
+        open={confirmDeleteOpen || !!pendingDeleteContact}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConfirmDeleteOpen(false);
+            setPendingDeleteContact(null);
+          }
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete {selectedIds.size} contact(s)?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {pendingDeleteContact
+                ? `Delete ${pendingDeleteContact.name || pendingDeleteContact.phone}?`
+                : `Delete ${selectedIds.size} contact(s)?`}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. The selected contacts will be permanently removed.
+              This action cannot be undone. {pendingDeleteContact ? "This contact" : "The selected contacts"}, along
+              with their message history and Inbox conversations, will be permanently removed.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel data-testid="button-cancel-bulk-delete">Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => bulkDeleteMutation.mutate(Array.from(selectedIds))}
+              onClick={() => {
+                if (pendingDeleteContact) {
+                  deleteContactMutation.mutate(pendingDeleteContact.id);
+                  setPendingDeleteContact(null);
+                } else {
+                  bulkDeleteMutation.mutate(Array.from(selectedIds));
+                }
+              }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               data-testid="button-confirm-bulk-delete"
             >
-              {bulkDeleteMutation.isPending ? "Deleting..." : "Delete"}
+              {(bulkDeleteMutation.isPending || deleteContactMutation.isPending) ? "Deleting..." : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

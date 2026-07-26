@@ -80,6 +80,11 @@ export interface IStorage {
   updateContact(id: string, updates: Partial<Contact>): Promise<Contact | undefined>;
   deleteContact(id: string): Promise<boolean>;
   bulkDeleteContacts(ids: string[], accountId: string): Promise<number>;
+  // Deletes broadcast/campaign message records and Inbox conversation
+  // history for a set of phone numbers on an account - called whenever a
+  // contact is deleted, so removing someone from the contact list also
+  // clears their message history instead of leaving it behind.
+  deleteMessagesForPhones(accountId: string, phones: string[]): Promise<void>;
   importContacts(contactsData: InsertContact[], listId?: string): Promise<{ imported: number; updated: number }>;
 
   getLists(accountId: string): Promise<ContactList[]>;
@@ -559,16 +564,34 @@ export class DatabaseStorage implements IStorage {
 
   // Analytics
   async getAnalyticsData(timeRange: string, accountId?: string): Promise<AnalyticsData> {
-    const allMessages = accountId
-      ? await db.select().from(messages).where(eq(messages.accountId, accountId))
-      : await db.select().from(messages);
-    const allTemplates = accountId
-      ? await db.select().from(templates).where(eq(templates.accountId, accountId))
-      : await db.select().from(templates);
-
     const now = new Date();
     const daysMap: Record<string, number> = { "24h": 1, "7d": 7, "30d": 30, "90d": 90 };
     const days = daysMap[timeRange] || 7;
+
+    // Filter to the selected window (and only the columns actually used
+    // below) in SQL, instead of pulling the account's entire message
+    // history into memory on every Analytics page load/refetch. For an
+    // account with months of campaign history that was a multi-hundred-MB
+    // spike per request - a real contributor to the server hitting its
+    // memory limit and getting restarted.
+    const windowStart = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    const messageConditions = [gte(messages.queuedAt, windowStart)];
+    if (accountId) messageConditions.push(eq(messages.accountId, accountId));
+
+    const allMessages = await db
+      .select({
+        queuedAt: messages.queuedAt,
+        status: messages.status,
+        errorCode: messages.errorCode,
+        errorDescription: messages.errorDescription,
+        cost: messages.cost,
+      })
+      .from(messages)
+      .where(and(...messageConditions));
+
+    const allTemplates = accountId
+      ? await db.select({ category: templates.category }).from(templates).where(eq(templates.accountId, accountId))
+      : await db.select({ category: templates.category }).from(templates);
 
     const dailyMap = new Map<string, { sent: number; delivered: number; read: number; failed: number }>();
     for (let i = days - 1; i >= 0; i--) {
@@ -788,15 +811,44 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteContact(id: string): Promise<boolean> {
+    const [contact] = await db.select({ phone: contacts.phone, accountId: contacts.accountId }).from(contacts).where(eq(contacts.id, id));
     const result = await db.delete(contacts).where(eq(contacts.id, id));
-    return (result.rowCount ?? 0) > 0;
+    const deleted = (result.rowCount ?? 0) > 0;
+    if (deleted && contact) {
+      await this.deleteMessagesForPhones(contact.accountId, [contact.phone]);
+    }
+    return deleted;
   }
 
   async bulkDeleteContacts(ids: string[], accountId: string): Promise<number> {
     if (ids.length === 0) return 0;
+    const toDelete = await db
+      .select({ phone: contacts.phone })
+      .from(contacts)
+      .where(and(inArray(contacts.id, ids), eq(contacts.accountId, accountId)));
     const result = await db.delete(contacts)
       .where(and(inArray(contacts.id, ids), eq(contacts.accountId, accountId)));
-    return result.rowCount ?? 0;
+    const deletedCount = result.rowCount ?? 0;
+    if (deletedCount > 0 && toDelete.length > 0) {
+      await this.deleteMessagesForPhones(accountId, toDelete.map((c) => c.phone));
+    }
+    return deletedCount;
+  }
+
+  async deleteMessagesForPhones(accountId: string, phones: string[]): Promise<void> {
+    if (phones.length === 0) return;
+    await db.delete(messages).where(and(eq(messages.accountId, accountId), inArray(messages.recipientPhone, phones)));
+
+    const matchingConversations = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(and(eq(conversations.accountId, accountId), inArray(conversations.contactPhone, phones)));
+
+    if (matchingConversations.length > 0) {
+      const conversationIds = matchingConversations.map((c) => c.id);
+      await db.delete(conversationMessages).where(inArray(conversationMessages.conversationId, conversationIds));
+      await db.delete(conversations).where(inArray(conversations.id, conversationIds));
+    }
   }
 
   async importContacts(contactsData: InsertContact[], listId?: string): Promise<{ imported: number; updated: number }> {

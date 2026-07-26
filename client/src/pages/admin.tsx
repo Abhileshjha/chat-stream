@@ -1136,6 +1136,8 @@ export default function Admin() {
             <AlertDialogDescription>
               {confirmAction?.type === "list"
                 ? `The list "${confirmAction.label}" will be deleted. Contacts in it are not deleted.`
+                : confirmAction?.type === "contact"
+                ? `"${confirmAction.label}" and their message history and Inbox conversations will be permanently removed. This cannot be undone.`
                 : `"${confirmAction?.label}" will be permanently removed. This cannot be undone.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
