@@ -72,7 +72,7 @@ export default function Terms() {
           <section>
             <h2 className="text-2xl font-semibold mb-4">5. Payment and Subscription</h2>
             <p className="text-muted-foreground leading-relaxed mb-4">
-              Our Service is offered on a subscription basis at ₹799/month:
+              Our Service is offered on a subscription basis. Current plan prices are listed on our Pricing page and may change over time:
             </p>
             <ul className="list-disc pl-6 space-y-2 text-muted-foreground">
               <li>Payment is due at the beginning of each billing cycle</li>

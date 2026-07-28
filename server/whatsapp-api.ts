@@ -219,7 +219,6 @@ async function resolveTemplateMediaHandle(
   }
 
   if ((headerComp as any).mediaHandle) {
-    console.log("Using pre-uploaded media handle:", (headerComp as any).mediaHandle);
     return { mediaHandle: (headerComp as any).mediaHandle };
   }
 
@@ -231,11 +230,9 @@ async function resolveTemplateMediaHandle(
     return {};
   }
 
-  console.log(`Uploading media to Meta for template header: ${headerComp.mediaUrl}`);
   const uploadResult = await uploadSessionMedia(effectiveAppId, accessToken, file.buffer, file.mimeType, file.originalName || "header");
 
   if (uploadResult.success && uploadResult.data?.handle) {
-    console.log("Media uploaded successfully, handle:", uploadResult.data.handle);
     return { mediaHandle: uploadResult.data.handle };
   }
 
@@ -284,11 +281,6 @@ export async function createTemplate(
     language: language,
     components: metaComponents,
   };
-
-  console.log(
-    "Submitting template to Meta API:",
-    JSON.stringify(payload, null, 2)
-  );
 
   const submit = () =>
     metaApiRequest(`${META_API_BASE}/${wabaId}/message_templates`, {
@@ -357,7 +349,6 @@ export async function updateTemplateOnMeta(
   }
 
   const payload = { category: category.toUpperCase(), components: metaComponents };
-  console.log("Updating template on Meta API:", metaTemplateId, JSON.stringify(payload, null, 2));
 
   return metaApiRequest(`${META_API_BASE}/${metaTemplateId}`, {
     method: "POST",
@@ -477,11 +468,6 @@ export async function sendTemplateMessage(
     type: "template",
     template,
   };
-
-  console.log(
-    "Sending template message via Meta API:",
-    JSON.stringify(payload, null, 2)
-  );
 
   return metaApiRequest(`${META_API_BASE}/${phoneNumberId}/messages`, {
     method: "POST",
@@ -615,8 +601,6 @@ export async function registerWebhookWithMeta(
     fields: "messages,message_template_status_update",
     access_token: appAccessToken,
   });
-
-  console.log(`[Meta Webhook] Registering webhook URL: ${callbackUrl} for app ${appId}`);
 
   return metaApiRequest(url, {
     method: "POST",

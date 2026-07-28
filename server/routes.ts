@@ -1,6 +1,6 @@
 import type { Express, RequestHandler } from "express";
 import { createServer, type Server } from "http";
-import { WebSocketServer, WebSocket } from "ws";
+import { WebSocketServer } from "ws";
 import { storage } from "./storage";
 import { normalizePhone } from "./phone";
 import { insertTemplateSchema, insertCampaignSchema, insertMessageSchema, type WhatsAppAccount, type Template, type Notification as NotificationRecord, teamMembers } from "@shared/schema";
@@ -10,6 +10,47 @@ import { z } from "zod";
 import { authStorage } from "./auth/storage";
 import { isAuthenticated } from "./auth/localAuth";
 import { requireActiveSubscription, hasActiveSubscription, SUBSCRIPTION_REQUIRED_MESSAGE, requireVerifiedEmail, EMAIL_VERIFICATION_REQUIRED_MESSAGE } from "./subscriptionGate";
+import {
+  assertCanAddContacts,
+  assertCanSendMessages,
+  assertCanAddWhatsappNumber,
+  assertCanCreateTemplate,
+  assertCanAddTeamSeat,
+  countNewContactsForImport,
+  getTrialUsage,
+  getPlanUsage,
+  isTrialUser,
+  getEffectiveTrialEndsAt,
+  TRIAL_DAYS,
+} from "./trialLimits";
+import {
+  ensureBillingPlansSeeded,
+  listActiveBillingPlans,
+  listAllBillingPlans,
+  getBillingPlanById,
+  getDefaultBillingPlan,
+  createBillingPlan,
+  updateBillingPlan,
+  deleteBillingPlan,
+  serializePlanForClient,
+} from "./billingPlans";
+import {
+  ensureBillingPaymentsTable,
+  recordBillingPayment,
+  listPaymentsForUser,
+  listAllPayments,
+  getPaymentByIdForUser,
+  paiseToInr,
+} from "./billingPayments";
+import { buildPaymentInvoiceHtml } from "./invoice";
+import {
+  activatePaidPlan,
+  ensureSubscriptionEndsAtColumn,
+  ensureSubscriptionFresh,
+  addMonths,
+  endsAtFromRazorpay,
+} from "./subscriptionLifecycle";
+import { getAdminRevenueSnapshot } from "./adminRevenue";
 import { pageViews, users } from "@shared/models/auth";
 import * as razorpayApi from "./razorpay";
 import { sendVerificationEmail } from "./email";
@@ -20,6 +61,14 @@ import fs from "fs";
 import * as whatsappApi from "./whatsapp-api";
 import { saveUploadedMedia, getUploadedMediaBuffer, deleteUploadedMedia, getUploadedMediaOwner, dbUploadUrl } from "./uploadStorage";
 import * as objectStorage from "./objectStorage";
+import { addWsClient, removeWsClient, broadcast } from "./realtime";
+import {
+  isQueueEnabled,
+  enqueueBroadcast,
+  getQueueMonitorSnapshot,
+  CONTACT_STREAM_PAGE_SIZE,
+  PHONES_PER_JOB,
+} from "./queues";
 
 // WhatsApp media type limits
 const whatsappMediaLimits: Record<string, number> = {
@@ -192,27 +241,27 @@ const upload = multer({
   },
 });
 
-// WebSocket clients for real-time updates
-const wsClients = new Set<WebSocket>();
-
-// Broadcast to all connected clients
-function broadcast(event: string, data: any) {
-  const message = JSON.stringify({ event, data, timestamp: new Date().toISOString() });
-  wsClients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(message);
-    }
-  });
-}
-
 async function getActiveAccount(req: any): Promise<{ userId: string; accountId: string; account: WhatsAppAccount | undefined } | null> {
   const userId = req.user?.claims?.sub;
   if (!userId) return null;
-  const accountId = await storage.getActiveAccountId(userId);
-  if (!accountId) return null;
-  const account = await storage.getAccount(accountId);
-  return { userId, accountId, account: account || undefined };
+  // Request-scoped cache — many handlers call this more than once per request.
+  if (req.__activeAccount) return req.__activeAccount;
+  const details = await storage.getActiveAccountWithDetails(userId);
+  if (!details) return null;
+  const result = { userId, accountId: details.accountId, account: details.account };
+  req.__activeAccount = result;
+  return result;
 }
+
+function isMetaApiConnected(account: WhatsAppAccount | undefined | null): boolean {
+  if (!account) return false;
+  const status = (account.status || "").toLowerCase();
+  if (status && status !== "connected") return false;
+  return !!(account.accessToken && account.phoneNumberId);
+}
+
+const META_CONNECTION_REQUIRED_MESSAGE =
+  "Connect a WhatsApp Business number (Meta API) before creating notifications.";
 
 // Schema for update operations
 const updateTemplateSchema = z.object({
@@ -266,26 +315,46 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  
+  await ensureBillingPlansSeeded().catch((err) => {
+    console.error("[BillingPlans] Seed failed:", err);
+  });
+  await ensureBillingPaymentsTable().catch((err) => {
+    console.error("[BillingPayments] Table ensure failed:", err);
+  });
+  await ensureSubscriptionEndsAtColumn().catch((err) => {
+    console.error("[Subscription] Column ensure failed:", err);
+  });
+
   // ============== WebSocket Setup ==============
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
   
   wss.on("connection", (ws) => {
-    wsClients.add(ws);
-    console.log("WebSocket client connected");
+    addWsClient(ws);
     
     // Send initial connection confirmation
     ws.send(JSON.stringify({ event: "connected", data: { message: "Connected to real-time updates" } }));
     
     ws.on("close", () => {
-      wsClients.delete(ws);
-      console.log("WebSocket client disconnected");
+      removeWsClient(ws);
     });
     
     ws.on("error", (error) => {
-      console.error("WebSocket error:", error);
-      wsClients.delete(ws);
+      removeWsClient(ws);
     });
+  });
+
+  // ============== Queue monitoring ==============
+  app.get("/api/queue/stats", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const snapshot = await getQueueMonitorSnapshot();
+      if (snapshot.accounts.some((a) => a.backlogAlert)) {
+        console.warn("[queue] backlog alert:", snapshot.accounts.filter((a) => a.backlogAlert).map((a) => a.accountId));
+      }
+      res.json(snapshot);
+    } catch (error: any) {
+      console.error("Queue stats error:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch queue stats" });
+    }
   });
 
   // ============== Dashboard ==============
@@ -435,7 +504,6 @@ export async function registerRoutes(
             extractFromDataPoints(convData.data_points);
           }
 
-          console.log(`[Sync] Conversation analytics: ${totalConversations} conversations, cost: ${totalCost}`);
           await storage.updateAccount(active.accountId, {
             messagingUsed: totalConversations,
             metaTotalCost: totalCost.toFixed(2),
@@ -722,6 +790,17 @@ export async function registerRoutes(
       if (!active) return res.status(401).json({ error: "No active account" });
       const activeAccount = active.account;
 
+      const userId = req.user?.claims?.sub as string | undefined;
+      if (userId) {
+        const user = await authStorage.getUser(userId);
+        if (user) {
+          const limit = await assertCanCreateTemplate(user);
+          if (!limit.ok) {
+            return res.status(402).json({ error: limit.code, message: limit.message });
+          }
+        }
+      }
+
       const bodyComp = (data.components as any[])?.find((c: any) => c.type === "BODY");
       if (!bodyComp?.text?.trim()) {
         return res.status(400).json({
@@ -793,7 +872,6 @@ export async function registerRoutes(
         if (metaResult.success && metaResult.data?.id) {
           metaTemplateId = metaResult.data.id;
           templateStatus = metaResult.data.status || "PENDING";
-          console.log("Template submitted to Meta API successfully:", metaResult.data);
         } else {
           console.error("Meta API template creation failed:", metaResult.error);
           metaError = metaResult.error?.message || "Unknown error from Meta API";
@@ -1031,18 +1109,15 @@ export async function registerRoutes(
           status: metaResult.data?.status || "PENDING",
           lastSyncedAt: new Date(),
         });
-        console.log(`[Template] "${template.name}" (re)submitted to Meta`);
         broadcast("template-updated", { template: updated });
         res.json(updated);
       } else {
-        console.error(`[Template] Submit failed for "${template.name}":`, metaResult.error);
         res.status(400).json({
           error: "Failed to submit template to Meta",
           details: metaResult.error?.message,
         });
       }
     } catch (error) {
-      console.error("Template submit error:", error);
       res.status(500).json({ error: "Failed to submit template" });
     }
   });
@@ -1057,7 +1132,6 @@ export async function registerRoutes(
         return res.status(400).json({ error: "No connected WhatsApp account found" });
       }
 
-      console.log(`[Sync] Fetching templates from Meta for WABA ${account.businessAccountId}...`);
       const metaResult = await whatsappApi.getTemplates(
         account.businessAccountId,
         account.accessToken
@@ -1072,7 +1146,6 @@ export async function registerRoutes(
       }
 
       const metaTemplates = metaResult.data?.data || [];
-      console.log(`[Sync] Got ${metaTemplates.length} templates from Meta: ${metaTemplates.map((t: any) => `${t.name}(${t.status})`).join(", ")}`);
       let synced = 0;
       let created = 0;
 
@@ -1119,10 +1192,8 @@ export async function registerRoutes(
         }
       }
 
-      console.log(`[Sync] Complete: ${synced} updated, ${created} created from ${metaTemplates.length} Meta templates`);
       res.json({ synced: synced + created, total: metaTemplates.length, updated: synced, created });
     } catch (error) {
-      console.error("Template sync error:", error);
       res.status(500).json({ error: "Failed to sync templates" });
     }
   });
@@ -1263,12 +1334,61 @@ export async function registerRoutes(
         return res.status(400).json({ error: "No recipients specified for this campaign" });
       }
 
+      const userId = req.user?.claims?.sub;
+      if (userId) {
+        const user = await authStorage.getUser(userId);
+        if (user) {
+          const limit = await assertCanSendMessages(user, recipients.length);
+          if (!limit.ok) {
+            return res.status(403).json({ error: limit.code, message: limit.message });
+          }
+        }
+      }
+
       await storage.updateCampaign(campaign.id, {
         status: "running",
         startedAt: new Date(),
       });
       broadcast("campaign-updated", { campaign: { ...campaign, status: "running" } });
 
+      if (isQueueEnabled()) {
+        const bodyPreview = renderTemplatePreview(template);
+        const phoneChunks = async function* () {
+          const batch: string[] = [];
+          for (const raw of recipients) {
+            const phone = normalizePhone(raw);
+            if (!phone) continue;
+            batch.push(phone);
+            if (batch.length >= CONTACT_STREAM_PAGE_SIZE) {
+              yield batch.splice(0, batch.length);
+            }
+          }
+          if (batch.length > 0) yield batch;
+        };
+
+        const result = await enqueueBroadcast({
+          kind: "campaign",
+          accountId: activeAccount.id,
+          campaignId: campaign.id,
+          templateId: template.id,
+          templateName: template.name,
+          templateLanguage: template.language || "en",
+          phoneChunks: phoneChunks(),
+          bodyPreview,
+          totalRecipients: recipients.length,
+        });
+
+        return res.json({
+          message: `Campaign queued. Sending to ${result.totalRecipients} recipients across ${result.jobCount} jobs.`,
+          queued: true,
+          queueName: result.queueName,
+          jobCount: result.jobCount,
+          totalRecipients: result.totalRecipients,
+        });
+      }
+
+      // Fallback when Redis is not configured (dev only) — prefer the queue in production.
+      console.warn("[campaign] Redis not configured — falling back to in-process send");
       res.json({ message: `Campaign started. Sending to ${recipients.length} recipients.` });
 
       let sentCount = 0;
@@ -1400,10 +1520,37 @@ export async function registerRoutes(
   app.get("/api/messages", async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
-      if (!active) return res.json([]);
-      const messages = await storage.getMessages(active.accountId);
-      res.json(messages);
+      if (!active) {
+        const wantsPaged = req.query.page != null || req.query.pageSize != null || req.query.status != null || req.query.search != null;
+        return wantsPaged
+          ? res.json({ messages: [], total: 0, page: 1, pageSize: 25 })
+          : res.json([]);
+      }
+
+      const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
+      const pageSize = Math.min(100, Math.max(1, parseInt(String(req.query.pageSize || "25"), 10) || 25));
+      const status = typeof req.query.status === "string" ? req.query.status : undefined;
+      const search = typeof req.query.search === "string" ? req.query.search : undefined;
+
+      // Server-side pagination — never dump the full messages table to the client.
+      const result = await storage.getMessagesPage({
+        accountId: active.accountId,
+        page,
+        pageSize,
+        status,
+        search,
+      });
+
+      // Backward compatible: bare array when no pagination query params (legacy clients),
+      // enriched object when page/pageSize/status/search provided.
+      const wantsPaged = req.query.page != null || req.query.pageSize != null || req.query.status != null || req.query.search != null;
+      if (!wantsPaged) {
+        // Still bounded — never unbounded SELECT *.
+        return res.json(result.messages);
+      }
+      res.json(result);
     } catch (error) {
+      console.error("Messages list error:", error);
       res.status(500).json({ error: "Failed to fetch messages" });
     }
   });
@@ -1413,10 +1560,17 @@ export async function registerRoutes(
       const active = await getActiveAccount(req);
       if (!active) return res.json([]);
       const { campaignId } = req.query;
-      const allMessages = await storage.getMessages(active.accountId);
-      let failedMessages = allMessages.filter(m => m.status === "failed");
-      if (campaignId) failedMessages = failedMessages.filter(m => m.campaignId === campaignId);
-      res.json(failedMessages);
+      if (typeof campaignId === "string" && campaignId) {
+        const failed = await storage.getMessagesByCampaignFiltered(campaignId, { status: "failed", limit: 1000 });
+        return res.json(failed);
+      }
+      const page = await storage.getMessagesPage({
+        accountId: active.accountId,
+        page: 1,
+        pageSize: 100,
+        status: "failed",
+      });
+      res.json(page.messages);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch failed messages" });
     }
@@ -1557,10 +1711,8 @@ export async function registerRoutes(
       const settings = await storage.getSettings();
       const configuredToken = settings?.webhookVerifyToken;
       if (configuredToken && token !== configuredToken) {
-        console.log(`[Webhook] Verify token mismatch: received "${token}", expected "${configuredToken}"`);
         return res.sendStatus(403);
       }
-      console.log("[Webhook] Verification successful");
       res.status(200).send(challenge);
     } else {
       res.sendStatus(403);
@@ -1571,7 +1723,6 @@ export async function registerRoutes(
   app.post("/api/webhook", async (req, res) => {
     try {
       const body = req.body;
-      console.log("[Webhook] Received:", JSON.stringify(body).substring(0, 500));
       
       if (body.object === "whatsapp_business_account") {
         for (const entry of body.entry || []) {
@@ -1586,7 +1737,6 @@ export async function registerRoutes(
                 const from = normalizePhone(rawFrom);
                 const contactInfo = contacts.find((c: any) => c.wa_id === rawFrom);
                 const contactName = contactInfo?.profile?.name || from;
-                console.log(`[Webhook] Incoming ${incoming.type} message from ${from} (${contactName}), phoneNumberId: ${phoneNumberId}`);
 
                 const accounts = await storage.getAccounts();
                 const account = accounts.find(a => a.phoneNumberId === phoneNumberId);
@@ -1600,7 +1750,6 @@ export async function registerRoutes(
                   continue;
                 }
                 const accountId = account.id;
-                console.log(`[Webhook] Matched account: ${account.name} (id: ${accountId})`);
 
                 let msgContent = "";
                 if (incoming.type === "text") {
@@ -1654,8 +1803,6 @@ export async function registerRoutes(
                     status: "open",
                   });
                 }
-
-                console.log(`[Webhook] Conversation ${conversation.id} updated with message: ${msgContent}`);
 
                 await storage.addConversationMessage({
                   conversationId: conversation.id,
@@ -1847,6 +1994,13 @@ export async function registerRoutes(
       if (!userId) {
         return res.status(401).json({ error: "Unauthorized" });
       }
+      const user = await authStorage.getUser(userId);
+      if (user) {
+        const limit = await assertCanAddWhatsappNumber(user);
+        if (!limit.ok) {
+          return res.status(402).json({ error: limit.code, message: limit.message });
+        }
+      }
       const account = await storage.createAccount({ ...req.body, userId });
       broadcast("account-added", { account });
       res.status(201).json(account);
@@ -1894,24 +2048,14 @@ export async function registerRoutes(
   app.post("/api/whatsapp-accounts/:id/test", isAuthenticated as RequestHandler, async (req, res) => {
     try {
       const accountId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-      console.log("Testing connection for account:", accountId);
       
       const account = await storage.getAccount(accountId);
       if (!account) {
-        console.log("Account not found:", accountId);
         return res.json({ 
           success: false, 
           message: "Account not found" 
         });
       }
-
-      console.log("Account found:", { 
-        id: account.id, 
-        name: account.name, 
-        phoneNumberId: account.phoneNumberId,
-        hasToken: !!account.accessToken,
-        tokenLength: account.accessToken?.length || 0
-      });
 
       if (!account.accessToken) {
         return res.json({ 
@@ -1929,11 +2073,9 @@ export async function registerRoutes(
 
       // Test the connection by making a simple API call to Meta
       const apiUrl = `https://graph.facebook.com/v21.0/${account.phoneNumberId}?access_token=${account.accessToken}`;
-      console.log("Testing Meta API with phoneNumberId:", account.phoneNumberId);
       
       const response = await fetch(apiUrl);
       const responseText = await response.text();
-      console.log("Meta API response status:", response.status);
 
       if (response.ok) {
         const data = JSON.parse(responseText) as any;
@@ -1946,7 +2088,6 @@ export async function registerRoutes(
         let errorMessage = "Connection failed. Check your credentials.";
         try {
           const errorData = JSON.parse(responseText) as any;
-          console.log("Meta API error:", errorData);
           errorMessage = errorData.error?.message || errorMessage;
         } catch (e) {
           console.log("Meta API raw error response:", responseText);
@@ -2027,7 +2168,6 @@ export async function registerRoutes(
 
           try {
             const subResult = await whatsappApi.subscribeAppToWaba(waba.id, accessToken);
-            console.log(`[Webhook] Subscribed app to WABA ${waba.id}:`, subResult.success ? "OK" : subResult.error?.message);
           } catch (subErr: any) {
             console.error(`[Webhook] Failed to subscribe to WABA ${waba.id}:`, subErr.message);
           }
@@ -2038,6 +2178,16 @@ export async function registerRoutes(
             const alreadyExists = existingAccounts.some(a => a.phoneNumberId === phone.id);
             
             if (!alreadyExists) {
+              const owner = await authStorage.getUser(userId);
+              if (owner) {
+                const limit = await assertCanAddWhatsappNumber(owner);
+                if (!limit.ok) {
+                  if (accountsCreated === 0) {
+                    return res.status(402).json({ error: limit.code, message: limit.message });
+                  }
+                  break;
+                }
+              }
               await storage.createAccount({
                 userId,
                 name: phone.verified_name || waba.name || business.name,
@@ -2128,6 +2278,14 @@ export async function registerRoutes(
           error: "Account already exists",
           message: "A WhatsApp account with this Phone Number ID is already connected."
         });
+      }
+
+      const user = await authStorage.getUser(userId);
+      if (user) {
+        const limit = await assertCanAddWhatsappNumber(user);
+        if (!limit.ok) {
+          return res.status(402).json({ error: limit.code, message: limit.message });
+        }
       }
 
       // Verify the credentials by making a test API call to Meta
@@ -2297,6 +2455,13 @@ export async function registerRoutes(
             const alreadyExists = existingAccounts.some(a => a.phoneNumberId === phone.id);
             
             if (!alreadyExists) {
+              const owner = await authStorage.getUser(userId);
+              if (owner) {
+                const limit = await assertCanAddWhatsappNumber(owner);
+                if (!limit.ok) {
+                  break;
+                }
+              }
               await storage.createAccount({
                 userId,
                 name: phone.verified_name || waba.name || business.name,
@@ -2328,7 +2493,7 @@ export async function registerRoutes(
   app.get("/api/contacts", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
-      if (!active) return res.status(401).json({ error: "No active account" });
+      if (!active) return res.json([]);
       const contacts = await storage.getContacts(active.accountId);
       res.json(contacts);
     } catch (error) {
@@ -2345,7 +2510,9 @@ export async function registerRoutes(
   app.get("/api/contacts/paginated", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
-      if (!active) return res.status(401).json({ error: "No active account" });
+      if (!active) {
+        return res.json({ contacts: [], total: 0, page: 1, pageSize: 100 });
+      }
 
       const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
       const requestedPageSize = parseInt(String(req.query.pageSize || "100"), 10);
@@ -2365,6 +2532,13 @@ export async function registerRoutes(
     try {
       const active = await getActiveAccount(req);
       if (!active) return res.status(401).json({ error: "No active account" });
+      const user = await authStorage.getUser(active.userId);
+      if (user) {
+        const limit = await assertCanAddContacts(user, 1);
+        if (!limit.ok) {
+          return res.status(403).json({ error: limit.code, message: limit.message });
+        }
+      }
       const contact = await storage.createContact({ ...req.body, accountId: active.accountId });
       res.status(201).json(contact);
     } catch (error) {
@@ -2432,6 +2606,17 @@ export async function registerRoutes(
       if (!active) return res.status(401).json({ error: "No active account" });
       const { contacts, listId } = req.body;
       const contactsWithAccount = (contacts || []).map((c: any) => ({ ...c, accountId: active.accountId }));
+      const user = await authStorage.getUser(active.userId);
+      if (user) {
+        const phones = contactsWithAccount
+          .map((c: { phone?: string }) => (c.phone ? normalizePhone(c.phone) : ""))
+          .filter(Boolean);
+        const newCount = await countNewContactsForImport(active.accountId, phones);
+        const limit = await assertCanAddContacts(user, newCount);
+        if (!limit.ok) {
+          return res.status(403).json({ error: limit.code, message: limit.message });
+        }
+      }
       const { imported, updated } = await storage.importContacts(contactsWithAccount, listId);
       res.json({ imported, updated });
     } catch (error: any) {
@@ -2444,7 +2629,7 @@ export async function registerRoutes(
   app.get("/api/lists", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
-      if (!active) return res.status(401).json({ error: "No active account" });
+      if (!active) return res.json([]);
       const lists = await storage.getLists(active.accountId);
       res.json(lists);
     } catch (error) {
@@ -2485,7 +2670,7 @@ export async function registerRoutes(
   app.get("/api/tags", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
-      if (!active) return res.status(401).json({ error: "No active account" });
+      if (!active) return res.json([]);
       const tags = await storage.getTags(active.accountId);
       res.json(tags);
     } catch (error) {
@@ -2526,7 +2711,7 @@ export async function registerRoutes(
   app.get("/api/conversations", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
-      if (!active) return res.status(401).json({ error: "No active account" });
+      if (!active) return res.json([]);
       const filter = req.query.filter as string;
 
       if (filter === "replied") {
@@ -2603,6 +2788,12 @@ export async function registerRoutes(
         }
         if (!(await hasActiveSubscription(userId))) {
           return res.status(402).json({ error: "subscription_required", message: SUBSCRIPTION_REQUIRED_MESSAGE });
+        }
+        if (sender) {
+          const limit = await assertCanSendMessages(sender, 1);
+          if (!limit.ok) {
+            return res.status(403).json({ error: limit.code, message: limit.message });
+          }
         }
       }
 
@@ -2702,21 +2893,10 @@ export async function registerRoutes(
   app.get("/api/notifications", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
-      if (!active) return res.status(401).json({ error: "No active account" });
+      if (!active) return res.json([]);
+      // Trust denormalized counters — no full messages table scan.
       const notificationList = await storage.getNotifications(active.accountId);
-      const allMessages = await storage.getMessages(active.accountId);
-
-      const enriched = notificationList.map(n => {
-        const msgs = allMessages.filter(m => m.campaignId === n.id);
-        if (msgs.length === 0) return n;
-        const sent = msgs.filter(m => m.status === "sent" || m.status === "delivered" || m.status === "read").length;
-        const delivered = msgs.filter(m => m.status === "delivered" || m.status === "read").length;
-        const read = msgs.filter(m => m.status === "read").length;
-        const failed = msgs.filter(m => m.status === "failed").length;
-        return { ...n, sentCount: sent, deliveredCount: delivered, readCount: read, failedCount: failed };
-      });
-
-      res.json(enriched);
+      res.json(notificationList);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch notifications" });
     }
@@ -2728,45 +2908,44 @@ export async function registerRoutes(
       if (!active) return res.status(401).json({ error: "No active account" });
       const notification = await storage.getNotification(req.params.id);
       if (!notification) return res.status(404).json({ error: "Notification not found" });
+      if (notification.accountId && notification.accountId !== active.accountId) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
 
-      const allMessages = await storage.getMessages(active.accountId);
-      const notificationMessages = allMessages.filter(m => m.campaignId === notification.id);
+      const [counts, failedMessages, template] = await Promise.all([
+        storage.getMessageStatusCountsByCampaign(notification.id),
+        storage.getMessagesByCampaignFiltered(notification.id, { status: "failed", limit: 500 }),
+        storage.getTemplate(notification.templateId),
+      ]);
 
-      const msgSent = notificationMessages.filter(m => m.status === "sent").length;
-      const msgDelivered = notificationMessages.filter(m => m.status === "delivered").length;
-      const msgRead = notificationMessages.filter(m => m.status === "read").length;
-      const msgFailed = notificationMessages.filter(m => m.status === "failed").length;
-      const msgQueued = notificationMessages.filter(m => m.status === "queued").length;
-      const hasMessages = notificationMessages.length > 0;
-
+      const hasMessages = counts.total > 0;
       const statusBreakdown = {
-        total: notification.totalRecipients || notificationMessages.length,
-        sent: hasMessages ? (msgSent + msgDelivered + msgRead) : (notification.sentCount || 0),
-        delivered: hasMessages ? (msgDelivered + msgRead) : (notification.deliveredCount || 0),
-        read: hasMessages ? msgRead : (notification.readCount || 0),
-        failed: hasMessages ? msgFailed : (notification.failedCount || 0),
-        queued: hasMessages ? msgQueued : 0,
+        total: notification.totalRecipients || counts.total,
+        sent: hasMessages ? counts.sent : (notification.sentCount || 0),
+        delivered: hasMessages ? counts.delivered : (notification.deliveredCount || 0),
+        read: hasMessages ? counts.read : (notification.readCount || 0),
+        failed: hasMessages ? counts.failed : (notification.failedCount || 0),
+        queued: hasMessages ? counts.queued : 0,
       };
 
-      const failedMessages = notificationMessages
-        .filter(m => m.status === "failed")
-        .map(m => ({
+      res.json({
+        notification: {
+          ...notification,
+          sentCount: statusBreakdown.sent,
+          deliveredCount: statusBreakdown.delivered,
+          readCount: statusBreakdown.read,
+          failedCount: statusBreakdown.failed,
+        },
+        template: template ? { name: template.name, category: template.category } : null,
+        statusBreakdown,
+        failedMessages: failedMessages.map(m => ({
           id: m.id,
           phone: m.recipientPhone,
           errorCode: m.errorCode,
           errorDescription: m.errorDescription,
           sentAt: m.sentAt || m.queuedAt,
-        }));
-
-      const templates = await storage.getTemplates(active.accountId);
-      const template = templates.find(t => t.id === notification.templateId);
-
-      res.json({
-        notification,
-        template: template ? { name: template.name, category: template.category } : null,
-        statusBreakdown,
-        failedMessages,
-        messages: notificationMessages.map(m => ({
+        })),
+        messages: failedMessages.map(m => ({
           id: m.id,
           phone: m.recipientPhone,
           status: m.status,
@@ -2794,14 +2973,17 @@ export async function registerRoutes(
       if (notification.accountId && notification.accountId !== active.accountId) {
         return res.status(404).json({ error: "Notification not found" });
       }
-      const allMessages = await storage.getMessages(active.accountId);
-      const msgs = allMessages.filter(m => m.campaignId === notification.id);
-      if (msgs.length > 0) {
-        const sent = msgs.filter(m => m.status === "sent" || m.status === "delivered" || m.status === "read").length;
-        const delivered = msgs.filter(m => m.status === "delivered" || m.status === "read").length;
-        const read = msgs.filter(m => m.status === "read").length;
-        const failed = msgs.filter(m => m.status === "failed").length;
-        return res.json({ ...notification, sentCount: sent, deliveredCount: delivered, readCount: read, failedCount: failed });
+      if (notification.status === "sending") {
+        const counts = await storage.getMessageStatusCountsByCampaign(notification.id);
+        if (counts.total > 0) {
+          return res.json({
+            ...notification,
+            sentCount: counts.sent,
+            deliveredCount: counts.delivered,
+            readCount: counts.read,
+            failedCount: counts.failed,
+          });
+        }
       }
       res.json(notification);
     } catch (error) {
@@ -2812,7 +2994,18 @@ export async function registerRoutes(
   app.post("/api/notifications", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
       const active = await getActiveAccount(req);
-      if (!active) return res.status(401).json({ error: "No active account" });
+      if (!active) {
+        return res.status(403).json({
+          error: "meta_connection_required",
+          message: META_CONNECTION_REQUIRED_MESSAGE,
+        });
+      }
+      if (!isMetaApiConnected(active.account)) {
+        return res.status(403).json({
+          error: "meta_connection_required",
+          message: META_CONNECTION_REQUIRED_MESSAGE,
+        });
+      }
       const notification = await storage.createNotification({ ...req.body, accountId: active.accountId });
       broadcast("notification-created", { notification });
       res.status(201).json(notification);
@@ -2821,8 +3014,14 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/notifications/:id", async (req, res) => {
+  app.patch("/api/notifications/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const existing = await storage.getNotification(req.params.id);
+      if (!existing || (existing.accountId && existing.accountId !== active.accountId)) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
       const notification = await storage.updateNotification(req.params.id, req.body);
       if (!notification) {
         return res.status(404).json({ error: "Notification not found" });
@@ -2834,8 +3033,14 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/notifications/:id", async (req, res) => {
+  app.delete("/api/notifications/:id", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
+      const active = await getActiveAccount(req);
+      if (!active) return res.status(401).json({ error: "No active account" });
+      const existing = await storage.getNotification(req.params.id);
+      if (!existing || (existing.accountId && existing.accountId !== active.accountId)) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
       const deleted = await storage.deleteNotification(req.params.id);
       if (!deleted) {
         return res.status(404).json({ error: "Notification not found" });
@@ -2966,9 +3171,9 @@ export async function registerRoutes(
     // send/resume pass) rather than trusting only this pass's local counters,
     // so a resumed send reports a correct total instead of overwriting prior
     // progress.
-    const allMessages = await storage.getMessagesByCampaign(notification.id);
-    const totalSent = allMessages.filter(m => m.status !== "failed").length;
-    const totalFailed = allMessages.filter(m => m.status === "failed").length;
+    const counts = await storage.getMessageStatusCountsByCampaign(notification.id);
+    const totalSent = counts.sent;
+    const totalFailed = counts.failed;
 
     const finalStatus = totalSent === 0 && totalFailed > 0 ? "failed" : "completed";
     await storage.updateNotification(notification.id, {
@@ -2983,7 +3188,7 @@ export async function registerRoutes(
       accountId: activeAccount.id,
       type: "notification_completed",
       title: finalStatus === "failed" ? "Notification Failed" : "Notification Completed",
-      description: `${notification.name}: ${totalSent} sent, ${totalFailed} failed out of ${allMessages.length}`,
+      description: `${notification.name}: ${totalSent} sent, ${totalFailed} failed out of ${counts.total}`,
       timestamp: new Date(),
       metadata: null,
     });
@@ -3027,23 +3232,6 @@ export async function registerRoutes(
       }
 
       const notificationAccountId = notification.accountId || activeAccount.id;
-      const allContacts = await storage.getContacts(notificationAccountId);
-      const recipientPhones: string[] = [];
-      const seen = new Set<string>();
-      for (const contact of allContacts) {
-        const contactListIds = (contact.listIds as string[]) || [];
-        if (contactListIds.some(lid => listIds.includes(lid))) {
-          const phone = normalizePhone(contact.phone);
-          if (phone && contact.status === "subscribed" && !seen.has(phone)) {
-            recipientPhones.push(phone);
-            seen.add(phone);
-          }
-        }
-      }
-
-      if (recipientPhones.length === 0) {
-        return res.status(400).json({ error: "No subscribed contacts found in the selected lists" });
-      }
 
       const components = (template.components as any[]) || [];
       const headerComp = components.find((c: any) => c.type === "HEADER");
@@ -3075,6 +3263,98 @@ export async function registerRoutes(
             type: "text",
             text: templateVars[`body_${i + 1}`] || "N/A",
           }));
+        }
+      }
+
+      const conversationMediaUrl = headerComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format || "")
+        ? (notification.headerMediaUrl || headerComp.mediaUrl || undefined)
+        : undefined;
+      const bodyPreview = renderTemplatePreview(template, bodyParams);
+
+      if (isQueueEnabled()) {
+        // Count recipients via a streaming pass without holding the full list.
+        let totalRecipients = 0;
+        for await (const chunk of storage.getSubscribedPhoneChunksByLists(
+          notificationAccountId,
+          listIds,
+          CONTACT_STREAM_PAGE_SIZE,
+        )) {
+          totalRecipients += chunk.length;
+        }
+
+        if (totalRecipients === 0) {
+          return res.status(400).json({ error: "No subscribed contacts found in the selected lists" });
+        }
+
+        if (userId) {
+          const user = await authStorage.getUser(userId);
+          if (user) {
+            const limit = await assertCanSendMessages(user, totalRecipients);
+            if (!limit.ok) {
+              return res.status(403).json({ error: limit.code, message: limit.message });
+            }
+          }
+        }
+
+        await storage.updateNotification(notification.id, {
+          status: "sending",
+          sentAt: new Date(),
+          totalRecipients,
+        });
+        broadcast("notification-updated", { notification: { ...notification, status: "sending", totalRecipients } });
+
+        const result = await enqueueBroadcast({
+          kind: "notification",
+          accountId: activeAccount.id,
+          campaignId: notification.id,
+          templateId: template.id,
+          templateName: template.name,
+          templateLanguage: template.language || "en",
+          phoneChunks: storage.getSubscribedPhoneChunksByLists(
+            notificationAccountId,
+            listIds,
+            CONTACT_STREAM_PAGE_SIZE,
+          ),
+          headerParams,
+          bodyParams,
+          bodyPreview,
+          conversationMediaUrl,
+          totalRecipients,
+        });
+
+        return res.json({
+          message: `Notification queued. Sending to ${result.totalRecipients} recipients across ${result.jobCount} jobs (~${PHONES_PER_JOB}/job).`,
+          queued: true,
+          queueName: result.queueName,
+          jobCount: result.jobCount,
+          totalRecipients: result.totalRecipients,
+        });
+      }
+
+      // Fallback: stream into memory only when Redis is unavailable.
+      console.warn("[notification] Redis not configured — falling back to in-process send");
+      const recipientPhones: string[] = [];
+      const seen = new Set<string>();
+      for await (const chunk of storage.getSubscribedPhoneChunksByLists(notificationAccountId, listIds, CONTACT_STREAM_PAGE_SIZE)) {
+        for (const phone of chunk) {
+          if (!seen.has(phone)) {
+            seen.add(phone);
+            recipientPhones.push(phone);
+          }
+        }
+      }
+
+      if (recipientPhones.length === 0) {
+        return res.status(400).json({ error: "No subscribed contacts found in the selected lists" });
+      }
+
+      if (userId) {
+        const user = await authStorage.getUser(userId);
+        if (user) {
+          const limit = await assertCanSendMessages(user, recipientPhones.length);
+          if (!limit.ok) {
+            return res.status(403).json({ error: limit.code, message: limit.message });
+          }
         }
       }
 
@@ -3122,33 +3402,46 @@ export async function registerRoutes(
 
       const listIds = notification.listIds || [];
       const notificationAccountId = notification.accountId || activeAccount.id;
-      const allContacts = await storage.getContacts(notificationAccountId);
-      const targetPhones = new Set<string>();
-      for (const contact of allContacts) {
-        const contactListIds = (contact.listIds as string[]) || [];
-        if (contactListIds.some(lid => listIds.includes(lid))) {
-          const phone = normalizePhone(contact.phone);
-          if (phone && contact.status === "subscribed") {
-            targetPhones.add(phone);
-          }
+      const attemptedPhones = new Set(
+        (await storage.getAttemptedPhonesByCampaign(notification.id)).map((p) => normalizePhone(p)),
+      );
+
+      const remainingPhoneChunks = async function* (): AsyncGenerator<string[]> {
+        for await (const chunk of storage.getSubscribedPhoneChunksByLists(
+          notificationAccountId,
+          listIds,
+          CONTACT_STREAM_PAGE_SIZE,
+        )) {
+          const remaining = chunk.filter((p) => !attemptedPhones.has(p));
+          if (remaining.length > 0) yield remaining;
         }
+      };
+
+      let remainingCount = 0;
+      for await (const chunk of remainingPhoneChunks()) {
+        remainingCount += chunk.length;
       }
 
-      const alreadyAttempted = await storage.getMessagesByCampaign(notification.id);
-      const attemptedPhones = new Set(alreadyAttempted.map(m => normalizePhone(m.recipientPhone)));
-      const remainingPhones = Array.from(targetPhones).filter(p => !attemptedPhones.has(p));
-
-      if (remainingPhones.length === 0) {
-        const totalSent = alreadyAttempted.filter(m => m.status !== "failed").length;
-        const totalFailed = alreadyAttempted.filter(m => m.status === "failed").length;
+      if (remainingCount === 0) {
+        const counts = await storage.getMessageStatusCountsByCampaign(notification.id);
         await storage.updateNotification(notification.id, {
-          status: totalSent === 0 && totalFailed > 0 ? "failed" : "completed",
+          status: counts.sent === 0 && counts.failed > 0 ? "failed" : "completed",
           completedAt: new Date(),
-          sentCount: totalSent,
-          failedCount: totalFailed,
-          deliveredCount: totalSent,
+          sentCount: counts.sent,
+          failedCount: counts.failed,
+          deliveredCount: counts.sent,
         });
         return res.json({ message: "Nothing left to resume - every recipient has already been attempted.", remaining: 0 });
+      }
+
+      if (userId) {
+        const user = await authStorage.getUser(userId);
+        if (user) {
+          const limit = await assertCanSendMessages(user, remainingCount);
+          if (!limit.ok) {
+            return res.status(403).json({ error: limit.code, message: limit.message });
+          }
+        }
       }
 
       const components = (template.components as any[]) || [];
@@ -3178,8 +3471,43 @@ export async function registerRoutes(
         }
       }
 
+      const conversationMediaUrl = headerComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format || "")
+        ? (notification.headerMediaUrl || headerComp.mediaUrl || undefined)
+        : undefined;
+      const bodyPreview = renderTemplatePreview(template, bodyParams);
+
       await storage.updateNotification(notification.id, { status: "sending" });
       broadcast("notification-updated", { notification: { ...notification, status: "sending" } });
+
+      if (isQueueEnabled()) {
+        const result = await enqueueBroadcast({
+          kind: "notification",
+          accountId: activeAccount.id,
+          campaignId: notification.id,
+          templateId: template.id,
+          templateName: template.name,
+          templateLanguage: template.language || "en",
+          phoneChunks: remainingPhoneChunks(),
+          headerParams,
+          bodyParams,
+          bodyPreview,
+          conversationMediaUrl,
+          totalRecipients: (notification.totalRecipients || 0) || remainingCount + attemptedPhones.size,
+        });
+
+        return res.json({
+          message: `Resuming — queued ${result.totalRecipients} remaining recipients across ${result.jobCount} jobs.`,
+          remaining: result.totalRecipients,
+          queued: true,
+          queueName: result.queueName,
+          jobCount: result.jobCount,
+        });
+      }
+
+      const remainingPhones: string[] = [];
+      for await (const chunk of remainingPhoneChunks()) {
+        remainingPhones.push(...chunk);
+      }
 
       res.json({ message: `Resuming - sending to ${remainingPhones.length} remaining recipients.`, remaining: remainingPhones.length });
 
@@ -3230,11 +3558,9 @@ export async function registerRoutes(
           await storage.saveSettings({ ...rest, webhookVerifyToken: verifyToken });
         }
 
-        console.log(`[Webhook] Registering webhook URL: ${webhookUrl}`);
         const registerResult = await whatsappApi.registerWebhookWithMeta(appId, appSecret, webhookUrl, verifyToken);
         if (registerResult.success) {
           results.push("Webhook URL registered with Meta");
-          console.log(`[Webhook] Successfully registered webhook URL: ${webhookUrl}`);
         } else {
           results.push(`Webhook URL registration failed: ${registerResult.error?.message}`);
           console.error(`[Webhook] URL registration failed:`, registerResult.error);
@@ -3249,7 +3575,6 @@ export async function registerRoutes(
       const wabaResult = await whatsappApi.subscribeAppToWaba(account.businessAccountId, account.accessToken);
       if (wabaResult.success) {
         results.push("App subscribed to WABA events");
-        console.log(`[Webhook] Subscribed app to WABA ${account.businessAccountId}`);
       } else {
         results.push(`WABA subscription failed: ${wabaResult.error?.message}`);
         console.error(`[Webhook] WABA subscribe failed:`, wabaResult.error);
@@ -3399,6 +3724,14 @@ export async function registerRoutes(
 
       const { email, role } = req.body;
       if (!email) return res.status(400).json({ error: "Email is required" });
+
+      const owner = await authStorage.getUser(userId);
+      if (owner) {
+        const limit = await assertCanAddTeamSeat(owner, active.accountId);
+        if (!limit.ok) {
+          return res.status(402).json({ error: limit.code, message: limit.message });
+        }
+      }
 
       const existing = await storage.getTeamMemberByEmail(email, active.accountId);
       if (existing) return res.status(400).json({ error: "This email is already a team member" });
@@ -3553,10 +3886,8 @@ export async function registerRoutes(
       // 5. Finally, delete the user account
       await authStorage.deleteUser(userId);
 
-      console.log(`User account deleted: ${userId}`);
       res.json({ success: true, message: "Account and all associated data have been deleted" });
     } catch (error) {
-      console.error("Failed to delete user account:", error);
       res.status(500).json({ error: "Failed to delete account. Please contact support." });
     }
   });
@@ -3581,10 +3912,65 @@ export async function registerRoutes(
   // Get all users (super_admin only)
   app.get("/api/admin/users", requireSuperAdmin, async (req, res) => {
     try {
-      const users = await authStorage.getAllUsers();
-      res.json(users);
+      const allUsers = await authStorage.getAllUsers();
+      const plans = await listAllBillingPlans();
+      const planById = new Map(plans.map((p) => [p.id, p]));
+      res.json(
+        allUsers.map((user) => {
+          const plan = user.billingPlanId ? planById.get(user.billingPlanId) : undefined;
+          return {
+            ...user,
+            billingPlan: plan
+              ? {
+                  id: plan.id,
+                  name: plan.name,
+                  slug: plan.slug,
+                  priceLabel: plan.priceLabel,
+                  amountInr: plan.amountInr,
+                }
+              : null,
+          };
+        }),
+      );
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
+  app.get("/api/admin/payments", requireSuperAdmin, async (_req, res) => {
+    try {
+      const payments = await listAllPayments(300);
+      const allUsers = await authStorage.getAllUsers();
+      const userById = new Map(allUsers.map((u) => [u.id, u]));
+      res.json({
+        payments: payments.map((payment) => {
+          const user = userById.get(payment.userId);
+          return {
+            ...payment,
+            user: user
+              ? {
+                  id: user.id,
+                  email: user.email,
+                  firstName: user.firstName,
+                  lastName: user.lastName,
+                }
+              : null,
+          };
+        }),
+      });
+    } catch (error) {
+      console.error("Failed to list payments:", error);
+      res.status(500).json({ error: "Failed to list payments" });
+    }
+  });
+
+  app.get("/api/admin/revenue", requireSuperAdmin, async (_req, res) => {
+    try {
+      const snapshot = await getAdminRevenueSnapshot();
+      res.json(snapshot);
+    } catch (error) {
+      console.error("Failed to fetch revenue snapshot:", error);
+      res.status(500).json({ error: "Failed to fetch revenue dashboard" });
     }
   });
 
@@ -3834,21 +4220,81 @@ export async function registerRoutes(
   // Get admin dashboard stats (super_admin only)
   app.get("/api/admin/stats", requireSuperAdmin, async (req, res) => {
     try {
-      const users = await authStorage.getAllUsers();
-      const totalUsers = users.length;
-      const activeUsers = users.filter(u => u.subscriptionStatus === "active" || u.grantedFreeAccess).length;
-      const trialUsers = users.filter(u => u.subscriptionStatus === "trial").length;
-      const paidUsers = users.filter(u => u.hasPaid).length;
+      const allUsers = await authStorage.getAllUsers();
+      const plans = await listAllBillingPlans();
+      const planById = new Map(plans.map((p) => [p.id, p]));
+      const totalUsers = allUsers.length;
+      const activeUsers = allUsers.filter(u => u.subscriptionStatus === "active" || u.grantedFreeAccess).length;
+      const trialUsers = allUsers.filter(u => u.subscriptionStatus === "trial").length;
+      const paidUsers = allUsers.filter(u => u.hasPaid).length;
+      const mrrInr = allUsers
+        .filter((u) => u.hasPaid && u.subscriptionStatus === "active" && u.billingPlanId)
+        .reduce((sum, u) => sum + (planById.get(u.billingPlanId!)?.amountInr ?? 0), 0);
       
       res.json({
         totalUsers,
         activeUsers,
         trialUsers,
         paidUsers,
-        pendingApproval: users.filter(u => u.subscriptionStatus === "inactive" && !u.grantedFreeAccess).length,
+        mrrInr,
+        pendingApproval: allUsers.filter(u => u.subscriptionStatus === "inactive" && !u.grantedFreeAccess).length,
       });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch admin stats" });
+    }
+  });
+
+  // ============== Admin billing plans ==============
+  app.get("/api/admin/plans", requireSuperAdmin, async (_req, res) => {
+    try {
+      const plans = await listAllBillingPlans();
+      res.json({ plans: plans.map((p) => serializePlanForClient(p)) });
+    } catch (error) {
+      console.error("Failed to list plans:", error);
+      res.status(500).json({ error: "Failed to list plans" });
+    }
+  });
+
+  app.post("/api/admin/plans", requireSuperAdmin, async (req: any, res) => {
+    try {
+      const plan = await createBillingPlan(req.body || {});
+      res.status(201).json({ plan: serializePlanForClient(plan) });
+    } catch (error: any) {
+      console.error("Failed to create plan:", error);
+      res.status(400).json({ error: error.message || "Failed to create plan" });
+    }
+  });
+
+  app.patch("/api/admin/plans/:id", requireSuperAdmin, async (req: any, res) => {
+    try {
+      const plan = await updateBillingPlan(req.params.id, req.body || {});
+      if (!plan) return res.status(404).json({ error: "Plan not found" });
+      res.json({ plan: serializePlanForClient(plan) });
+    } catch (error: any) {
+      console.error("Failed to update plan:", error);
+      res.status(400).json({ error: error.message || "Failed to update plan" });
+    }
+  });
+
+  app.delete("/api/admin/plans/:id", requireSuperAdmin, async (req: any, res) => {
+    try {
+      const ok = await deleteBillingPlan(req.params.id);
+      if (!ok) return res.status(404).json({ error: "Plan not found" });
+      res.json({ message: "Plan deactivated" });
+    } catch (error) {
+      console.error("Failed to delete plan:", error);
+      res.status(500).json({ error: "Failed to delete plan" });
+    }
+  });
+
+  // Public marketing plans (no auth)
+  app.get("/api/plans", async (_req, res) => {
+    try {
+      const plans = await listActiveBillingPlans();
+      res.json({ plans: plans.map((p) => serializePlanForClient(p)) });
+    } catch (error) {
+      console.error("Failed to fetch public plans:", error);
+      res.status(500).json({ error: "Failed to fetch plans" });
     }
   });
 
@@ -3956,18 +4402,87 @@ export async function registerRoutes(
   app.get("/api/subscription/status", isAuthenticated as RequestHandler, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const user = await authStorage.getUser(userId);
-      if (!user) return res.status(404).json({ error: "User not found" });
+      const rawUser = await authStorage.getUser(userId);
+      if (!rawUser) return res.status(404).json({ error: "User not found" });
+      const user = await ensureSubscriptionFresh(rawUser);
+
+      const trialUsage = isTrialUser(user) ? await getTrialUsage(userId) : null;
+      const planUsage = await getPlanUsage(user);
+      const effectiveTrialEndsAt = getEffectiveTrialEndsAt(user);
+      const currentPlan = user.billingPlanId
+        ? await getBillingPlanById(user.billingPlanId)
+        : undefined;
+
       res.json({
         subscriptionStatus: user.subscriptionStatus,
         hasPaid: user.hasPaid,
         grantedFreeAccess: user.grantedFreeAccess,
-        trialEndsAt: user.trialEndsAt,
+        billingPlanId: user.billingPlanId ?? null,
+        subscriptionEndsAt: user.subscriptionEndsAt
+          ? new Date(user.subscriptionEndsAt).toISOString()
+          : null,
+        plan: currentPlan
+          ? {
+              id: currentPlan.id,
+              name: currentPlan.name,
+              priceLabel: currentPlan.priceLabel,
+              slug: currentPlan.slug,
+              amountInr: currentPlan.amountInr,
+            }
+          : null,
+        trialEndsAt: effectiveTrialEndsAt?.toISOString() ?? null,
         emailVerified: user.emailVerified,
         isActive: await hasActiveSubscription(userId),
+        trialDays: TRIAL_DAYS,
+        isTrial: isTrialUser(user),
+        trialUsage,
+        planUsage,
       });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch subscription status" });
+    }
+  });
+
+  app.get("/api/subscription/plans", isAuthenticated as RequestHandler, async (_req, res) => {
+    try {
+      const plans = await listActiveBillingPlans();
+      res.json({ plans: plans.map((p) => serializePlanForClient(p)) });
+    } catch (error) {
+      console.error("Failed to fetch subscription plans:", error);
+      res.status(500).json({ error: "Failed to fetch plans" });
+    }
+  });
+
+  app.get("/api/subscription/payments", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const payments = await listPaymentsForUser(userId, 100);
+      res.json({ payments });
+    } catch (error) {
+      console.error("Failed to fetch payment history:", error);
+      res.status(500).json({ error: "Failed to fetch payment history" });
+    }
+  });
+
+  app.get("/api/subscription/payments/:id/invoice", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await authStorage.getUser(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const payment = await getPaymentByIdForUser(req.params.id, userId);
+      if (!payment) return res.status(404).json({ error: "Payment not found" });
+      if (payment.status !== "captured") {
+        return res.status(400).json({ error: "Invoice is only available for successful payments" });
+      }
+
+      const { html, filename } = await buildPaymentInvoiceHtml({ payment, user });
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(html);
+    } catch (error) {
+      console.error("Failed to generate invoice:", error);
+      res.status(500).json({ error: "Failed to generate invoice" });
     }
   });
 
@@ -3981,11 +4496,30 @@ export async function registerRoutes(
         return res.status(500).json({ error: "Payments are not configured yet. Please try again later." });
       }
 
-      const subscription = await razorpayApi.createSubscription(
+      const requestedPlanId = req.body?.planId as string | undefined;
+      const plan =
+        (requestedPlanId ? await getBillingPlanById(requestedPlanId) : undefined) ||
+        (await getDefaultBillingPlan());
+
+      if (!plan || !plan.active) {
+        return res.status(400).json({ error: "Selected plan is not available" });
+      }
+
+      if (!plan.razorpayEnabled) {
+        return res.status(400).json({
+          error: "contact_sales_required",
+          message: "This plan requires a sales conversation. Please contact us to get started.",
+        });
+      }
+
+      const { subscription, plan: billingPlan } = await razorpayApi.createSubscription(
         user.email || "",
-        `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email || "Customer"
+        `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email || "Customer",
+        plan.id,
       );
 
+      // Persist subscription id only — billingPlanId is set on payment confirm
+      // so abandoned checkouts do not lock the plan card as "current".
       await authStorage.updateUserSubscription(userId, {
         razorpaySubscriptionId: subscription.id,
       });
@@ -3993,10 +4527,223 @@ export async function registerRoutes(
       res.json({
         subscriptionId: subscription.id,
         keyId: process.env.RAZORPAY_KEY_ID,
+        plan: {
+          id: billingPlan.id,
+          name: billingPlan.name,
+          priceLabel: billingPlan.priceLabel,
+        },
       });
     } catch (error: any) {
       console.error("Failed to create Razorpay subscription:", error);
+      if (error?.statusCode === 401) {
+        const message = await razorpayApi.describeUnauthorizedError();
+        return res.status(500).json({ error: message });
+      }
       res.status(500).json({ error: "Failed to start subscription. Please try again." });
+    }
+  });
+
+  app.post("/api/subscription/upgrade", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await authStorage.getUser(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      if (!(user.hasPaid && user.subscriptionStatus === "active" && user.billingPlanId)) {
+        return res.status(400).json({
+          error: "no_active_plan",
+          message:
+            "You don't have an active plan to upgrade. Please subscribe to a plan first.",
+        });
+      }
+
+      if (!process.env.RAZORPAY_KEY_ID) {
+        return res.status(500).json({ error: "Payments are not configured yet. Please try again later." });
+      }
+
+      const targetPlanId = req.body?.planId as string | undefined;
+      if (!targetPlanId) {
+        return res.status(400).json({ error: "planId is required" });
+      }
+
+      if (targetPlanId === user.billingPlanId) {
+        return res.status(400).json({
+          error: "already_on_plan",
+          message: "You are already on this plan.",
+        });
+      }
+
+      const { order, quote } = await razorpayApi.createUpgradeOrder({
+        userId,
+        customerEmail: user.email || "",
+        customerName:
+          `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email || "Customer",
+        currentPlanId: user.billingPlanId,
+        targetPlanId,
+      });
+
+      res.json({
+        mode: "upgrade",
+        orderId: order.id,
+        amount: order.amount,
+        currency: order.currency,
+        keyId: process.env.RAZORPAY_KEY_ID?.replace(/^["']|["']$/g, ""),
+        differenceInr: quote.differenceInr,
+        fromPlan: {
+          id: quote.fromPlan.id,
+          name: quote.fromPlan.name,
+          priceLabel: quote.fromPlan.priceLabel,
+        },
+        toPlan: {
+          id: quote.toPlan.id,
+          name: quote.toPlan.name,
+          priceLabel: quote.toPlan.priceLabel,
+        },
+      });
+    } catch (error: any) {
+      console.error("Failed to start plan upgrade:", error);
+      if (error?.statusCode === 401) {
+        const message = await razorpayApi.describeUnauthorizedError();
+        return res.status(500).json({ error: message });
+      }
+      res.status(400).json({
+        error: error?.message || "Failed to start upgrade. Please try again.",
+      });
+    }
+  });
+
+  app.post("/api/subscription/upgrade/confirm", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await authStorage.getUser(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      if (!(user.hasPaid && user.subscriptionStatus === "active" && user.billingPlanId)) {
+        return res.status(400).json({
+          error: "no_active_plan",
+          message:
+            "You don't have an active plan to upgrade. Please subscribe to a plan first.",
+        });
+      }
+
+      const { planId, orderId, paymentId, signature } = req.body || {};
+      if (!planId || !orderId || !paymentId || !signature) {
+        return res.status(400).json({ error: "Missing payment confirmation fields" });
+      }
+
+      const quote = await razorpayApi.applyPlanUpgrade({
+        userId,
+        razorpaySubscriptionId: user.razorpaySubscriptionId,
+        fromPlanId: user.billingPlanId,
+        toPlanId: planId,
+        orderId,
+        paymentId,
+        signature,
+      });
+
+      // Keep existing period end if still in future; otherwise start a fresh month.
+      const currentEnd =
+        user.subscriptionEndsAt && new Date(user.subscriptionEndsAt) > new Date()
+          ? new Date(user.subscriptionEndsAt)
+          : addMonths(new Date(), 1);
+
+      await activatePaidPlan({
+        userId,
+        billingPlanId: quote.toPlan.id,
+        razorpaySubscriptionId: user.razorpaySubscriptionId,
+        subscriptionEndsAt: currentEnd,
+      });
+
+      await recordBillingPayment({
+        userId,
+        billingPlanId: quote.toPlan.id,
+        fromPlanId: quote.fromPlan.id,
+        type: "upgrade",
+        status: "captured",
+        amountInr: quote.differenceInr,
+        razorpayPaymentId: paymentId,
+        razorpayOrderId: orderId,
+        razorpaySubscriptionId: user.razorpaySubscriptionId,
+        email: user.email,
+        description: `Upgrade from ${quote.fromPlan.name} to ${quote.toPlan.name}`,
+      });
+
+      res.json({
+        message: "Plan upgraded successfully",
+        plan: {
+          id: quote.toPlan.id,
+          name: quote.toPlan.name,
+          priceLabel: quote.toPlan.priceLabel,
+        },
+        differenceInr: quote.differenceInr,
+        subscriptionEndsAt: currentEnd.toISOString(),
+      });
+    } catch (error: any) {
+      console.error("Failed to confirm plan upgrade:", error);
+      res.status(400).json({
+        error: error?.message || "Failed to confirm upgrade. Please contact support if you were charged.",
+      });
+    }
+  });
+
+  app.post("/api/subscription/confirm", isAuthenticated as RequestHandler, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await authStorage.getUser(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const { planId, paymentId, subscriptionId, signature } = req.body || {};
+      if (!planId || !paymentId || !subscriptionId || !signature) {
+        return res.status(400).json({ error: "Missing payment confirmation fields" });
+      }
+
+      if (
+        !razorpayApi.verifySubscriptionPaymentSignature(paymentId, subscriptionId, signature)
+      ) {
+        return res.status(400).json({ error: "Invalid payment signature" });
+      }
+
+      if (user.razorpaySubscriptionId && user.razorpaySubscriptionId !== subscriptionId) {
+        return res.status(400).json({ error: "Subscription mismatch" });
+      }
+
+      const plan = await getBillingPlanById(planId);
+      if (!plan) return res.status(400).json({ error: "Plan not found" });
+
+      const endsAt = addMonths(new Date(), 1);
+      await activatePaidPlan({
+        userId,
+        billingPlanId: plan.id,
+        razorpaySubscriptionId: subscriptionId,
+        subscriptionEndsAt: endsAt,
+      });
+
+      await recordBillingPayment({
+        userId,
+        billingPlanId: plan.id,
+        type: "subscription",
+        status: "captured",
+        amountInr: plan.amountInr,
+        razorpayPaymentId: paymentId,
+        razorpaySubscriptionId: subscriptionId,
+        email: user.email,
+        description: `Subscribed to ${plan.name}`,
+      });
+
+      res.json({
+        message: "Subscription activated",
+        plan: {
+          id: plan.id,
+          name: plan.name,
+          priceLabel: plan.priceLabel,
+        },
+        subscriptionEndsAt: endsAt.toISOString(),
+      });
+    } catch (error: any) {
+      console.error("Failed to confirm subscription:", error);
+      res.status(400).json({
+        error: error?.message || "Failed to confirm subscription",
+      });
     }
   });
 
@@ -4015,31 +4762,122 @@ export async function registerRoutes(
 
       const event = req.body.event;
       const payload = req.body.payload;
-      console.log(`[Razorpay Webhook] Received event: ${event}`);
 
-      const subscriptionId = payload?.subscription?.entity?.id;
+      const subscriptionEntity = payload?.subscription?.entity;
+      const paymentEntity = payload?.payment?.entity;
+      const subscriptionId = subscriptionEntity?.id as string | undefined;
+      const notesPlanId = (subscriptionEntity?.notes?.billingPlanId ||
+        paymentEntity?.notes?.toPlanId ||
+        paymentEntity?.notes?.billingPlanId) as string | undefined;
 
       if (event === "subscription.activated" || event === "subscription.charged") {
         if (subscriptionId) {
           const [user] = await db.select().from(users).where(eq(users.razorpaySubscriptionId, subscriptionId));
           if (user) {
-            await authStorage.updateUserSubscription(user.id, {
-              hasPaid: true,
-              subscriptionStatus: "active",
-            });
-            console.log(`[Razorpay Webhook] User ${user.email} marked active/paid`);
+            const planId = notesPlanId || user.billingPlanId;
+            if (planId) {
+              await activatePaidPlan({
+                userId: user.id,
+                billingPlanId: planId,
+                razorpaySubscriptionId: subscriptionId,
+                razorpayCurrentEnd: subscriptionEntity?.current_end,
+              });
+            } else {
+              await authStorage.updateUserSubscription(user.id, {
+                hasPaid: true,
+                subscriptionStatus: "active",
+                subscriptionEndsAt: endsAtFromRazorpay(subscriptionEntity?.current_end),
+              });
+            }
+
+            // Only record when Razorpay includes a payment id. Without it,
+            // client /confirm already wrote the row; inserting again would
+            // create an un-idempotent duplicate (no payment id to dedupe on).
+            if (paymentEntity?.id) {
+              await recordBillingPayment({
+                userId: user.id,
+                billingPlanId: planId,
+                type: event === "subscription.activated" ? "subscription" : "renewal",
+                status: "captured",
+                amountInr: paiseToInr(paymentEntity.amount),
+                razorpayPaymentId: paymentEntity.id,
+                razorpayOrderId: paymentEntity.order_id,
+                razorpaySubscriptionId: subscriptionId,
+                razorpayInvoiceId: paymentEntity.invoice_id,
+                method: paymentEntity.method,
+                email: user.email || paymentEntity.email,
+                description:
+                  event === "subscription.activated"
+                    ? "Initial subscription payment"
+                    : "Subscription renewal",
+                rawPayload: { event, paymentId: paymentEntity.id, subscriptionId },
+              });
+            }
           }
+        }
+      } else if (event === "payment.captured") {
+        const notes = paymentEntity?.notes || {};
+        if (notes.type === "plan_upgrade" && notes.userId && notes.toPlanId) {
+          const upgradeUser = await authStorage.getUser(String(notes.userId));
+          const keepEnd =
+            upgradeUser?.subscriptionEndsAt &&
+            new Date(upgradeUser.subscriptionEndsAt) > new Date()
+              ? new Date(upgradeUser.subscriptionEndsAt)
+              : addMonths(new Date(), 1);
+          await activatePaidPlan({
+            userId: String(notes.userId),
+            billingPlanId: String(notes.toPlanId),
+            razorpaySubscriptionId: upgradeUser?.razorpaySubscriptionId,
+            subscriptionEndsAt: keepEnd,
+          });
+          await recordBillingPayment({
+            userId: String(notes.userId),
+            billingPlanId: String(notes.toPlanId),
+            fromPlanId: notes.fromPlanId ? String(notes.fromPlanId) : null,
+            type: "upgrade",
+            status: "captured",
+            amountInr: paiseToInr(paymentEntity?.amount),
+            razorpayPaymentId: paymentEntity?.id,
+            razorpayOrderId: paymentEntity?.order_id,
+            method: paymentEntity?.method,
+            email: paymentEntity?.email,
+            description: "Plan upgrade payment",
+            rawPayload: { event, paymentId: paymentEntity?.id },
+          });
         }
       } else if (["subscription.cancelled", "subscription.halted", "subscription.completed"].includes(event)) {
         if (subscriptionId) {
           const [user] = await db.select().from(users).where(eq(users.razorpaySubscriptionId, subscriptionId));
           if (user) {
-            await authStorage.updateUserSubscription(user.id, { subscriptionStatus: "cancelled" });
-            console.log(`[Razorpay Webhook] User ${user.email} subscription cancelled`);
+            const { expirePaidPlan } = await import("./subscriptionLifecycle");
+            await expirePaidPlan(user.id);
           }
         }
       } else if (event === "payment.failed") {
-        console.error("[Razorpay Webhook] Payment failed:", JSON.stringify(payload?.payment?.entity));
+        console.error("[Razorpay Webhook] Payment failed:", JSON.stringify(paymentEntity));
+        const notes = paymentEntity?.notes || {};
+        const userId =
+          (notes.userId as string | undefined) ||
+          (subscriptionId
+            ? (await db.select().from(users).where(eq(users.razorpaySubscriptionId, subscriptionId)))[0]?.id
+            : undefined);
+        if (userId) {
+          await recordBillingPayment({
+            userId,
+            billingPlanId: notes.toPlanId || notes.billingPlanId || null,
+            fromPlanId: notes.fromPlanId || null,
+            type: notes.type === "plan_upgrade" ? "upgrade" : "failed",
+            status: "failed",
+            amountInr: paiseToInr(paymentEntity?.amount),
+            razorpayPaymentId: paymentEntity?.id,
+            razorpayOrderId: paymentEntity?.order_id,
+            razorpaySubscriptionId: subscriptionId,
+            method: paymentEntity?.method,
+            email: paymentEntity?.email,
+            description: paymentEntity?.error_description || "Payment failed",
+            rawPayload: { event, paymentId: paymentEntity?.id },
+          });
+        }
       }
 
       res.sendStatus(200);
@@ -4099,7 +4937,6 @@ export async function registerRoutes(
       const accounts = await storage.getAccounts();
       for (const account of accounts) {
         if (account.businessAccountId && account.accessToken) {
-          console.log(`[Startup] Auto-subscribing WABA ${account.businessAccountId} (${account.name}) to webhook events...`);
           const result = await whatsappApi.subscribeAppToWaba(account.businessAccountId, account.accessToken);
           if (result.success) {
             console.log(`[Startup] WABA ${account.businessAccountId} subscribed successfully`);

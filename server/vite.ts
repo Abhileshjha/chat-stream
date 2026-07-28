@@ -8,10 +8,35 @@ import { nanoid } from "nanoid";
 
 const viteLogger = createLogger();
 
+function resolveHmrOptions(httpServer: Server) {
+  const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
+  // When serving behind ngrok/HTTPS tunnels, the browser must open WSS on
+  // the public host:443 — not localhost:5173 (Vite's default guess).
+  if (appUrl.startsWith("https://") && !/localhost|127\.0\.0\.1/.test(appUrl)) {
+    try {
+      const { hostname } = new URL(appUrl);
+      return {
+        server: httpServer,
+        path: "/vite-hmr",
+        protocol: "wss" as const,
+        host: hostname,
+        clientPort: 443,
+      };
+    } catch {
+      // fall through
+    }
+  }
+
+  return {
+    server: httpServer,
+    path: "/vite-hmr",
+  };
+}
+
 export async function setupVite(server: Server, app: Express) {
   const serverOptions = {
     middlewareMode: true,
-    hmr: { server, path: "/vite-hmr" },
+    hmr: resolveHmrOptions(server),
     allowedHosts: true as const,
   };
 

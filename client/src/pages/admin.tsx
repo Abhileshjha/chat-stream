@@ -26,6 +26,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
 import {
   Users,
   UserCheck,
@@ -50,9 +51,13 @@ import {
   Contact as ContactIcon,
   Trash2,
   List as ListIcon,
+  BarChart3,
 } from "lucide-react";
 import type { User } from "@shared/models/auth";
 import type { Contact, ContactList } from "@shared/schema";
+import { AdminPlansPanel } from "@/components/admin-plans";
+import { AdminPaymentsPanel } from "@/components/admin-payments";
+import { AdminRevenuePanel } from "@/components/admin-revenue";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -60,7 +65,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-const MONTHLY_PLAN_PRICE_INR = 799;
+const MONTHLY_PLAN_PRICE_INR = 1999;
+
+interface AdminUser extends User {
+  billingPlan?: {
+    id: string;
+    name: string;
+    slug: string;
+    priceLabel: string;
+    amountInr: number;
+  } | null;
+}
 
 interface AdminStats {
   totalUsers: number;
@@ -68,6 +83,7 @@ interface AdminStats {
   trialUsers: number;
   paidUsers: number;
   pendingApproval: number;
+  mrrInr?: number;
 }
 
 interface VisitorAnalytics {
@@ -104,7 +120,7 @@ interface AuditLogEntry {
   timestamp: string;
 }
 
-type AdminTab = "dashboard" | "visitors" | "users" | "audit" | "files" | "contacts";
+type AdminTab = "dashboard" | "visitors" | "users" | "audit" | "files" | "contacts" | "plans" | "payments" | "revenue";
 
 interface AdminUploadFile {
   id: string;
@@ -151,6 +167,7 @@ function formatBytes(bytes: number): string {
 }
 
 export default function Admin() {
+  const { logout, isLoggingOut } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<AdminTab>("dashboard");
@@ -182,7 +199,7 @@ export default function Admin() {
     queryKey: ["/api/admin/stats"],
   });
 
-  const { data: users = [], isLoading: usersLoading, error: usersError } = useQuery<User[]>({
+  const { data: users = [], isLoading: usersLoading, error: usersError } = useQuery<AdminUser[]>({
     queryKey: ["/api/admin/users"],
   });
 
@@ -425,75 +442,98 @@ export default function Admin() {
   const trialUsers = stats?.trialUsers ?? 0;
   const totalUsers = stats?.totalUsers ?? 0;
   const pendingApproval = stats?.pendingApproval ?? 0;
-  const mrr = paidUsers * MONTHLY_PLAN_PRICE_INR;
+  const mrr = stats?.mrrInr ?? paidUsers * MONTHLY_PLAN_PRICE_INR;
   const trialToPaidPct = totalUsers > 0 ? Math.round((paidUsers / totalUsers) * 100) : 0;
 
   const navItems: { id: AdminTab; label: string; icon: typeof LayoutDashboard; badge?: number }[] = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "visitors", label: "Visitors", icon: Eye, badge: visitors?.visitors24h },
     { id: "users", label: "User management", icon: Users, badge: pendingApproval || undefined },
+    { id: "plans", label: "Billing plans", icon: CreditCard },
+    { id: "revenue", label: "Subscriptions & Revenue", icon: BarChart3 },
+    { id: "payments", label: "Payments", icon: CreditCard },
     { id: "files", label: "Uploaded files", icon: FileText },
     { id: "contacts", label: "Contacts", icon: ContactIcon },
     { id: "audit", label: "Audit log", icon: ScrollText },
   ];
 
   return (
-    <div className="flex min-h-screen -m-4 md:-m-6">
-      {/* Admin-specific navy sidebar - visually distinct from the regular app sidebar */}
-      <div className="w-60 shrink-0 bg-primary text-primary-foreground flex flex-col py-5 sticky top-0 h-screen">
-        <div className="flex items-center gap-2.5 px-5 pb-5">
+    <div className="flex h-screen overflow-hidden bg-[#F7FAFF]">
+      {/* Light admin sidebar — navy/cyan accents on white */}
+      <aside className="w-60 shrink-0 h-screen bg-white border-r border-[#14205a]/10 text-[#14205a] flex flex-col py-5 overflow-hidden">
+        <div className="flex items-center gap-2.5 px-5 pb-5 shrink-0">
           <div className="relative h-8 w-8 shrink-0">
-            <div className="absolute inset-0 translate-x-[-3px] translate-y-[3px] rounded-lg bg-[hsl(var(--chart-2))]" />
-            <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-white font-heading text-base font-bold text-primary">
+            <div className="absolute inset-0 translate-x-[-3px] translate-y-[3px] rounded-lg bg-cyan-400" />
+            <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-[#14205a] font-heading text-base font-bold text-white">
               c
             </div>
           </div>
           <div>
-            <div className="font-heading font-bold text-[15px]">convora<span className="text-[hsl(var(--chart-2))]">.tech</span></div>
-            <div className="text-[10px] tracking-widest uppercase text-primary-foreground/50">Admin panel</div>
+            <div className="font-heading font-bold text-[15px]">
+              convora<span className="text-cyan-500">.tech</span>
+            </div>
+            <div className="text-[10px] tracking-widest uppercase text-[#14205a]/45">
+              Admin panel
+            </div>
           </div>
         </div>
-        <div className="px-5 pb-2 text-[10px] tracking-widest uppercase text-primary-foreground/50">Menu</div>
-        <div className="flex flex-col gap-0.5 px-3">
+        <div className="px-5 pb-2 text-[10px] tracking-widest uppercase text-[#14205a]/40 shrink-0">
+          Menu
+        </div>
+        <nav className="flex flex-col gap-0.5 px-3 flex-1 min-h-0 overflow-hidden">
           {navItems.map((item) => (
             <button
               key={item.id}
               onClick={() => setTab(item.id)}
               className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-colors",
-                tab === item.id ? "bg-white/10" : "hover:bg-white/5 text-primary-foreground/80"
+                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-colors duration-200",
+                tab === item.id
+                  ? "bg-cyan-500/15 text-[#14205a] font-semibold"
+                  : "text-[#14205a]/70 hover:bg-[#14205a]/5 hover:text-[#14205a]",
               )}
               data-testid={`admin-nav-${item.id}`}
             >
-              <item.icon className="h-4 w-4 shrink-0" />
+              <item.icon
+                className={cn(
+                  "h-4 w-4 shrink-0",
+                  tab === item.id ? "text-cyan-600" : "text-[#14205a]/50",
+                )}
+              />
               <span className="flex-1">{item.label}</span>
               {!!item.badge && (
-                <span className="bg-[hsl(var(--chart-2))] text-[#0B1030] rounded-full text-[11px] font-bold px-1.5 min-w-5 text-center">
+                <span className="bg-cyan-500 text-[#0B1030] rounded-full text-[11px] font-bold px-1.5 min-w-5 text-center">
                   {item.badge}
                 </span>
               )}
             </button>
           ))}
-        </div>
-        <div className="mt-auto px-5 pt-3.5 border-t border-white/10 mx-3.5">
-          <div className="flex items-center gap-2 text-xs text-primary-foreground/60">
-            <span className="w-2 h-2 rounded-full bg-[hsl(var(--chart-2))]" />
+        </nav>
+        <div className="shrink-0 px-5 pt-3.5 border-t border-[#14205a]/10 mx-3.5">
+          <div className="flex items-center gap-2 text-xs text-[#14205a]/50">
+            <span className="w-2 h-2 rounded-full bg-cyan-500" />
             Live &middot; refreshes 30s
           </div>
           <div className="flex items-center justify-between mt-2.5">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-full bg-[hsl(var(--chart-2))] text-[#0B1030] flex items-center justify-center font-bold text-xs">SA</div>
+              <div className="w-7 h-7 rounded-full bg-cyan-500 text-[#0B1030] flex items-center justify-center font-bold text-xs">
+                SA
+              </div>
               <div className="text-xs font-medium">Admin</div>
             </div>
-            <a href="/api/logout" className="text-xs font-semibold text-[hsl(var(--chart-2))] flex items-center gap-1">
-              <LogOut className="h-3 w-3" /> Log out
-            </a>
+            <button
+              type="button"
+              onClick={() => logout()}
+              disabled={isLoggingOut}
+              className="text-xs font-semibold text-cyan-600 hover:text-cyan-700 flex items-center gap-1 transition-colors"
+            >
+              <LogOut className="h-3 w-3" /> {isLoggingOut ? "…" : "Log out"}
+            </button>
           </div>
         </div>
-      </div>
+      </aside>
 
-      {/* Main content */}
-      <div className="flex-1 min-w-0 p-6 space-y-6">
+      {/* Main content — only this region scrolls */}
+      <div className="flex-1 min-w-0 h-screen overflow-y-auto p-6 space-y-6 bg-[#F7FAFF]">
         {tab === "dashboard" && (
           <>
             <div>
@@ -569,16 +609,29 @@ export default function Admin() {
                   </div>
                 </CardContent>
               </Card>
-              <Card className="bg-primary text-primary-foreground">
-                <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Quick actions</CardTitle></CardHeader>
+              <Card className="border-cyan-500/30 bg-gradient-to-b from-cyan-500/10 to-white">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-semibold text-[#14205a]">
+                    Quick actions
+                  </CardTitle>
+                </CardHeader>
                 <CardContent className="flex flex-col gap-2">
-                  <button onClick={() => setTab("users")} className="border border-white/25 rounded-lg px-3.5 py-2.5 text-sm font-semibold text-left flex justify-between hover:border-[hsl(var(--chart-2))] transition-colors">
+                  <button
+                    onClick={() => setTab("users")}
+                    className="border border-[#14205a]/12 rounded-lg px-3.5 py-2.5 text-sm font-semibold text-left flex justify-between text-[#14205a] hover:border-cyan-500 hover:bg-white transition-colors"
+                  >
                     Review pending users <span>&rarr;</span>
                   </button>
-                  <button onClick={() => setTab("visitors")} className="border border-white/25 rounded-lg px-3.5 py-2.5 text-sm font-semibold text-left flex justify-between hover:border-[hsl(var(--chart-2))] transition-colors">
+                  <button
+                    onClick={() => setTab("visitors")}
+                    className="border border-[#14205a]/12 rounded-lg px-3.5 py-2.5 text-sm font-semibold text-left flex justify-between text-[#14205a] hover:border-cyan-500 hover:bg-white transition-colors"
+                  >
                     View visitor activity <span>&rarr;</span>
                   </button>
-                  <button onClick={() => setTab("audit")} className="border border-white/25 rounded-lg px-3.5 py-2.5 text-sm font-semibold text-left flex justify-between hover:border-[hsl(var(--chart-2))] transition-colors">
+                  <button
+                    onClick={() => setTab("audit")}
+                    className="border border-[#14205a]/12 rounded-lg px-3.5 py-2.5 text-sm font-semibold text-left flex justify-between text-[#14205a] hover:border-cyan-500 hover:bg-white transition-colors"
+                  >
                     View audit log <span>&rarr;</span>
                   </button>
                 </CardContent>
@@ -751,6 +804,12 @@ export default function Admin() {
           </>
         )}
 
+        {tab === "plans" && <AdminPlansPanel />}
+
+        {tab === "revenue" && <AdminRevenuePanel />}
+
+        {tab === "payments" && <AdminPaymentsPanel />}
+
         {tab === "users" && (
           <>
             <div className="flex items-end justify-between gap-4 flex-wrap">
@@ -813,6 +872,7 @@ export default function Admin() {
                         <TableRow>
                           <TableHead>User</TableHead>
                           <TableHead>Role</TableHead>
+                          <TableHead>Plan</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead>Joined</TableHead>
                           <TableHead className="text-right">Actions</TableHead>
@@ -820,7 +880,7 @@ export default function Admin() {
                       </TableHeader>
                       <TableBody>
                         {filteredUsers.length === 0 ? (
-                          <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No users found</TableCell></TableRow>
+                          <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No users found</TableCell></TableRow>
                         ) : (
                           filteredUsers.map((user) => (
                             <TableRow key={user.id} data-testid={`row-user-${user.id}`}>
@@ -837,6 +897,18 @@ export default function Admin() {
                                 </div>
                               </TableCell>
                               <TableCell>{getRoleBadge(user.role)}</TableCell>
+                              <TableCell>
+                                {user.billingPlan ? (
+                                  <div>
+                                    <p className="font-medium text-sm">{user.billingPlan.name}</p>
+                                    <p className="text-xs text-muted-foreground">{user.billingPlan.priceLabel}/mo</p>
+                                  </div>
+                                ) : user.grantedFreeAccess ? (
+                                  <span className="text-sm text-muted-foreground">Free access</span>
+                                ) : (
+                                  <span className="text-sm text-muted-foreground">—</span>
+                                )}
+                              </TableCell>
                               <TableCell>{getStatusBadge(user)}</TableCell>
                               <TableCell className="text-muted-foreground">{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "N/A"}</TableCell>
                               <TableCell className="text-right">

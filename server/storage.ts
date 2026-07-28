@@ -21,6 +21,17 @@ import {
 import { db } from "@db";
 import { eq, desc, and, or, isNull, isNotNull, inArray, gte, ilike, sql as dsql } from "drizzle-orm";
 import { normalizePhone } from "./phone";
+import {
+  bumpAccountMessageCreated,
+  bumpAccountMessageStatusChange,
+  bumpNotificationOnMessageCreate,
+  bumpNotificationOnStatusChange,
+  bumpCampaignMetricsOnCreate,
+  adjustListCounts,
+  adjustTagCounts,
+  bumpAccountContactDelta,
+  bumpAccountTemplateStatus,
+} from "./counters";
 
 export interface IStorage {
   getTemplates(accountId?: string): Promise<Template[]>;
@@ -37,10 +48,27 @@ export interface IStorage {
   deleteCampaign(id: string): Promise<boolean>;
 
   getMessages(accountId?: string): Promise<Message[]>;
+  getMessagesPage(params: {
+    accountId: string;
+    page: number;
+    pageSize: number;
+    status?: string;
+    search?: string;
+  }): Promise<{ messages: Message[]; total: number; statusCounts: Record<string, number> }>;
   getMessageCountsByAccount(): Promise<Array<{ accountId: string | null; total: number; failed: number }>>;
   getMessage(id: string): Promise<Message | undefined>;
   getMessagesByWhatsappId(whatsappId: string): Promise<Message | undefined>;
   getMessagesByCampaign(campaignId: string): Promise<Message[]>;
+  getMessagesByCampaignFiltered(campaignId: string, opts?: { status?: string; limit?: number }): Promise<Message[]>;
+  getMessageStatusCountsByCampaign(campaignId: string): Promise<{ sent: number; failed: number; total: number; delivered: number; read: number; queued: number }>;
+  getMessageStatusCountsByCampaigns(campaignIds: string[]): Promise<Map<string, { sent: number; failed: number; delivered: number; read: number; queued: number; total: number }>>;
+  getAttemptedPhonesByCampaign(campaignId: string): Promise<string[]>;
+  getMessageByCampaignAndPhone(campaignId: string, phone: string): Promise<Message | undefined>;
+  getExistingPhonesForCampaign(campaignId: string, phones: string[]): Promise<Set<string>>;
+  getSubscribedPhoneChunksByLists(accountId: string, listIds: string[], pageSize?: number): AsyncGenerator<string[]>;
+  getMessagingUsed24h(accountId: string): Promise<number>;
+  getActiveAccountWithDetails(userId: string): Promise<{ accountId: string; account: WhatsAppAccount } | undefined>;
+  getTemplateByMetaId(metaTemplateId: string): Promise<Template | undefined>;
   createMessage(message: InsertMessage): Promise<Message>;
   updateMessage(id: string, updates: Partial<Message>): Promise<Message | undefined>;
   deleteMessage(id: string): Promise<boolean>;
@@ -185,20 +213,37 @@ export class DatabaseStorage implements IStorage {
     return rows[0];
   }
 
+  async getTemplateByMetaId(metaTemplateId: string): Promise<Template | undefined> {
+    const rows = await db.select().from(templates).where(eq(templates.metaTemplateId, metaTemplateId)).limit(1);
+    return rows[0];
+  }
+
   async createTemplate(template: InsertTemplate): Promise<Template> {
     const rows = await db.insert(templates).values(template as any).returning();
-    return rows[0];
+    const created = rows[0];
+    void bumpAccountTemplateStatus(created.accountId, null, created.status).catch(() => {});
+    return created;
   }
 
   async updateTemplate(id: string, updates: Partial<Template>): Promise<Template | undefined> {
     const { id: _id, ...rest } = updates as any;
+    const existing = rest.status !== undefined ? await this.getTemplate(id) : undefined;
     const rows = await db.update(templates).set({ ...rest, updatedAt: new Date() }).where(eq(templates.id, id)).returning();
-    return rows[0];
+    const updated = rows[0];
+    if (updated && existing && rest.status !== undefined && existing.status !== rest.status) {
+      void bumpAccountTemplateStatus(updated.accountId, existing.status, rest.status).catch(() => {});
+    }
+    return updated;
   }
 
   async deleteTemplate(id: string): Promise<boolean> {
+    const existing = await this.getTemplate(id);
     const result = await db.delete(templates).where(eq(templates.id, id));
-    return (result.rowCount ?? 0) > 0;
+    const deleted = (result.rowCount ?? 0) > 0;
+    if (deleted && existing) {
+      void bumpAccountTemplateStatus(existing.accountId, existing.status, null).catch(() => {});
+    }
+    return deleted;
   }
 
   // Campaigns
@@ -215,12 +260,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createCampaign(campaign: InsertCampaign): Promise<Campaign> {
-    const rows = await db.insert(campaigns).values(campaign as any).returning();
+    const recipientCount = Array.isArray(campaign.recipients) ? campaign.recipients.length : 0;
+    const rows = await db.insert(campaigns).values({ ...campaign, recipientCount } as any).returning();
     return rows[0];
   }
 
   async updateCampaign(id: string, updates: Partial<Campaign>): Promise<Campaign | undefined> {
     const { id: _id, ...rest } = updates as any;
+    if (Array.isArray(rest.recipients)) {
+      rest.recipientCount = rest.recipients.length;
+    }
     const rows = await db.update(campaigns).set({ ...rest, updatedAt: new Date() }).where(eq(campaigns.id, id)).returning();
     return rows[0];
   }
@@ -231,11 +280,52 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Messages
+  // Prefer getMessagesPage for UI. This unbounded getter remains for rare
+  // admin/backfill paths only — never call it from polled endpoints.
   async getMessages(accountId?: string): Promise<Message[]> {
     if (accountId) {
-      return db.select().from(messages).where(eq(messages.accountId, accountId)).orderBy(desc(messages.queuedAt));
+      return db.select().from(messages).where(eq(messages.accountId, accountId)).orderBy(desc(messages.queuedAt)).limit(5000);
     }
-    return db.select().from(messages).orderBy(desc(messages.queuedAt));
+    return db.select().from(messages).orderBy(desc(messages.queuedAt)).limit(5000);
+  }
+
+  async getMessagesPage(params: {
+    accountId: string;
+    page: number;
+    pageSize: number;
+    status?: string;
+    search?: string;
+  }): Promise<{ messages: Message[]; total: number; statusCounts: Record<string, number> }> {
+    const page = Math.max(1, params.page || 1);
+    const pageSize = Math.min(100, Math.max(1, params.pageSize || 25));
+    const conditions = [eq(messages.accountId, params.accountId)];
+    if (params.status && params.status !== "all") {
+      conditions.push(eq(messages.status, params.status));
+    }
+    if (params.search?.trim()) {
+      const term = `%${params.search.trim()}%`;
+      conditions.push(or(ilike(messages.recipientPhone, term), ilike(messages.whatsappMessageId, term))!);
+    }
+    const where = and(...conditions);
+
+    const [rows, countRow, statusRows] = await Promise.all([
+      db.select().from(messages).where(where).orderBy(desc(messages.queuedAt)).limit(pageSize).offset((page - 1) * pageSize),
+      db.select({ count: dsql<number>`count(*)::int` }).from(messages).where(where),
+      db
+        .select({ status: messages.status, count: dsql<number>`count(*)::int` })
+        .from(messages)
+        .where(eq(messages.accountId, params.accountId))
+        .groupBy(messages.status),
+    ]);
+
+    const statusCounts: Record<string, number> = { all: 0 };
+    for (const row of statusRows) {
+      const n = Number(row.count) || 0;
+      statusCounts[row.status] = n;
+      statusCounts.all += n;
+    }
+
+    return { messages: rows, total: Number(countRow[0]?.count) || 0, statusCounts };
   }
 
   // Aggregated in SQL rather than pulling every message row into the app -
@@ -277,15 +367,209 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(messages).where(eq(messages.campaignId, campaignId));
   }
 
+  async getMessageStatusCountsByCampaign(campaignId: string): Promise<{
+    sent: number;
+    failed: number;
+    total: number;
+    delivered: number;
+    read: number;
+    queued: number;
+  }> {
+    const rows = await db
+      .select({
+        status: messages.status,
+        count: dsql<number>`count(*)::int`,
+      })
+      .from(messages)
+      .where(eq(messages.campaignId, campaignId))
+      .groupBy(messages.status);
+
+    let sent = 0;
+    let failed = 0;
+    let delivered = 0;
+    let read = 0;
+    let queued = 0;
+    let total = 0;
+    for (const row of rows) {
+      const n = Number(row.count) || 0;
+      total += n;
+      if (row.status === "failed") failed += n;
+      else if (row.status === "delivered") delivered += n;
+      else if (row.status === "read") read += n;
+      else if (row.status === "queued") queued += n;
+      else sent += n; // sent + any other non-failed
+    }
+    // "sent" for UI = reached Meta successfully (sent+delivered+read)
+    return {
+      sent: sent + delivered + read,
+      failed,
+      total,
+      delivered: delivered + read,
+      read,
+      queued,
+    };
+  }
+
+  async getMessageStatusCountsByCampaigns(
+    campaignIds: string[],
+  ): Promise<Map<string, { sent: number; failed: number; delivered: number; read: number; queued: number; total: number }>> {
+    const map = new Map<string, { sent: number; failed: number; delivered: number; read: number; queued: number; total: number }>();
+    if (campaignIds.length === 0) return map;
+
+    const rows = await db
+      .select({
+        campaignId: messages.campaignId,
+        status: messages.status,
+        count: dsql<number>`count(*)::int`,
+      })
+      .from(messages)
+      .where(inArray(messages.campaignId, campaignIds))
+      .groupBy(messages.campaignId, messages.status);
+
+    for (const id of campaignIds) {
+      map.set(id, { sent: 0, failed: 0, delivered: 0, read: 0, queued: 0, total: 0 });
+    }
+    for (const row of rows) {
+      if (!row.campaignId) continue;
+      const entry = map.get(row.campaignId) || { sent: 0, failed: 0, delivered: 0, read: 0, queued: 0, total: 0 };
+      const n = Number(row.count) || 0;
+      entry.total += n;
+      if (row.status === "failed") entry.failed += n;
+      else if (row.status === "delivered") entry.delivered += n;
+      else if (row.status === "read") entry.read += n;
+      else if (row.status === "queued") entry.queued += n;
+      else entry.sent += n;
+      map.set(row.campaignId, entry);
+    }
+    for (const [id, entry] of Array.from(map.entries())) {
+      entry.sent = entry.sent + entry.delivered + entry.read;
+      entry.delivered = entry.delivered + entry.read;
+      map.set(id, entry);
+    }
+    return map;
+  }
+
+  async getMessagesByCampaignFiltered(
+    campaignId: string,
+    opts?: { status?: string; limit?: number },
+  ): Promise<Message[]> {
+    const conditions = [eq(messages.campaignId, campaignId)];
+    if (opts?.status) conditions.push(eq(messages.status, opts.status));
+    let q = db.select().from(messages).where(and(...conditions)).orderBy(desc(messages.queuedAt));
+    if (opts?.limit) {
+      return q.limit(opts.limit);
+    }
+    return q.limit(5000);
+  }
+
+  async getAttemptedPhonesByCampaign(campaignId: string): Promise<string[]> {
+    const rows = await db
+      .selectDistinct({ phone: messages.recipientPhone })
+      .from(messages)
+      .where(eq(messages.campaignId, campaignId));
+    return rows.map((r) => r.phone);
+  }
+
+  async getMessageByCampaignAndPhone(campaignId: string, phone: string): Promise<Message | undefined> {
+    const rows = await db
+      .select()
+      .from(messages)
+      .where(and(eq(messages.campaignId, campaignId), eq(messages.recipientPhone, phone)))
+      .limit(1);
+    return rows[0];
+  }
+
+  async getExistingPhonesForCampaign(campaignId: string, phones: string[]): Promise<Set<string>> {
+    if (phones.length === 0) return new Set();
+    const rows = await db
+      .select({ phone: messages.recipientPhone })
+      .from(messages)
+      .where(and(eq(messages.campaignId, campaignId), inArray(messages.recipientPhone, phones)));
+    return new Set(rows.map((r) => r.phone));
+  }
+
+  /**
+   * Stream subscribed contact phones that belong to any of the given lists,
+   * page by page — never load the full contact table into memory.
+   */
+  async *getSubscribedPhoneChunksByLists(
+    accountId: string,
+    listIds: string[],
+    pageSize = 500,
+  ): AsyncGenerator<string[]> {
+    if (listIds.length === 0) return;
+
+    let offset = 0;
+    for (;;) {
+      const rows = await db
+        .select({ phone: contacts.phone })
+        .from(contacts)
+        .where(
+          and(
+            eq(contacts.accountId, accountId),
+            eq(contacts.status, "subscribed"),
+            or(
+              ...listIds.map(
+                (lid) => dsql`${contacts.listIds} @> ${JSON.stringify([lid])}::jsonb`,
+              ),
+            ),
+          ),
+        )
+        .orderBy(contacts.id)
+        .limit(pageSize)
+        .offset(offset);
+
+      if (rows.length === 0) break;
+
+      const phones = rows
+        .map((r) => normalizePhone(r.phone))
+        .filter((p): p is string => Boolean(p));
+      if (phones.length > 0) yield phones;
+
+      offset += rows.length;
+      if (rows.length < pageSize) break;
+    }
+  }
+
+  async getMessagingUsed24h(accountId: string): Promise<number> {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [{ count }] = await db
+      .select({ count: dsql<number>`count(*)::int` })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.accountId, accountId),
+          gte(messages.sentAt, since),
+          dsql`${messages.status} != 'failed'`,
+        ),
+      );
+    return Number(count) || 0;
+  }
+
   async createMessage(message: InsertMessage): Promise<Message> {
     const rows = await db.insert(messages).values(message).returning();
-    return rows[0];
+    const created = rows[0];
+    // Fire-and-forget counters — never fail the send path if rollups lag.
+    void Promise.all([
+      bumpAccountMessageCreated(created.accountId, created.status),
+      bumpNotificationOnMessageCreate(created.campaignId, created.status),
+      bumpCampaignMetricsOnCreate(created.campaignId, created.accountId, created.status),
+    ]).catch((err) => console.error("[counters] createMessage bump failed:", err.message));
+    return created;
   }
 
   async updateMessage(id: string, updates: Partial<Message>): Promise<Message | undefined> {
     const { id: _id, ...rest } = updates as any;
+    const existing = rest.status ? await this.getMessage(id) : undefined;
     const rows = await db.update(messages).set(rest).where(eq(messages.id, id)).returning();
-    return rows[0];
+    const updated = rows[0];
+    if (updated && existing && rest.status && existing.status !== rest.status) {
+      void Promise.all([
+        bumpAccountMessageStatusChange(updated.accountId, existing.status, rest.status),
+        bumpNotificationOnStatusChange(updated.campaignId, existing.status, rest.status),
+      ]).catch((err) => console.error("[counters] updateMessage bump failed:", err.message));
+    }
+    return updated;
   }
 
   async deleteMessage(id: string): Promise<boolean> {
@@ -311,39 +595,73 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Dashboard
-  // This used to fetch every message/template/campaign row for the account
-  // just to count them - the dashboard is polled every ~8s by the client's
-  // real-time sync, so on an account with tens of thousands of messages that
-  // repeatedly pulled the entire table across the wire from Neon for no
-  // reason. Aggregating with COUNT/SUM/GROUP BY in SQL instead means only a
-  // handful of summary rows ever leave the database.
+  // Prefer denormalized rollups on whatsapp_accounts (O(1) by id). Fall back
+  // to SQL GROUP BY only when rollups are still zero but messages exist
+  // (pre-backfill accounts).
   async getDashboardMetrics(accountId?: string): Promise<DashboardMetrics> {
-    const messageStatusCounts = accountId
-      ? await db.select({ status: messages.status, count: dsql<number>`count(*)`, costSum: dsql<string>`coalesce(sum(${messages.cost}), 0)` })
-          .from(messages).where(eq(messages.accountId, accountId)).groupBy(messages.status)
-      : await db.select({ status: messages.status, count: dsql<number>`count(*)`, costSum: dsql<string>`coalesce(sum(${messages.cost}), 0)` })
-          .from(messages).groupBy(messages.status);
-
-    const templateStatusCounts = accountId
-      ? await db.select({ status: templates.status, count: dsql<number>`count(*)` }).from(templates).where(eq(templates.accountId, accountId)).groupBy(templates.status)
-      : await db.select({ status: templates.status, count: dsql<number>`count(*)` }).from(templates).groupBy(templates.status);
-
-    const campaignStatusCounts = accountId
-      ? await db.select({ status: campaigns.status, count: dsql<number>`count(*)` }).from(campaigns).where(eq(campaigns.accountId, accountId)).groupBy(campaigns.status)
-      : await db.select({ status: campaigns.status, count: dsql<number>`count(*)` }).from(campaigns).groupBy(campaigns.status);
-
     const allAccounts = accountId
       ? await db.select().from(whatsappAccounts).where(eq(whatsappAccounts.id, accountId))
       : await db.select().from(whatsappAccounts);
 
-    const countFor = (rows: { status: string | null; count: number }[], status: string) =>
-      Number(rows.find(r => r.status === status)?.count || 0);
-    const totalMessageRows = messageStatusCounts.reduce((sum, r) => sum + Number(r.count), 0);
-    const localSent = countFor(messageStatusCounts, "sent") + countFor(messageStatusCounts, "delivered") + countFor(messageStatusCounts, "read");
-    const localDelivered = countFor(messageStatusCounts, "delivered") + countFor(messageStatusCounts, "read");
-    const readCount = countFor(messageStatusCounts, "read");
-    const failedCount = countFor(messageStatusCounts, "failed");
-    const localCost = messageStatusCounts.reduce((sum, r) => sum + parseFloat(r.costSum || "0"), 0);
+    const account = allAccounts[0];
+    const hasRollups = account && (
+      (account.messageTotalCount || 0) > 0 ||
+      (account.messageFailedCount || 0) > 0 ||
+      (account.templateApprovedCount || 0) > 0
+    );
+
+    let totalMessageRows = 0;
+    let localSent = 0;
+    let localDelivered = 0;
+    let readCount = 0;
+    let failedCount = 0;
+    let approvedTemplates = 0;
+    let pendingTemplates = 0;
+    let activeCampaigns = 0;
+    let localCost = 0;
+
+    if (hasRollups && accountId && account) {
+      totalMessageRows = account.messageTotalCount || 0;
+      // Dashboard "sent" historically = sent+delivered+read
+      localSent = (account.messageSentCount || 0) + (account.messageDeliveredCount || 0) + (account.messageReadCount || 0);
+      localDelivered = (account.messageDeliveredCount || 0) + (account.messageReadCount || 0);
+      readCount = account.messageReadCount || 0;
+      failedCount = account.messageFailedCount || 0;
+      approvedTemplates = account.templateApprovedCount || 0;
+      pendingTemplates = account.templatePendingCount || 0;
+
+      const [campaignStatusCounts] = await Promise.all([
+        db.select({ status: campaigns.status, count: dsql<number>`count(*)` })
+          .from(campaigns).where(eq(campaigns.accountId, accountId)).groupBy(campaigns.status),
+      ]);
+      activeCampaigns = Number(campaignStatusCounts.find(r => r.status === "running")?.count || 0);
+    } else {
+      const [messageStatusCounts, templateStatusCounts, campaignStatusCounts] = await Promise.all([
+        accountId
+          ? db.select({ status: messages.status, count: dsql<number>`count(*)`, costSum: dsql<string>`coalesce(sum(${messages.cost}), 0)` })
+              .from(messages).where(eq(messages.accountId, accountId)).groupBy(messages.status)
+          : db.select({ status: messages.status, count: dsql<number>`count(*)`, costSum: dsql<string>`coalesce(sum(${messages.cost}), 0)` })
+              .from(messages).groupBy(messages.status),
+        accountId
+          ? db.select({ status: templates.status, count: dsql<number>`count(*)` }).from(templates).where(eq(templates.accountId, accountId)).groupBy(templates.status)
+          : db.select({ status: templates.status, count: dsql<number>`count(*)` }).from(templates).groupBy(templates.status),
+        accountId
+          ? db.select({ status: campaigns.status, count: dsql<number>`count(*)` }).from(campaigns).where(eq(campaigns.accountId, accountId)).groupBy(campaigns.status)
+          : db.select({ status: campaigns.status, count: dsql<number>`count(*)` }).from(campaigns).groupBy(campaigns.status),
+      ]);
+
+      const countFor = (rows: { status: string | null; count: number }[], status: string) =>
+        Number(rows.find(r => r.status === status)?.count || 0);
+      totalMessageRows = messageStatusCounts.reduce((sum, r) => sum + Number(r.count), 0);
+      localSent = countFor(messageStatusCounts, "sent") + countFor(messageStatusCounts, "delivered") + countFor(messageStatusCounts, "read");
+      localDelivered = countFor(messageStatusCounts, "delivered") + countFor(messageStatusCounts, "read");
+      readCount = countFor(messageStatusCounts, "read");
+      failedCount = countFor(messageStatusCounts, "failed");
+      localCost = messageStatusCounts.reduce((sum, r) => sum + parseFloat(r.costSum || "0"), 0);
+      approvedTemplates = countFor(templateStatusCounts, "APPROVED");
+      pendingTemplates = countFor(templateStatusCounts, "PENDING");
+      activeCampaigns = countFor(campaignStatusCounts, "running");
+    }
 
     const metaSent = allAccounts.reduce((sum, a) => sum + (a.metaSentCount || 0), 0);
     const metaDelivered = allAccounts.reduce((sum, a) => sum + (a.metaDeliveredCount || 0), 0);
@@ -352,9 +670,7 @@ export class DatabaseStorage implements IStorage {
     const sentCount = Math.max(localSent, metaSent);
     const deliveredCount = Math.max(localDelivered, metaDelivered);
     const totalCost = Math.max(localCost, metaCost);
-
     const totalMessagingLimit = allAccounts.reduce((sum, a) => sum + (a.messagingLimit || 0), 0);
-
     const lastSync = allAccounts[0]?.lastSyncedAt;
 
     return {
@@ -366,9 +682,9 @@ export class DatabaseStorage implements IStorage {
       deliveryRate: sentCount > 0 ? (deliveredCount / sentCount) * 100 : 0,
       readRate: deliveredCount > 0 ? (readCount / deliveredCount) * 100 : 0,
       totalCost,
-      activeCampaigns: countFor(campaignStatusCounts, "running"),
-      approvedTemplates: countFor(templateStatusCounts, "APPROVED"),
-      pendingTemplates: countFor(templateStatusCounts, "PENDING"),
+      activeCampaigns,
+      approvedTemplates,
+      pendingTemplates,
       messagingLimit: totalMessagingLimit,
       messagingUsed: Math.max(totalMessageRows, sentCount),
       throughputLevel: allAccounts[0]?.throughputLevel || null,
@@ -764,6 +1080,29 @@ export class DatabaseStorage implements IStorage {
     return undefined;
   }
 
+  /** Single round-trip for the common authz path (active map + account row). */
+  async getActiveAccountWithDetails(userId: string): Promise<{ accountId: string; account: WhatsAppAccount } | undefined> {
+    const joined = await db
+      .select({
+        accountId: activeAccounts.accountId,
+        account: whatsappAccounts,
+      })
+      .from(activeAccounts)
+      .innerJoin(whatsappAccounts, eq(whatsappAccounts.id, activeAccounts.accountId))
+      .where(eq(activeAccounts.userId, userId))
+      .limit(1);
+
+    if (joined[0]?.account) {
+      return { accountId: joined[0].accountId, account: joined[0].account };
+    }
+
+    const accountId = await this.getActiveAccountId(userId);
+    if (!accountId) return undefined;
+    const account = await this.getAccount(accountId);
+    if (!account) return undefined;
+    return { accountId, account };
+  }
+
   // Contacts
   async getContacts(accountId: string): Promise<Contact[]> {
     return db.select().from(contacts).where(eq(contacts.accountId, accountId)).orderBy(desc(contacts.createdAt));
@@ -803,22 +1142,61 @@ export class DatabaseStorage implements IStorage {
   async createContact(contact: InsertContact): Promise<Contact> {
     const normalized = contact.phone ? { ...contact, phone: normalizePhone(contact.phone) } : contact;
     const rows = await db.insert(contacts).values(normalized as any).returning();
-    return rows[0];
+    const created = rows[0];
+    const listIds = (created.listIds as string[]) || [];
+    const tagIds = (created.tagIds as string[]) || [];
+    void Promise.all([
+      bumpAccountContactDelta(created.accountId, 1),
+      adjustListCounts(listIds, []),
+      adjustTagCounts(tagIds, []),
+    ]).catch((err) => console.error("[counters] createContact:", err.message));
+    return created;
   }
 
   async updateContact(id: string, updates: Partial<Contact>): Promise<Contact | undefined> {
     const { id: _id, ...rest } = updates as any;
     if (rest.phone) rest.phone = normalizePhone(rest.phone);
+    const before = (rest.listIds !== undefined || rest.tagIds !== undefined)
+      ? await this.getContact(id)
+      : undefined;
     const rows = await db.update(contacts).set({ ...rest, updatedAt: new Date() }).where(eq(contacts.id, id)).returning();
-    return rows[0];
+    const updated = rows[0];
+    if (updated && before) {
+      const oldLists = new Set((before.listIds as string[]) || []);
+      const newLists = new Set((updated.listIds as string[]) || []);
+      const oldTags = new Set((before.tagIds as string[]) || []);
+      const newTags = new Set((updated.tagIds as string[]) || []);
+      const listInc = Array.from(newLists).filter((x) => !oldLists.has(x));
+      const listDec = Array.from(oldLists).filter((x) => !newLists.has(x));
+      const tagInc = Array.from(newTags).filter((x) => !oldTags.has(x));
+      const tagDec = Array.from(oldTags).filter((x) => !newTags.has(x));
+      void Promise.all([
+        adjustListCounts(listInc, listDec),
+        adjustTagCounts(tagInc, tagDec),
+      ]).catch((err) => console.error("[counters] updateContact:", err.message));
+    }
+    return updated;
   }
 
   async deleteContact(id: string): Promise<boolean> {
-    const [contact] = await db.select({ phone: contacts.phone, accountId: contacts.accountId }).from(contacts).where(eq(contacts.id, id));
+    const [contact] = await db
+      .select({
+        phone: contacts.phone,
+        accountId: contacts.accountId,
+        listIds: contacts.listIds,
+        tagIds: contacts.tagIds,
+      })
+      .from(contacts)
+      .where(eq(contacts.id, id));
     const result = await db.delete(contacts).where(eq(contacts.id, id));
     const deleted = (result.rowCount ?? 0) > 0;
     if (deleted && contact) {
       await this.deleteMessagesForPhones(contact.accountId, [contact.phone]);
+      void Promise.all([
+        bumpAccountContactDelta(contact.accountId, -1),
+        adjustListCounts([], (contact.listIds as string[]) || []),
+        adjustTagCounts([], (contact.tagIds as string[]) || []),
+      ]).catch((err) => console.error("[counters] deleteContact:", err.message));
     }
     return deleted;
   }
@@ -920,39 +1298,19 @@ export class DatabaseStorage implements IStorage {
       updated += chunk.length;
     }
 
-    // contactCount is computed live from the contacts table in getLists() -
-    // no need to maintain a separate counter here (that's what drifted out
-    // of sync before).
+    // Counters are maintained on create/update/delete/import via server/counters.ts.
+    // After deploy, run backfillAccountCounters once if counts look stale.
     return { imported, updated };
   }
 
-  // Contact Lists
+  // Contact Lists — trust denormalized contact_count (indexed account lookup only).
   async getLists(accountId: string): Promise<ContactList[]> {
-    const lists = await db.select().from(contactLists).where(eq(contactLists.accountId, accountId)).orderBy(desc(contactLists.createdAt));
-
-    // contactCount used to be a manually-incremented counter that only ever
-    // went up (on import) and never down (on delete/edit), so it drifted
-    // from reality. Compute the real count live from the contacts table
-    // instead of trusting the stored column.
-    const countRows = await db.execute<{ list_id: string; count: number }>(dsql`
-      select list_id, count(*)::int as count
-      from contacts, jsonb_array_elements_text(list_ids) as list_id
-      where account_id = ${accountId}
-      group by list_id
-    `);
-    const countsByListId = new Map(countRows.rows.map((r: any) => [r.list_id, Number(r.count)]));
-
-    return lists.map((l) => ({ ...l, contactCount: countsByListId.get(l.id) || 0 }));
+    return db.select().from(contactLists).where(eq(contactLists.accountId, accountId)).orderBy(desc(contactLists.createdAt));
   }
 
   async getList(id: string): Promise<ContactList | undefined> {
     const rows = await db.select().from(contactLists).where(eq(contactLists.id, id));
-    if (!rows[0]) return undefined;
-
-    const countResult = await db.execute<{ count: number }>(dsql`
-      select count(*)::int as count from contacts where list_ids @> ${JSON.stringify([id])}::jsonb
-    `);
-    return { ...rows[0], contactCount: Number(countResult.rows[0]?.count || 0) };
+    return rows[0];
   }
 
   async createList(list: InsertContactList): Promise<ContactList> {
@@ -979,19 +1337,9 @@ export class DatabaseStorage implements IStorage {
     return this.getLists(accountId);
   }
 
-  // Contact Tags
+  // Contact Tags — trust denormalized contact_count.
   async getTags(accountId: string): Promise<ContactTag[]> {
-    const tags = await db.select().from(contactTags).where(eq(contactTags.accountId, accountId)).orderBy(desc(contactTags.createdAt));
-
-    const countRows = await db.execute<{ tag_id: string; count: number }>(dsql`
-      select tag_id, count(*)::int as count
-      from contacts, jsonb_array_elements_text(tag_ids) as tag_id
-      where account_id = ${accountId}
-      group by tag_id
-    `);
-    const countsByTagId = new Map(countRows.rows.map((r: any) => [r.tag_id, Number(r.count)]));
-
-    return tags.map((t) => ({ ...t, contactCount: countsByTagId.get(t.id) || 0 }));
+    return db.select().from(contactTags).where(eq(contactTags.accountId, accountId)).orderBy(desc(contactTags.createdAt));
   }
 
   async getTag(id: string): Promise<ContactTag | undefined> {
@@ -1199,10 +1547,8 @@ export class DatabaseStorage implements IStorage {
   async backfillMessageCampaignIds(): Promise<void> {
     const orphanedMessages = await db.select().from(messages).where(isNull(messages.campaignId));
     if (orphanedMessages.length === 0) {
-      console.log("[Backfill] No orphaned messages found");
       return;
     }
-    console.log(`[Backfill] Found ${orphanedMessages.length} messages without campaign_id, attempting to link...`);
 
     const allNotifications = await db.select().from(notifications);
     let linked = 0;
@@ -1237,7 +1583,6 @@ export class DatabaseStorage implements IStorage {
         linked++;
       }
     }
-    console.log(`[Backfill] Linked ${linked} of ${orphanedMessages.length} orphaned messages to notifications`);
   }
 }
 

@@ -24,7 +24,7 @@ export default function DeleteData() {
         </div>
       </nav>
 
-      <main className="container mx-auto max-w-3xl px-4 py-12">
+      <main className="container mx-auto px-4 py-12">
         <h1 className="text-4xl font-bold mb-4">User Data Deletion</h1>
         <p className="text-muted-foreground mb-8">
           Information about how to request deletion of your personal data.

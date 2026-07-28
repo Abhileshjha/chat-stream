@@ -18,7 +18,13 @@ import {
 import { Send, Clock, Users, MessageSquare, Zap, AlertCircle, Check, Upload, X, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Template, ContactList, Notification } from "@shared/schema";
+import type { Template, ContactList, Notification, WhatsAppAccount } from "@shared/schema";
+
+function isConnectedAccount(account: WhatsAppAccount): boolean {
+  const status = (account.status || "").toLowerCase();
+  if (status && status !== "connected") return false;
+  return !!(account.accessToken && account.phoneNumberId);
+}
 
 export default function NotificationEditor() {
   const [, navigate] = useLocation();
@@ -36,6 +42,23 @@ export default function NotificationEditor() {
   const [isUploading, setIsUploading] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { data: accountsData } = useQuery<{ accounts: WhatsAppAccount[] }>({
+    queryKey: ["/api/accounts"],
+  });
+  const hasConnectedMeta = (accountsData?.accounts ?? []).some(isConnectedAccount);
+
+  useEffect(() => {
+    if (isEdit) return;
+    if (accountsData && !hasConnectedMeta) {
+      toast({
+        title: "Connect WhatsApp first",
+        description: "Connect a WhatsApp Business number (Meta API) before creating notifications.",
+        variant: "destructive",
+      });
+      navigate("/notifications");
+    }
+  }, [accountsData, hasConnectedMeta, isEdit, navigate, toast]);
 
   const { data: templates = [] } = useQuery<Template[]>({
     queryKey: ["/api/templates"],
@@ -156,10 +179,12 @@ export default function NotificationEditor() {
       queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
       navigate("/notifications");
     },
-    onError: () => {
+    onError: (error: any) => {
       toast({
         title: "Error",
-        description: "Failed to save notification. Please try again.",
+        description:
+          error?.message?.replace(/^\d+:\s*/, "") ||
+          "Failed to save notification. Please try again.",
         variant: "destructive",
       });
     },

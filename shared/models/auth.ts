@@ -37,8 +37,14 @@ export const users = pgTable("users", {
   trialEndsAt: timestamp("trial_ends_at"),
   razorpayCustomerId: varchar("razorpay_customer_id"),
   razorpaySubscriptionId: varchar("razorpay_subscription_id"),
+  /** Active paid plan id from billing_plans (set on checkout / webhook). */
+  billingPlanId: varchar("billing_plan_id"),
+  /** When the current paid billing period ends (from Razorpay current_end or +1 month). */
+  subscriptionEndsAt: timestamp("subscription_ends_at"),
   emailVerified: boolean("email_verified").notNull().default(false),
   emailVerificationToken: varchar("email_verification_token"),
+  // Only one browser/device session per user — updated on each login.
+  activeSessionId: varchar("active_session_id"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

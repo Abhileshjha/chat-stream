@@ -78,6 +78,7 @@ import type { WhatsAppAccount, Conversation } from "@shared/schema";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { FaWhatsapp } from "react-icons/fa";
 
 interface AppSidebarProps {
   pendingTemplates?: number;
@@ -88,7 +89,7 @@ interface AppSidebarProps {
 const navigationItems = [
   {
     title: "Dashboard",
-    url: "/",
+    url: "/dashboard",
     icon: LayoutDashboard,
   },
   {
@@ -161,7 +162,7 @@ export function AppSidebar({
     name: "",
   });
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, logout, isLoggingOut } = useAuth();
   
   const isSuperAdmin = user?.role === "super_admin";
 
@@ -305,7 +306,6 @@ export function AppSidebar({
       // Note: business_management scope is required to access /me/businesses endpoint
       window.FB.login(
         (response: any) => {
-          console.log("Embedded signup response:", response);
           
           if (response.authResponse) {
             // Successfully authenticated - send to backend
@@ -341,20 +341,20 @@ export function AppSidebar({
   };
 
   return (
-    <Sidebar>
-      <SidebarHeader className="border-b border-sidebar-border px-4 py-4">
+    <Sidebar variant="floating">
+      <SidebarHeader className="border-b border-sidebar-border/80 px-4 py-4 bg-gradient-to-b from-white to-[rgba(220,248,198,0.42)]">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex w-full items-center gap-3 rounded-lg p-2 hover-elevate text-left" data-testid="button-account-switcher">
+            <button className="flex w-full items-center gap-3 rounded-2xl border border-white/70 bg-white/80 p-2.5 hover-elevate text-left shadow-sm" data-testid="button-account-switcher">
               <div className="relative h-9 w-9 shrink-0">
-                <div className="absolute inset-0 translate-x-[3px] translate-y-[3px] rounded-lg bg-[hsl(var(--sidebar-primary))]" />
-                <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-primary font-heading text-lg font-bold text-primary-foreground">
-                  c
+                <div className="absolute inset-0 translate-x-[3px] translate-y-[3px] rounded-full bg-[hsl(var(--sidebar-primary))]" />
+                <div className="absolute inset-0 flex items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+                  <FaWhatsapp className="h-4.5 w-4.5" />
                 </div>
               </div>
               <div className="flex flex-1 flex-col min-w-0">
                 <span className="text-sm font-semibold truncate">{activeAccount?.name || "Convora"}</span>
-                <span className="text-xs text-muted-foreground truncate">{activeAccount?.phoneNumber || "No account"}</span>
+                <span className="text-xs text-muted-foreground truncate">{activeAccount?.phoneNumber || "Choose a WhatsApp number"}</span>
               </div>
               <ChevronDown className="h-4 w-4 text-muted-foreground" />
             </button>
@@ -510,7 +510,7 @@ export function AppSidebar({
         </DropdownMenu>
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent className="bg-[linear-gradient(180deg,rgba(255,255,255,0.74),rgba(247,251,248,0.94))]">
         <SidebarGroup>
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
@@ -681,12 +681,16 @@ export function AppSidebar({
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-sidebar-border p-4 space-y-3">
-        <div className="flex items-center gap-2 text-xs">
+      <SidebarFooter className="border-t border-sidebar-border/80 p-3 space-y-2.5 bg-gradient-to-t from-[rgba(220,248,198,0.35)] to-white/80">
+        <div className="flex items-center gap-2 rounded-xl border border-white/80 bg-white/90 px-3 py-2 text-xs shadow-sm">
           {apiStatus === "connected" ? (
             <>
-              <Wifi className="h-3.5 w-3.5 text-green-500" />
-              <span className="text-muted-foreground">Meta API Connected</span>
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#25D366] opacity-60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-[#25D366]" />
+              </span>
+              <Wifi className="h-3.5 w-3.5 text-[#25D366]" />
+              <span className="text-[#075E54]/70 font-medium">Meta API Connected</span>
             </>
           ) : apiStatus === "error" ? (
             <>
@@ -701,21 +705,38 @@ export function AppSidebar({
           )}
         </div>
         {user && (
-          <div className="flex items-center justify-between">
-            <div className="text-xs text-muted-foreground truncate flex-1">
-              {user.email || user.firstName || "User"}
+          <div className="rounded-2xl border border-white/80 bg-white/90 p-3 shadow-[0_12px_32px_-16px_rgba(7,94,84,0.2)]">
+            <div className="flex items-center gap-3">
+              <div className="relative shrink-0">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#25D366] to-[#128C7E] text-sm font-bold text-white shadow-md shadow-[#25D366]/25">
+                  {(user.firstName?.[0] || user.email?.[0] || "U").toUpperCase()}
+                </div>
+                <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white bg-[#25D366]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#25D366]">
+                  Workspace User
+                </div>
+                <div className="text-sm font-medium text-[#075E54] truncate leading-tight mt-0.5">
+                  {user.firstName
+                    ? `${user.firstName}${user.lastName ? ` ${user.lastName}` : ""}`
+                    : user.email || "User"}
+                </div>
+                {user.firstName && user.email && (
+                  <div className="text-[11px] text-muted-foreground truncate">{user.email}</div>
+                )}
+              </div>
             </div>
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
-              asChild
-              className="h-7 px-2"
+              className="mt-3 w-full h-9 rounded-xl border-[#075E54]/12 bg-[#F7FBF8] text-[#075E54] hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors gap-2 font-medium"
               data-testid="button-logout"
+              disabled={isLoggingOut}
+              onClick={() => logout()}
             >
-              <a href="/api/logout">
-                <LogOut className="h-3.5 w-3.5 mr-1" />
-                Logout
-              </a>
+              <LogOut className="h-3.5 w-3.5" />
+              {isLoggingOut ? "Signing out…" : "Sign out"}
             </Button>
           </div>
         )}

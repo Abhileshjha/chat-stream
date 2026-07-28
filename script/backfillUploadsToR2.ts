@@ -71,7 +71,6 @@ async function runCopyPhase(dryRun: boolean): Promise<void> {
       const label = `${row.id} (${row.originalName || row.mimeType}, ${row.size} bytes)`;
 
       if (dryRun) {
-        console.log(`[backfill] [dry-run] would upload ${label} -> ${key}`);
         migrated++;
         continue;
       }
@@ -84,10 +83,8 @@ async function runCopyPhase(dryRun: boolean): Promise<void> {
         if (!landed) throw new Error("object not found in R2 immediately after upload");
 
         await storage.setUploadedFileStorageKey(row.id, key);
-        console.log(`[backfill] migrated ${label} -> ${key}`);
         migrated++;
       } catch (err: any) {
-        console.error(`[backfill] FAILED to migrate ${row.id}:`, err.message);
         failed++;
       }
     }
@@ -95,7 +92,6 @@ async function runCopyPhase(dryRun: boolean): Promise<void> {
     await sleep(BATCH_DELAY_MS);
   }
 
-  console.log(`\n[backfill] Copy phase done. Migrated: ${migrated}, skipped: ${skipped}, failed: ${failed}.`);
   if (failed > 0) {
     console.log("[backfill] Re-run the same command to retry failed rows - progress is resumable.");
   }
@@ -115,7 +111,6 @@ async function runClearPhase(dryRun: boolean): Promise<void> {
         console.log(`[backfill] [dry-run] would clear legacy data for ${row.id}`);
       } else {
         await storage.clearUploadedFileData(row.id);
-        console.log(`[backfill] cleared legacy data for ${row.id}`);
       }
       cleared++;
     }
@@ -123,12 +118,10 @@ async function runClearPhase(dryRun: boolean): Promise<void> {
     await sleep(BATCH_DELAY_MS);
   }
 
-  console.log(`\n[backfill] Clear phase done. Cleared: ${cleared} row(s).`);
 }
 
 async function main() {
   const { dryRun, phase } = parseArgs();
-  console.log(`[backfill] Starting ${phase} phase${dryRun ? " (dry run - no writes)" : ""}...\n`);
 
   if (phase === "copy") {
     await runCopyPhase(dryRun);

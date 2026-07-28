@@ -1,4 +1,5 @@
 import { Link } from "wouter";
+import { lazy, Suspense } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import {
@@ -8,11 +9,9 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import {
-  MessageSquare,
   Users,
   BarChart3,
   Shield,
-  Zap,
   Check,
   ArrowRight,
   Phone,
@@ -20,18 +19,51 @@ import {
   Send,
   FileText,
   RefreshCw,
+  Lock,
+  BadgeCheck,
+  Headphones,
+  Star,
+  Eye,
+  Server,
+  Clock,
 } from "lucide-react";
+import { FaWhatsapp } from "react-icons/fa";
+import { AnimatedSection } from "@/components/section-backdrop";
+import { TrustBadgeBanner } from "@/components/trust-badges";
+import { MARKETING_NAV, HELP_NUMBER } from "@/lib/marketing-content";
+import { MarketingHeader } from "@/components/marketing-layout";
+import { toMarketingPlanCards, usePublicPlans } from "@/hooks/use-public-plans";
+import { Skeleton } from "@/components/ui/skeleton";
 
-const APP_URL = "https://app.convora.tech";
-const HELP_NUMBER = "8766350093";
+const ScrollScene = lazy(() =>
+  import("@/components/scroll-scene").then((m) => ({ default: m.ScrollScene })),
+);
 
-function FadeIn({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
+const WA = {
+  green: "#25D366",
+  teal: "#128C7E",
+  dark: "#075E54",
+  light: "#DCF8C6",
+  chat: "#ECE5DD",
+  mist: "#F7FBF8",
+};
+
+function FadeIn({
+  children,
+  delay = 0,
+  className = "",
+}: {
+  children: React.ReactNode;
+  delay?: number;
+  className?: string;
+}) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 24 }}
+      className={className}
+      initial={{ opacity: 0, y: 28 }}
       whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, margin: "-80px" }}
-      transition={{ duration: 0.6, delay, ease: "easeOut" }}
+      viewport={{ once: true, margin: "-60px" }}
+      transition={{ duration: 0.55, delay, ease: [0.22, 1, 0.36, 1] }}
     >
       {children}
     </motion.div>
@@ -122,56 +154,6 @@ const useCases = [
   },
 ];
 
-const plans = [
-  {
-    name: "Starter",
-    tagline: "For small teams getting started",
-    price: "₹1,999",
-    featured: false,
-    features: [
-      "1 WhatsApp number",
-      "2,500 contacts",
-      "10 message templates",
-      "Broadcast campaigns",
-      "Basic analytics",
-      "Email support",
-    ],
-    cta: "Start free trial",
-  },
-  {
-    name: "Growth",
-    tagline: "For growing sales & marketing teams",
-    price: "₹4,999",
-    featured: true,
-    features: [
-      "1 WhatsApp number",
-      "25,000 contacts",
-      "Unlimited templates",
-      "Shared team inbox (5 seats)",
-      "Campaign scheduling & segments",
-      "Real-time delivery analytics",
-      "Priority WhatsApp support",
-    ],
-    cta: "Start free trial",
-  },
-  {
-    name: "Scale",
-    tagline: "For agencies & high-volume senders",
-    price: "₹9,999",
-    featured: false,
-    features: [
-      "Multiple WhatsApp numbers",
-      "Unlimited contacts",
-      "Unlimited templates & campaigns",
-      "Team inbox (unlimited seats)",
-      "Multi-client workspaces",
-      "API access & webhooks",
-      "Dedicated account manager",
-    ],
-    cta: "Talk to sales",
-  },
-];
-
 const faqs = [
   {
     q: "Is this the official WhatsApp Business API?",
@@ -199,172 +181,206 @@ const faqs = [
   },
 ];
 
-export default function Landing() {
+const trustPillars = [
+  {
+    icon: BadgeCheck,
+    title: "Official Meta WhatsApp API",
+    desc: "No grey-market gateways. Your messages go through Meta’s Cloud API with a verified business profile.",
+  },
+  {
+    icon: Lock,
+    title: "Your data stays yours",
+    desc: "Contacts and conversations belong to your workspace. We don’t sell audience data or resell your leads.",
+  },
+  {
+    icon: Eye,
+    title: "Full delivery transparency",
+    desc: "See sent, delivered, read and failed in real time — so you always know what customers actually received.",
+  },
+  {
+    icon: Server,
+    title: "Built for reliability",
+    desc: "Queue-backed sending, Meta rate-limit awareness, and campaign reports you can share with stakeholders.",
+  },
+];
+
+const testimonials = [
+  {
+    quote:
+      "We moved off spreadsheet broadcasts in a week. Delivery reports finally made WhatsApp feel like a real channel — not a gamble.",
+    name: "Ananya R.",
+    role: "Growth lead, D2C brand",
+  },
+  {
+    quote:
+      "Template approvals and the shared inbox alone paid for the plan. Our brokers actually reply from one place now.",
+    name: "Vikram S.",
+    role: "Sales ops, real estate",
+  },
+  {
+    quote:
+      "Clients ask for WhatsApp delivery proofs. Convora gives us clean campaign reports without custom tooling.",
+    name: "Neha M.",
+    role: "Agency founder",
+  },
+];
+
+const guarantees = [
+  {
+    icon: Shield,
+    title: "No unofficial tools",
+    desc: "We never use banned multi-device or scraped WhatsApp clients. Ban risk stays with unofficial tools — not us.",
+  },
+  {
+    icon: Clock,
+    title: "Try before you pay",
+    desc: "Free trial on every plan. Connect your number, send real campaigns, then decide.",
+  },
+  {
+    icon: Headphones,
+    title: "Humans when you need them",
+    desc: "WhatsApp and call support for setup, template fixes, and campaign questions — not just a chatbot.",
+  },
+];
+
+function WaMark({ className = "h-9 w-9" }: { className?: string }) {
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-cyan-400/30 relative">
+    <div
+      className={`flex items-center justify-center rounded-full bg-[#25D366] text-white shadow-md shadow-[#25D366]/30 ${className}`}
+    >
+      <FaWhatsapp className="h-[58%] w-[58%]" />
+    </div>
+  );
+}
+
+export default function Landing() {
+  const { data: plansData, isLoading: plansLoading } = usePublicPlans();
+  const plans = toMarketingPlanCards(plansData?.plans ?? []);
+
+  return (
+    <div
+      className="relative min-h-screen text-[#075E54] selection:bg-[#25D366]/30"
+      style={{ backgroundColor: WA.mist }}
+    >
+      <Suspense fallback={null}>
+        <ScrollScene />
+      </Suspense>
+
       <div
-        className="fixed inset-0 -z-20 opacity-[0.15]"
+        className="pointer-events-none fixed inset-0 -z-[5]"
         style={{
-          backgroundImage: "radial-gradient(circle, rgba(148,163,184,0.4) 1px, transparent 1px)",
-          backgroundSize: "32px 32px",
+          background:
+            "radial-gradient(ellipse 90% 55% at 50% -5%, rgba(37,211,102,0.18), transparent 50%), linear-gradient(180deg, rgba(247,251,248,0.45) 0%, rgba(247,251,248,0.78) 55%, #F7FBF8 100%)",
         }}
       />
-      <div className="bg-slate-900 border-b border-slate-800/80 text-slate-400 text-center text-sm py-2 px-4">
-        <Phone className="inline h-3.5 w-3.5 mr-1.5 -mt-0.5 text-cyan-400" />
-        Need help? Call us at{" "}
-        <a href={`tel:+91${HELP_NUMBER}`} className="font-semibold text-cyan-400 underline underline-offset-2">
-          +91 {HELP_NUMBER}
-        </a>
-      </div>
 
-      <nav className="sticky top-0 z-50 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-xl">
-        <div className="container mx-auto flex h-16 items-center justify-between px-4">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-300 to-cyan-600 text-slate-950">
-              <MessageSquare className="h-5 w-5" />
-            </div>
-            <span className="text-xl font-serif font-semibold tracking-tight">Convora</span>
-          </div>
-          <div className="hidden md:flex items-center gap-8">
-            <a href="#features" className="text-sm text-slate-400 hover:text-slate-100 transition-colors">Features</a>
-            <a href="#how-it-works" className="text-sm text-slate-400 hover:text-slate-100 transition-colors">How It Works</a>
-            <a href="#use-cases" className="text-sm text-slate-400 hover:text-slate-100 transition-colors">Use Cases</a>
-            <a href="#pricing" className="text-sm text-slate-400 hover:text-slate-100 transition-colors">Pricing</a>
-            <a href="#faq" className="text-sm text-slate-400 hover:text-slate-100 transition-colors">FAQ</a>
-          </div>
-          <div className="flex items-center gap-3">
-            <a href={`${APP_URL}/login`}>
-              <Button variant="outline" className="border-slate-700 bg-transparent text-slate-200 hover:bg-slate-800 hover:text-slate-100" data-testid="button-login">Log In</Button>
-            </a>
-            <a href={`${APP_URL}/login`}>
-              <Button className="bg-gradient-to-r from-cyan-400 to-cyan-500 text-slate-950 font-semibold hover:from-cyan-300 hover:to-cyan-400" data-testid="button-get-started">Get Started</Button>
-            </a>
-          </div>
-        </div>
-      </nav>
+      <MarketingHeader />
 
+      <div className="overflow-x-clip">
       {/* Hero */}
-      <section className="pt-20 pb-20 px-4 relative overflow-hidden">
-        <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_60%_50%_at_50%_-10%,rgba(34,211,238,0.14),transparent)]" />
-        <div className="absolute inset-0 -z-10 bg-[linear-gradient(to_bottom,transparent,rgba(9,9,11,0.6))]" />
-        <div className="absolute -left-32 top-10 h-72 w-72 rounded-full bg-cyan-500/10 blur-[100px] -z-10" />
-        <div className="absolute -right-24 top-1/3 h-80 w-80 rounded-full bg-blue-600/10 blur-[110px] -z-10" />
+      <AnimatedSection variant="spark" intensity="bold" className="pt-12 pb-14 md:pt-20 md:pb-20 px-4">
         <div className="container mx-auto max-w-6xl">
-          <div className="grid lg:grid-cols-2 gap-16 items-center">
+          <div className="grid lg:grid-cols-2 gap-10 lg:gap-16 items-center">
             <motion.div
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.7 }}
             >
-              <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-400/5 px-4 py-1.5 text-sm text-cyan-300 mb-8">
-                <Shield className="h-3.5 w-3.5" />
+              <div className="inline-flex items-center gap-2 rounded-full border border-[#25D366]/35 bg-[#25D366]/10 px-4 py-1.5 text-sm text-[#075E54] mb-8">
+                <FaWhatsapp className="h-4 w-4 text-[#25D366]" />
                 Official Meta WhatsApp Business API
               </div>
-              <h1 className="text-4xl md:text-5xl lg:text-6xl font-serif font-semibold leading-tight mb-6 tracking-tight">
+              <h1 className="text-4xl md:text-5xl lg:text-6xl font-heading font-bold leading-tight mb-6 tracking-tight text-[#075E54]">
                 Turn WhatsApp into your{" "}
-                <span className="bg-gradient-to-r from-cyan-200 via-cyan-400 to-cyan-500 bg-clip-text text-transparent">
+                <span className="bg-gradient-to-r from-[#075E54] via-[#128C7E] to-[#25D366] bg-clip-text text-transparent">
                   #1 revenue channel
                 </span>
               </h1>
-              <p className="text-lg md:text-xl text-slate-400 max-w-xl mb-10 leading-relaxed">
+              <p className="text-lg md:text-xl text-[#075E54]/65 max-w-xl mb-10 leading-relaxed">
                 Broadcast campaigns, approved templates, a shared team inbox and real-time delivery
                 analytics — everything your business needs to sell, support and follow up on WhatsApp,
                 from one dashboard.
               </p>
-              <div className="flex flex-wrap gap-4 mb-10">
-                <a href={`${APP_URL}/login`}>
-                  <Button size="lg" className="gap-2 bg-gradient-to-r from-cyan-400 to-cyan-500 text-slate-950 font-semibold hover:from-cyan-300 hover:to-cyan-400 shadow-lg shadow-cyan-500/20" data-testid="button-start-free">
-                    Start Free Trial <ArrowRight className="h-4 w-4" />
+              <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 mb-10">
+                <a href="/login" className="w-full sm:w-auto">
+                  <Button
+                    size="lg"
+                    className="w-full sm:w-auto gap-2 bg-[#25D366] text-white font-semibold hover:bg-[#20bd5a] shadow-lg shadow-[#25D366]/30"
+                    data-testid="button-start-free"
+                  >
+                    <FaWhatsapp className="h-5 w-5" /> Start Free Trial <ArrowRight className="h-4 w-4" />
                   </Button>
                 </a>
-                <a href="#how-it-works">
-                  <Button size="lg" variant="outline" className="border-slate-700 bg-transparent text-slate-200 hover:bg-slate-800">See How It Works</Button>
+                <a href="#how-it-works" className="w-full sm:w-auto">
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    className="w-full sm:w-auto border-[#075E54]/20 bg-white/70 text-[#075E54] hover:bg-white hover:border-[#25D366]/50"
+                  >
+                    See How It Works
+                  </Button>
                 </a>
               </div>
-              <div className="flex flex-wrap items-center gap-6 text-sm text-slate-500">
-                <div className="flex items-center gap-2">
-                  <Check className="h-4 w-4 text-cyan-400" />
-                  <span>90%+ delivery rate</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Check className="h-4 w-4 text-cyan-400" />
-                  <span>No-code setup</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Check className="h-4 w-4 text-cyan-400" />
-                  <span>Cancel anytime</span>
-                </div>
+              <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-sm text-[#075E54]/55 mb-10">
+                {["90%+ delivery rate", "No-code setup", "Cancel anytime"].map((t) => (
+                  <div key={t} className="flex items-center gap-2">
+                    <Check className="h-4 w-4 text-[#25D366]" />
+                    <span>{t}</span>
+                  </div>
+                ))}
               </div>
             </motion.div>
 
-            {/* Phone mockup */}
             <motion.div
               initial={{ opacity: 0, y: 40 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.8, delay: 0.3 }}
               className="relative flex justify-center"
             >
-              <div className="absolute -top-4 -left-4 md:-left-10 z-10 rounded-xl border border-slate-800 bg-slate-900/90 backdrop-blur-sm px-4 py-3 shadow-xl hidden sm:block">
-                <p className="text-[10px] uppercase tracking-wide text-slate-500">Messages sent</p>
-                <p className="text-xl font-serif font-semibold text-slate-100">7,839</p>
-                <p className="text-[11px] text-cyan-400 flex items-center gap-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" /> live campaign
+              <div className="absolute -top-4 -left-4 md:-left-10 z-10 rounded-xl border border-[#075E54]/10 bg-white/95 backdrop-blur-sm px-4 py-3 shadow-xl hidden sm:block">
+                <p className="text-[10px] uppercase tracking-wide text-[#075E54]/45">Messages sent</p>
+                <p className="text-xl font-heading font-semibold text-[#075E54]">7,839</p>
+                <p className="text-[11px] text-[#128C7E] flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#25D366] animate-pulse" /> live campaign
                 </p>
               </div>
-              <div className="absolute -bottom-4 -right-4 md:-right-10 z-10 rounded-xl border border-slate-800 bg-slate-900/90 backdrop-blur-sm px-4 py-3 shadow-xl hidden sm:block">
-                <p className="text-[10px] uppercase tracking-wide text-slate-500">Delivery rate</p>
-                <p className="text-xl font-serif font-semibold text-slate-100">90.8%</p>
-                <p className="text-[11px] text-cyan-400">quality: high</p>
+              <div className="absolute -bottom-4 -right-4 md:-right-10 z-10 rounded-xl border border-[#075E54]/10 bg-white/95 backdrop-blur-sm px-4 py-3 shadow-xl hidden sm:block">
+                <p className="text-[10px] uppercase tracking-wide text-[#075E54]/45">Delivery rate</p>
+                <p className="text-xl font-heading font-semibold text-[#075E54]">90.8%</p>
+                <p className="text-[11px] text-[#128C7E]">quality: high</p>
               </div>
 
-              <div className="w-[300px] rounded-[2rem] border border-slate-800 bg-slate-900/60 backdrop-blur-sm shadow-2xl shadow-cyan-500/10 overflow-hidden">
-                <div className="bg-gradient-to-r from-cyan-500/20 to-cyan-400/10 border-b border-slate-800 px-4 py-3 flex items-center gap-2.5">
-                  <div className="h-8 w-8 rounded-full bg-gradient-to-br from-cyan-300 to-cyan-600 flex items-center justify-center">
-                    <MessageSquare className="h-4 w-4 text-slate-950" />
+              <div className="w-full max-w-[min(100%,300px)] mx-auto lg:mx-0 rounded-[2rem] border border-[#075E54]/10 bg-white shadow-2xl shadow-[#25D366]/15 overflow-hidden">
+                <div className="bg-[#075E54] px-4 py-3 flex items-center gap-2.5">
+                  <div className="h-8 w-8 rounded-full bg-[#25D366] flex items-center justify-center">
+                    <FaWhatsapp className="h-4 w-4 text-white" />
                   </div>
                   <div className="text-left">
-                    <p className="text-sm font-semibold text-slate-100">Your Business</p>
-                    <p className="text-xs text-cyan-400">online · verified</p>
+                    <p className="text-sm font-semibold text-white">Your Business</p>
+                    <p className="text-xs text-[#DCF8C6]">online · verified</p>
                   </div>
                 </div>
-                <div className="p-4 space-y-3 text-left">
+                <div className="p-4 space-y-3 text-left" style={{ backgroundColor: WA.chat }}>
                   <div className="flex justify-end">
-                    <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-cyan-500/15 border border-cyan-400/20 px-3.5 py-2">
-                      <p className="text-sm text-slate-100 leading-snug">
+                    <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-[#DCF8C6] px-3.5 py-2 shadow-sm">
+                      <p className="text-sm text-[#075E54] leading-snug">
                         🎉 New Launch Alert! Premium retail shops now open for booking from ₹28L*. Assured
                         footfall location, limited units.
                       </p>
-                      <p className="text-xs text-cyan-300 mt-1.5 border-t border-cyan-400/20 pt-1.5 text-center font-medium">📅 Book a site visit</p>
-                      <div className="flex items-center justify-end gap-1 mt-1">
-                        <span className="text-[10px] text-slate-500">11:02</span>
-                        <svg width="14" height="10" viewBox="0 0 16 11" className="text-cyan-400">
-                          <path fill="none" stroke="currentColor" strokeWidth="1.5" d="M1 5.5L4 8.5L10 1.5" />
-                          <path fill="none" stroke="currentColor" strokeWidth="1.5" d="M6 5.5L9 8.5L15 1.5" />
-                        </svg>
-                      </div>
+                      <p className="text-xs text-[#128C7E] mt-1.5 border-t border-[#075E54]/10 pt-1.5 text-center font-medium">📅 Book a site visit</p>
                     </div>
                   </div>
                   <div className="flex justify-start">
-                    <div className="max-w-[85%] rounded-2xl rounded-tl-sm bg-slate-800/80 border border-slate-700/60 px-3.5 py-2">
-                      <p className="text-sm text-slate-100 leading-snug">Interested! Can you share the price list and floor plan?</p>
-                      <div className="flex items-center justify-end gap-1 mt-1">
-                        <span className="text-[10px] text-slate-500">11:04</span>
-                      </div>
+                    <div className="max-w-[85%] rounded-2xl rounded-tl-sm bg-white px-3.5 py-2 shadow-sm">
+                      <p className="text-sm text-[#075E54] leading-snug">Interested! Can you share the price list and floor plan?</p>
                     </div>
                   </div>
                   <div className="flex justify-end">
-                    <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-cyan-500/15 border border-cyan-400/20 px-3.5 py-2">
-                      <p className="text-sm text-slate-100 leading-snug">
+                    <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-[#DCF8C6] px-3.5 py-2 shadow-sm">
+                      <p className="text-sm text-[#075E54] leading-snug">
                         Sure — sending the brochure now. Our team will call you within 10 minutes to
                         schedule your visit. 🤝
                       </p>
-                      <div className="flex items-center justify-end gap-1 mt-1">
-                        <span className="text-[10px] text-slate-500">11:04</span>
-                        <svg width="14" height="10" viewBox="0 0 16 11" className="text-cyan-400">
-                          <path fill="none" stroke="currentColor" strokeWidth="1.5" d="M1 5.5L4 8.5L10 1.5" />
-                          <path fill="none" stroke="currentColor" strokeWidth="1.5" d="M6 5.5L9 8.5L15 1.5" />
-                        </svg>
-                      </div>
                     </div>
                   </div>
                 </div>
@@ -372,74 +388,145 @@ export default function Landing() {
             </motion.div>
           </div>
         </div>
-      </section>
+      </AnimatedSection>
 
-      {/* Trust strip */}
-      <section className="border-y border-slate-800/60 bg-slate-900/30 py-7 px-4">
-        <div className="container mx-auto max-w-6xl flex flex-wrap items-center justify-between gap-7">
-          <div className="flex items-center gap-3 text-sm text-slate-400 max-w-md">
-            <Shield className="h-6 w-6 text-cyan-400 shrink-0" />
-            <span>
-              Built on the <b className="text-slate-100">official Meta WhatsApp Business API</b> — no
-              grey-market tools, no ban risk.
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-8 md:gap-11">
-            {[
-              { value: "1M+", label: "messages / mo" },
-              { value: "90%", label: "avg delivery" },
-              { value: "40%", label: "avg read rate" },
-              { value: "High", label: "quality rating" },
-            ].map((s) => (
-              <div key={s.label}>
-                <p className="text-2xl font-serif font-semibold text-cyan-400">{s.value}</p>
-                <p className="text-[11px] uppercase tracking-wide text-slate-500">{s.label}</p>
-              </div>
-            ))}
+      {/* Trust strip + badges */}
+      <AnimatedSection variant="grid" intensity="subtle" className="border-y border-[#075E54]/10 bg-white/55 py-10 px-4">
+        <div className="container mx-auto max-w-6xl space-y-8">
+          <div className="flex flex-col lg:flex-row flex-wrap items-start lg:items-center justify-between gap-6 lg:gap-7">
+            <div className="flex items-center gap-3 text-sm text-[#075E54]/70 max-w-md">
+              <Shield className="h-6 w-6 text-[#25D366] shrink-0" />
+              <span>
+                Built on the <b className="text-[#075E54]">official Meta WhatsApp Business API</b> — no
+                grey-market tools, no ban risk.
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-6 sm:flex sm:flex-wrap sm:gap-8 md:gap-11 w-full lg:w-auto">
+              {[
+                { value: "1M+", label: "messages / mo" },
+                { value: "90%", label: "avg delivery" },
+                { value: "40%", label: "avg read rate" },
+                { value: "High", label: "quality rating" },
+              ].map((s) => (
+                <div key={s.label}>
+                  <p className="text-2xl font-heading font-semibold text-[#25D366]">{s.value}</p>
+                  <p className="text-[11px] uppercase tracking-wide text-[#075E54]/45">{s.label}</p>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
-      </section>
+      </AnimatedSection>
 
-      {/* Features */}
-      <section id="features" className="py-24 px-4">
+      {/* Why teams trust us */}
+      <AnimatedSection id="trust" variant="shield" intensity="bold" dark className="py-16 md:py-24 px-4">
         <div className="container mx-auto max-w-6xl">
           <FadeIn>
             <div className="max-w-2xl mb-14">
-              <p className="text-cyan-400 text-sm font-medium tracking-wide uppercase mb-3">Platform</p>
-              <h2 className="text-3xl md:text-4xl font-serif font-semibold mb-4">
+              <p className="text-[#25D366] text-sm font-medium tracking-wide uppercase mb-3 flex items-center gap-2">
+                <Shield className="h-4 w-4" /> Trust & compliance
+              </p>
+              <h2 className="text-3xl md:text-4xl font-heading font-bold mb-4 text-white">
+                Built so you can send with confidence
+              </h2>
+              <p className="text-lg text-white/65">
+                WhatsApp is where your buyers live — but only if your stack is official, transparent, and
+                accountable. Here&apos;s how Convora earns that trust.
+              </p>
+            </div>
+          </FadeIn>
+          <div className="grid md:grid-cols-2 gap-5">
+            {trustPillars.map((p, i) => (
+              <FadeIn key={p.title} delay={i * 0.08}>
+                <div className="h-full rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-6 hover:border-[#25D366]/40 transition-colors">
+                  <div className="h-11 w-11 rounded-xl bg-[#25D366]/20 flex items-center justify-center mb-4">
+                    <p.icon className="h-5 w-5 text-[#25D366]" />
+                  </div>
+                  <h3 className="font-heading font-semibold text-lg text-white mb-2">{p.title}</h3>
+                  <p className="text-sm text-white/65 leading-relaxed">{p.desc}</p>
+                </div>
+              </FadeIn>
+            ))}
+          </div>
+          <FadeIn delay={0.15}>
+            <div className="mt-12">
+              <TrustBadgeBanner variant="dark" />
+            </div>
+          </FadeIn>
+        </div>
+      </AnimatedSection>
+
+      {/* Delivery wave band */}
+      <AnimatedSection variant="wave" intensity="bold" dark className="py-16 px-4">
+        <div className="container mx-auto max-w-3xl text-center">
+          <FaWhatsapp className="h-10 w-10 text-[#25D366] mx-auto mb-3" />
+          <p className="font-heading text-white text-xl md:text-2xl font-bold">
+            Millions of messages. One dashboard.
+          </p>
+          <p className="text-white/70 text-sm mt-2">
+            Watch delivery pulse across your audience in real time.
+          </p>
+        </div>
+      </AnimatedSection>
+
+      {/* Features */}
+      <AnimatedSection id="features" variant="particles" intensity="subtle" className="py-16 md:py-24 px-4">
+        <div className="container mx-auto max-w-6xl">
+          <FadeIn>
+            <div className="max-w-2xl mb-14">
+              <p className="text-[#25D366] text-sm font-medium tracking-wide uppercase mb-3 flex items-center gap-2">
+                <FaWhatsapp className="h-4 w-4" /> Platform
+              </p>
+              <h2 className="text-3xl md:text-4xl font-heading font-bold mb-4 text-[#075E54]">
                 Everything WhatsApp marketing needs, in one place
               </h2>
-              <p className="text-lg text-slate-400">
+              <p className="text-lg text-[#075E54]/55">
                 Convora replaces the mess of spreadsheets, broadcast lists and manual follow-ups with a
                 single, compliant command centre.
               </p>
             </div>
           </FadeIn>
-
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
             {features.map((f, i) => (
               <FadeIn key={f.title} delay={(i % 3) * 0.1}>
-                <div className="h-full p-6 rounded-xl border border-slate-800/80 bg-slate-900/40 hover:border-cyan-400/30 hover:bg-slate-900/70 transition-all duration-300">
-                  <div className="h-11 w-11 rounded-lg bg-cyan-400/10 flex items-center justify-center mb-4">
-                    <f.icon className="h-5 w-5 text-cyan-400" />
+                <div className="h-full p-6 rounded-xl border border-[#075E54]/10 bg-white/80 hover:border-[#25D366]/50 hover:bg-white transition-all duration-300 shadow-sm">
+                  <div className="h-11 w-11 rounded-lg bg-[#25D366]/12 flex items-center justify-center mb-4">
+                    <f.icon className="h-5 w-5 text-[#128C7E]" />
                   </div>
-                  <h3 className="font-semibold text-slate-100 mb-1.5">{f.title}</h3>
-                  <p className="text-slate-400 text-sm leading-relaxed">{f.desc}</p>
+                  <h3 className="font-semibold text-[#075E54] mb-1.5">{f.title}</h3>
+                  <p className="text-[#075E54]/55 text-sm leading-relaxed">{f.desc}</p>
                 </div>
               </FadeIn>
             ))}
           </div>
         </div>
-      </section>
+      </AnimatedSection>
+
+      {/* Bubbles band */}
+      <AnimatedSection variant="bubbles" intensity="bold" className="py-16 md:py-20 px-4 bg-[#ECE5DD]/60">
+        <div className="container mx-auto max-w-md text-center">
+          <div className="rounded-2xl bg-white/90 backdrop-blur-md border border-[#25D366]/25 px-6 py-5 shadow-xl">
+            <div className="flex justify-center gap-2 mb-3">
+              <FaWhatsapp className="h-6 w-6 text-[#25D366]" />
+              <FaWhatsapp className="h-6 w-6 text-[#128C7E] opacity-70" />
+              <FaWhatsapp className="h-6 w-6 text-[#075E54] opacity-50" />
+            </div>
+            <p className="font-heading font-bold text-[#075E54] text-lg">Conversations that convert</p>
+            <p className="text-sm text-[#075E54]/60 mt-1">
+              Every broadcast can become a sales chat — replied to from your shared inbox.
+            </p>
+          </div>
+        </div>
+      </AnimatedSection>
 
       {/* How it works */}
-      <section id="how-it-works" className="py-24 px-4 border-t border-slate-800/60">
+      <AnimatedSection id="how-it-works" variant="orbit" intensity="subtle" className="py-16 md:py-24 px-4 border-t border-[#075E54]/10">
         <div className="container mx-auto max-w-5xl">
           <FadeIn>
             <div className="max-w-2xl mb-14">
-              <p className="text-cyan-400 text-sm font-medium tracking-wide uppercase mb-3">Setup</p>
-              <h2 className="text-3xl md:text-4xl font-serif font-semibold mb-4">Live in three steps, not three weeks</h2>
-              <p className="text-lg text-slate-400">
+              <p className="text-[#25D366] text-sm font-medium tracking-wide uppercase mb-3">Setup</p>
+              <h2 className="text-3xl md:text-4xl font-heading font-bold mb-4 text-[#075E54]">Live in three steps, not three weeks</h2>
+              <p className="text-lg text-[#075E54]/55">
                 If you have a Facebook Business account and a phone number, you can be sending your first
                 campaign today.
               </p>
@@ -448,25 +535,25 @@ export default function Landing() {
           <div className="grid md:grid-cols-3 gap-6">
             {steps.map((step, i) => (
               <FadeIn key={step.n} delay={i * 0.1}>
-                <div className="h-full p-6 rounded-xl border border-slate-800/80 bg-slate-900/40 hover:border-cyan-400/30 transition-colors">
-                  <div className="text-3xl font-semibold bg-gradient-to-br from-cyan-300 to-cyan-600 bg-clip-text text-transparent font-mono mb-4">{step.n}</div>
-                  <h3 className="font-semibold text-lg mb-1.5 text-slate-100">{step.title}</h3>
-                  <p className="text-slate-400 text-sm leading-relaxed">{step.desc}</p>
+                <div className="h-full p-6 rounded-xl border border-[#075E54]/10 bg-white/80 hover:border-[#25D366]/40 transition-colors">
+                  <div className="text-3xl font-semibold bg-gradient-to-br from-[#128C7E] to-[#25D366] bg-clip-text text-transparent font-mono mb-4">{step.n}</div>
+                  <h3 className="font-semibold text-lg mb-1.5 text-[#075E54]">{step.title}</h3>
+                  <p className="text-[#075E54]/55 text-sm leading-relaxed">{step.desc}</p>
                 </div>
               </FadeIn>
             ))}
           </div>
         </div>
-      </section>
+      </AnimatedSection>
 
       {/* Use cases */}
-      <section id="use-cases" className="py-24 px-4 border-t border-slate-800/60 bg-slate-900/20">
+      <AnimatedSection id="use-cases" variant="messages" intensity="subtle" className="py-16 md:py-24 px-4 border-t border-[#075E54]/10 bg-white/40">
         <div className="container mx-auto max-w-6xl">
           <FadeIn>
             <div className="max-w-2xl mb-14">
-              <p className="text-cyan-400 text-sm font-medium tracking-wide uppercase mb-3">Who it's for</p>
-              <h2 className="text-3xl md:text-4xl font-serif font-semibold mb-4">Built for teams that sell in conversations</h2>
-              <p className="text-lg text-slate-400">
+              <p className="text-[#25D366] text-sm font-medium tracking-wide uppercase mb-3">Who it&apos;s for</p>
+              <h2 className="text-3xl md:text-4xl font-heading font-bold mb-4 text-[#075E54]">Built for teams that sell in conversations</h2>
+              <p className="text-lg text-[#075E54]/55">
                 WhatsApp is where Indian buyers actually respond. Convora turns those conversations into a
                 pipeline.
               </p>
@@ -475,16 +562,16 @@ export default function Landing() {
           <div className="grid md:grid-cols-3 gap-5">
             {useCases.map((c, i) => (
               <FadeIn key={c.title} delay={i * 0.1}>
-                <div className="h-full p-6 rounded-xl border border-slate-800/80 bg-gradient-to-b from-slate-900/60 to-transparent">
-                  <span className="inline-block text-xs font-medium uppercase tracking-wide text-cyan-300 bg-cyan-400/10 border border-cyan-400/20 rounded-full px-3 py-1 mb-4">
+                <div className="h-full p-6 rounded-xl border border-[#075E54]/10 bg-gradient-to-b from-white to-[#F7FBF8]">
+                  <span className="inline-block text-xs font-medium uppercase tracking-wide text-[#128C7E] bg-[#25D366]/12 border border-[#25D366]/25 rounded-full px-3 py-1 mb-4">
                     {c.tag}
                   </span>
-                  <h3 className="font-semibold text-lg mb-1.5 text-slate-100">{c.title}</h3>
-                  <p className="text-slate-400 text-sm leading-relaxed mb-4">{c.desc}</p>
+                  <h3 className="font-semibold text-lg mb-1.5 text-[#075E54]">{c.title}</h3>
+                  <p className="text-[#075E54]/55 text-sm leading-relaxed mb-4">{c.desc}</p>
                   <ul className="space-y-2">
                     {c.items.map((item) => (
-                      <li key={item} className="flex items-start gap-2 text-sm text-slate-400">
-                        <Check className="h-4 w-4 text-cyan-400 shrink-0 mt-0.5" />
+                      <li key={item} className="flex items-start gap-2 text-sm text-[#075E54]/65">
+                        <Check className="h-4 w-4 text-[#25D366] shrink-0 mt-0.5" />
                         <span>{item}</span>
                       </li>
                     ))}
@@ -494,86 +581,194 @@ export default function Landing() {
             ))}
           </div>
         </div>
-      </section>
+      </AnimatedSection>
 
-      {/* Pricing */}
-      <section id="pricing" className="py-24 px-4 border-t border-slate-800/60">
+      {/* NEW: Social proof */}
+      <AnimatedSection id="proof" variant="helix" intensity="bold" dark className="py-16 md:py-24 px-4">
         <div className="container mx-auto max-w-6xl">
           <FadeIn>
             <div className="text-center max-w-2xl mx-auto mb-14">
-              <p className="text-cyan-400 text-sm font-medium tracking-wide uppercase mb-3">Pricing</p>
-              <h2 className="text-3xl md:text-4xl font-serif font-semibold mb-4">
+              <p className="text-[#25D366] text-sm font-medium tracking-wide uppercase mb-3 flex items-center justify-center gap-2">
+                <Star className="h-4 w-4" /> Customer proof
+              </p>
+              <h2 className="text-3xl md:text-4xl font-heading font-bold text-white mb-4">
+                Teams that switched — and stayed
+              </h2>
+              <p className="text-white/65">
+                Real operators using WhatsApp the compliant way: broadcasts, inbox, and delivery proof in one place.
+              </p>
+            </div>
+          </FadeIn>
+          <div className="grid md:grid-cols-3 gap-5">
+            {testimonials.map((t, i) => (
+              <FadeIn key={t.name} delay={i * 0.1}>
+                <div className="h-full rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm">
+                  <div className="flex gap-1 mb-4">
+                    {[0, 1, 2, 3, 4].map((s) => (
+                      <Star key={s} className="h-4 w-4 fill-[#25D366] text-[#25D366]" />
+                    ))}
+                  </div>
+                  <p className="text-white/85 text-sm leading-relaxed mb-6">&ldquo;{t.quote}&rdquo;</p>
+                  <p className="font-semibold text-white text-sm">{t.name}</p>
+                  <p className="text-white/50 text-xs mt-0.5">{t.role}</p>
+                </div>
+              </FadeIn>
+            ))}
+          </div>
+        </div>
+      </AnimatedSection>
+
+      {/* NEW: Guarantees */}
+      <AnimatedSection variant="rings" intensity="subtle" className="py-16 md:py-24 px-4 border-y border-[#075E54]/10">
+        <div className="container mx-auto max-w-5xl">
+          <FadeIn>
+            <div className="text-center max-w-2xl mx-auto mb-14">
+              <p className="text-[#25D366] text-sm font-medium tracking-wide uppercase mb-3">Our promise</p>
+              <h2 className="text-3xl md:text-4xl font-heading font-bold text-[#075E54] mb-4">
+                Clear commitments before you subscribe
+              </h2>
+            </div>
+          </FadeIn>
+          <div className="grid md:grid-cols-3 gap-6">
+            {guarantees.map((g, i) => (
+              <FadeIn key={g.title} delay={i * 0.1}>
+                <div className="text-center p-6 rounded-2xl border border-[#075E54]/10 bg-white/80">
+                  <div className="mx-auto h-12 w-12 rounded-full bg-[#25D366]/12 flex items-center justify-center mb-4">
+                    <g.icon className="h-6 w-6 text-[#128C7E]" />
+                  </div>
+                  <h3 className="font-heading font-semibold text-[#075E54] mb-2">{g.title}</h3>
+                  <p className="text-sm text-[#075E54]/55 leading-relaxed">{g.desc}</p>
+                </div>
+              </FadeIn>
+            ))}
+          </div>
+        </div>
+      </AnimatedSection>
+
+      {/* Signal / Meta reliability */}
+      <AnimatedSection variant="broadcast" intensity="bold" dark className="py-16 md:py-20 px-4">
+        <div className="container mx-auto max-w-lg text-center">
+          <FaWhatsapp className="h-12 w-12 text-[#25D366] mx-auto mb-4" />
+          <p className="font-heading text-2xl md:text-3xl font-bold text-white">
+            Official API. Enterprise reliability.
+          </p>
+          <p className="text-white/65 text-sm mt-3">
+            Quality rating, messaging limits, and template status — synced live from Meta.
+          </p>
+        </div>
+      </AnimatedSection>
+
+      {/* Pricing */}
+      <AnimatedSection id="pricing" variant="ticks" intensity="subtle" className="py-16 md:py-24 px-4">
+        <div className="container mx-auto max-w-6xl">
+          <FadeIn>
+            <div className="text-center max-w-2xl mx-auto mb-14">
+              <p className="text-[#25D366] text-sm font-medium tracking-wide uppercase mb-3">Pricing</p>
+              <h2 className="text-3xl md:text-4xl font-heading font-bold mb-4 text-[#075E54]">
                 Simple plans that scale with your messaging
               </h2>
-              <p className="text-lg text-slate-400">
-                Every plan runs on the official API. Meta's per-conversation charges are billed at cost —
+              <p className="text-lg text-[#075E54]/55">
+                Every plan runs on the official API. Meta&apos;s per-conversation charges are billed at cost —
                 we never mark them up.
               </p>
             </div>
           </FadeIn>
-
-          <div className="grid md:grid-cols-3 gap-6 items-stretch">
-            {plans.map((plan, i) => (
-              <FadeIn key={plan.name} delay={i * 0.1}>
+          <div className={`grid gap-6 items-stretch ${plans.length >= 3 ? "md:grid-cols-3" : plans.length === 2 ? "md:grid-cols-2 max-w-4xl mx-auto" : "max-w-md mx-auto"}`}>
+            {plansLoading ? (
+              [1, 2, 3].map((i) => <Skeleton key={i} className="h-80 rounded-2xl" />)
+            ) : (
+            plans.map((plan, i) => (
+              <FadeIn key={plan.id || plan.name} delay={i * 0.1}>
                 <div
-                  className={`h-full flex flex-col rounded-2xl p-8 backdrop-blur-sm relative ${
+                  className={`h-full flex flex-col rounded-2xl p-8 relative ${
                     plan.featured
-                      ? "border border-cyan-400/40 bg-gradient-to-b from-slate-900/80 to-slate-900/40 shadow-2xl shadow-cyan-500/10"
-                      : "border border-slate-800/80 bg-slate-900/40"
+                      ? "border-2 border-[#25D366] bg-white shadow-2xl shadow-[#25D366]/15"
+                      : "border border-[#075E54]/10 bg-white/80"
                   }`}
                 >
                   {plan.featured && (
-                    <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 rounded-full bg-cyan-400 text-slate-950 text-xs font-semibold uppercase tracking-wide px-4 py-1">
-                      Most Popular
+                    <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 rounded-full bg-[#25D366] text-white text-xs font-semibold uppercase tracking-wide px-4 py-1 flex items-center gap-1">
+                      <FaWhatsapp className="h-3 w-3" /> Most Popular
                     </div>
                   )}
-                  <h3 className="text-xl font-serif font-semibold text-slate-100">{plan.name}</h3>
-                  <p className="text-slate-500 text-sm mt-1">{plan.tagline}</p>
+                  <h3 className="text-xl font-heading font-semibold text-[#075E54]">{plan.name}</h3>
+                  <p className="text-[#075E54]/45 text-sm mt-1">{plan.tagline}</p>
                   <div className="mt-6 mb-1">
-                    <span className="text-4xl font-bold text-slate-100">{plan.price}</span>
-                    <span className="text-slate-500">/month</span>
+                    <span className="text-4xl font-bold text-[#075E54]">{plan.price}</span>
+                    <span className="text-[#075E54]/45">/month</span>
                   </div>
-                  <p className="text-xs text-slate-500 font-mono mb-6">+ Meta conversation charges, + GST</p>
-
+                  <p className="text-xs text-[#075E54]/40 font-mono mb-6">+ Meta conversation charges, + GST</p>
                   <ul className="space-y-3 mb-8 flex-1">
                     {plan.features.map((item) => (
                       <li key={item} className="flex items-center gap-3">
-                        <Check className="h-4 w-4 text-cyan-400 flex-shrink-0" />
-                        <span className="text-slate-300 text-sm">{item}</span>
+                        <Check className="h-4 w-4 text-[#25D366] flex-shrink-0" />
+                        <span className="text-[#075E54]/75 text-sm">{item}</span>
                       </li>
                     ))}
                   </ul>
-
-                  <a href={`${APP_URL}/login`} className="block">
+                  <a href="/login" className="block">
                     <Button
-                      className={`w-full font-semibold ${
+                      className={`w-full font-semibold gap-2 ${
                         plan.featured
-                          ? "bg-gradient-to-r from-cyan-400 to-cyan-500 text-slate-950 hover:from-cyan-300 hover:to-cyan-400"
-                          : "border border-slate-700 bg-transparent text-slate-200 hover:bg-slate-800"
+                          ? "bg-[#25D366] text-white hover:bg-[#20bd5a]"
+                          : "border border-[#075E54]/15 bg-transparent text-[#075E54] hover:bg-[#25D366]/10"
                       }`}
                       size="lg"
+                      variant={plan.featured ? "default" : "outline"}
                       data-testid={`button-subscribe-${plan.name.toLowerCase()}`}
                     >
+                      {plan.featured && <FaWhatsapp className="h-4 w-4" />}
                       {plan.cta}
                     </Button>
                   </a>
                 </div>
               </FadeIn>
-            ))}
+            ))
+            )}
           </div>
-          <p className="text-center text-sm text-slate-500 font-mono mt-8">
+          <p className="text-center text-sm text-[#075E54]/40 font-mono mt-8">
             All prices exclusive of GST · Free trial on every plan · No setup fees
           </p>
         </div>
-      </section>
+      </AnimatedSection>
+
+      {/* NEW: Support trust */}
+      <AnimatedSection variant="typing" intensity="subtle" className="py-16 md:py-20 px-4 border-t border-[#075E54]/10 bg-white/50">
+        <div className="container mx-auto max-w-4xl">
+          <FadeIn>
+            <div className="rounded-3xl border border-[#25D366]/25 bg-white/90 p-5 sm:p-8 md:p-10 flex flex-col md:flex-row items-center gap-6 md:gap-8 shadow-lg shadow-[#25D366]/10">
+              <div className="h-16 w-16 rounded-2xl bg-[#25D366] flex items-center justify-center shrink-0 shadow-lg shadow-[#25D366]/30">
+                <Headphones className="h-8 w-8 text-white" />
+              </div>
+              <div className="text-center md:text-left flex-1">
+                <h3 className="font-heading text-2xl font-bold text-[#075E54] mb-2">
+                  Stuck on setup? Talk to a human.
+                </h3>
+                <p className="text-[#075E54]/60 text-sm leading-relaxed">
+                  Meta embeds, template rejections, number migration — we help you get live. Call{" "}
+                  <a href={`tel:+91${HELP_NUMBER}`} className="font-semibold text-[#128C7E] underline">
+                    +91 {HELP_NUMBER}
+                  </a>{" "}
+                  or reach us on WhatsApp during business hours.
+                </p>
+              </div>
+              <a href={`tel:+91${HELP_NUMBER}`} className="w-full sm:w-auto">
+                <Button className="w-full sm:w-auto bg-[#075E54] hover:bg-[#0a6b5f] text-white gap-2 shrink-0">
+                  <Phone className="h-4 w-4" /> Call support
+                </Button>
+              </a>
+            </div>
+          </FadeIn>
+        </div>
+      </AnimatedSection>
 
       {/* FAQ */}
-      <section id="faq" className="py-24 px-4 border-t border-slate-800/60">
+      <AnimatedSection id="faq" variant="inbox" intensity="subtle" className="py-16 md:py-24 px-4 border-t border-[#075E54]/10">
         <div className="container mx-auto max-w-3xl">
           <FadeIn>
             <div className="text-center mb-12">
-              <p className="text-cyan-400 text-sm font-medium tracking-wide uppercase mb-3">FAQ</p>
-              <h2 className="text-3xl md:text-4xl font-serif font-semibold">Questions, answered</h2>
+              <p className="text-[#25D366] text-sm font-medium tracking-wide uppercase mb-3">FAQ</p>
+              <h2 className="text-3xl md:text-4xl font-heading font-bold text-[#075E54]">Questions, answered</h2>
             </div>
           </FadeIn>
           <FadeIn delay={0.1}>
@@ -582,12 +777,12 @@ export default function Landing() {
                 <AccordionItem
                   key={item.q}
                   value={`item-${i}`}
-                  className="border border-slate-800/80 rounded-xl bg-slate-900/40 px-6 mb-3 last:mb-0"
+                  className="border border-[#075E54]/10 rounded-xl bg-white/80 px-4 sm:px-6 mb-3 last:mb-0"
                 >
-                  <AccordionTrigger className="text-left font-serif font-semibold text-slate-100 hover:no-underline py-5">
+                  <AccordionTrigger className="text-left font-heading font-semibold text-[#075E54] hover:no-underline py-5">
                     {item.q}
                   </AccordionTrigger>
-                  <AccordionContent className="text-slate-400 text-sm leading-relaxed">
+                  <AccordionContent className="text-[#075E54]/55 text-sm leading-relaxed">
                     {item.a}
                   </AccordionContent>
                 </AccordionItem>
@@ -595,87 +790,94 @@ export default function Landing() {
             </Accordion>
           </FadeIn>
         </div>
-      </section>
+      </AnimatedSection>
 
       {/* Final CTA */}
-      <section className="py-24 px-4 border-t border-slate-800/60 relative overflow-hidden">
-        <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_50%_80%_at_50%_100%,rgba(34,211,238,0.08),transparent)]" />
+      <AnimatedSection variant="spark" intensity="bold" className="py-16 md:py-24 px-4 border-t border-[#075E54]/10">
         <div className="container mx-auto max-w-3xl text-center">
           <FadeIn>
-            <div className="rounded-3xl border border-cyan-400/30 bg-gradient-to-b from-slate-900/80 to-slate-900/40 px-6 md:px-16 py-16">
-              <h2 className="text-3xl md:text-4xl font-serif font-semibold mb-4">
-                Your customers are already on WhatsApp.
-                <br />
-                Meet them there.
-              </h2>
-              <p className="text-lg text-slate-400 mb-8 max-w-lg mx-auto">
-                Set up in a day, send your first campaign this week, and watch the read rates speak for
-                themselves.
-              </p>
-              <a href={`${APP_URL}/login`}>
-                <Button size="lg" className="gap-2 bg-gradient-to-r from-cyan-400 to-cyan-500 text-slate-950 font-semibold hover:from-cyan-300 hover:to-cyan-400 shadow-lg shadow-cyan-500/20">
-                  Start Your Free Trial <ArrowRight className="h-4 w-4" />
-                </Button>
-              </a>
+            <div className="rounded-3xl border border-[#25D366]/40 bg-[#075E54] px-4 sm:px-6 md:px-16 py-12 md:py-16 text-white relative overflow-hidden">
+              <div className="absolute inset-0 bg-[radial-gradient(ellipse_50%_80%_at_50%_100%,rgba(37,211,102,0.35),transparent)]" />
+              <div className="relative">
+                <FaWhatsapp className="h-12 w-12 text-[#25D366] mx-auto mb-5" />
+                <h2 className="text-2xl sm:text-3xl md:text-4xl font-heading font-bold mb-4">
+                  Your customers are already on WhatsApp.
+                  <br className="hidden sm:block" />
+                  <span className="sm:hidden"> </span>
+                  Meet them there.
+                </h2>
+                <p className="text-lg text-white/70 mb-8 max-w-lg mx-auto">
+                  Set up in a day, send your first campaign this week, and watch the read rates speak for
+                  themselves.
+                </p>
+                <a href="/login" className="inline-block w-full sm:w-auto">
+                  <Button size="lg" className="w-full sm:w-auto gap-2 bg-[#25D366] text-white font-semibold hover:bg-[#20bd5a] shadow-lg shadow-[#25D366]/30">
+                    <FaWhatsapp className="h-5 w-5" /> Start Your Free Trial <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </a>
+                <p className="mt-6 text-sm text-white/50">
+                  <a href="#trust" className="underline underline-offset-2 hover:text-white/70">
+                    See why teams trust Convora
+                  </a>
+                </p>
+              </div>
             </div>
           </FadeIn>
         </div>
-      </section>
+      </AnimatedSection>
 
-      <footer className="border-t border-slate-800/60 py-12 px-4">
+      <AnimatedSection variant="soft" intensity="subtle" className="border-t border-[#075E54]/10 py-10 sm:py-12 px-4 bg-white/70">
         <div className="container mx-auto max-w-6xl">
-          <div className="grid md:grid-cols-4 gap-8">
-            <div>
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-8">
+            <div className="col-span-2 sm:col-span-2 md:col-span-1">
               <div className="flex items-center gap-2 mb-4">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-300 to-cyan-600 text-slate-950">
-                  <MessageSquare className="h-4 w-4" />
-                </div>
-                <span className="font-serif font-semibold text-slate-100">Convora</span>
+                <WaMark className="h-8 w-8" />
+                <span className="font-heading font-bold text-[#075E54]">Convora</span>
               </div>
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-[#075E54]/50">
                 The WhatsApp Business API platform for teams that sell in conversations.
               </p>
             </div>
-
             <div>
-              <h4 className="font-semibold mb-4 text-slate-200">Product</h4>
-              <ul className="space-y-2 text-sm text-slate-500">
-                <li><a href="#features" className="hover:text-slate-200 transition-colors">Features</a></li>
-                <li><a href="#how-it-works" className="hover:text-slate-200 transition-colors">How It Works</a></li>
-                <li><a href="#pricing" className="hover:text-slate-200 transition-colors">Pricing</a></li>
-                <li><a href="#faq" className="hover:text-slate-200 transition-colors">FAQ</a></li>
+              <h4 className="font-semibold mb-4 text-[#075E54]">Product</h4>
+              <ul className="space-y-2 text-sm text-[#075E54]/50">
+                {MARKETING_NAV.map(({ href, label }) => (
+                  <li key={href}>
+                    <Link href={href} className="hover:text-[#075E54]">{label}</Link>
+                  </li>
+                ))}
               </ul>
             </div>
-
             <div>
-              <h4 className="font-semibold mb-4 text-slate-200">Legal</h4>
-              <ul className="space-y-2 text-sm text-slate-500">
-                <li><Link href="/privacy" className="hover:text-slate-200 transition-colors">Privacy Policy</Link></li>
-                <li><Link href="/terms" className="hover:text-slate-200 transition-colors">Terms of Service</Link></li>
-                <li><Link href="/refund" className="hover:text-slate-200 transition-colors">Refund Policy</Link></li>
-                <li><Link href="/delete-data" className="hover:text-slate-200 transition-colors">Data Deletion</Link></li>
+              <h4 className="font-semibold mb-4 text-[#075E54]">Legal</h4>
+              <ul className="space-y-2 text-sm text-[#075E54]/50">
+                <li><Link href="/privacy" className="hover:text-[#075E54]">Privacy Policy</Link></li>
+                <li><Link href="/terms" className="hover:text-[#075E54]">Terms of Service</Link></li>
+                <li><Link href="/refund" className="hover:text-[#075E54]">Refund Policy</Link></li>
+                <li><Link href="/delete-data" className="hover:text-[#075E54]">Data Deletion</Link></li>
               </ul>
             </div>
-
             <div>
-              <h4 className="font-semibold mb-4 text-slate-200">Support</h4>
-              <ul className="space-y-2 text-sm text-slate-500">
-                <li><Link href="/contact" className="hover:text-slate-200 transition-colors">Contact Us</Link></li>
+              <h4 className="font-semibold mb-4 text-[#075E54]">Support</h4>
+              <ul className="space-y-2 text-sm text-[#075E54]/50">
+                <li><Link href="/contact" className="hover:text-[#075E54]">Contact Us</Link></li>
                 <li>
-                  <a href={`tel:+91${HELP_NUMBER}`} className="hover:text-slate-200 transition-colors flex items-center gap-1.5">
-                    <Phone className="h-3.5 w-3.5 text-cyan-400" /> +91 {HELP_NUMBER}
+                  <a href={`tel:+91${HELP_NUMBER}`} className="hover:text-[#075E54] flex items-center gap-1.5">
+                    <Phone className="h-3.5 w-3.5 text-[#25D366]" /> +91 {HELP_NUMBER}
                   </a>
                 </li>
               </ul>
             </div>
           </div>
-
-          <div className="border-t border-slate-800/60 mt-8 pt-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-sm text-slate-500">
+          <div className="border-t border-[#075E54]/10 mt-8 pt-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs sm:text-sm text-[#075E54]/40 text-center sm:text-left">
             <p>&copy; {new Date().getFullYear()} Convora. All rights reserved.</p>
-            <p>Built on the official Meta WhatsApp Business Platform</p>
+            <p className="flex items-center justify-center gap-1.5 max-w-xs sm:max-w-none">
+              <FaWhatsapp className="h-3.5 w-3.5 text-[#25D366]" /> Built on the official Meta WhatsApp Business Platform
+            </p>
           </div>
         </div>
-      </footer>
+      </AnimatedSection>
+      </div>
     </div>
   );
 }

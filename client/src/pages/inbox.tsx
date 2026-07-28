@@ -320,11 +320,11 @@ export default function Inbox() {
   const closedCount = allConversations.filter(c => isMissedReply(c)).length;
 
   return (
-    <div className="h-[calc(100vh-7rem)] flex flex-col">
-      <div className="flex items-center justify-between mb-4">
+    <div className="h-[calc(100vh-7rem)] flex flex-col gap-4">
+      <div className="page-hero flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Inbox</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="page-title" data-testid="text-page-title">Inbox</h1>
+          <p className="page-subtitle">
             {totalUnread > 0 ? `${totalUnread} unread` : "All caught up"} · {allConversations.length} conversations
           </p>
         </div>
@@ -342,7 +342,7 @@ export default function Inbox() {
         </div>
       </div>
 
-      <div className="flex gap-0 flex-1 min-h-0 border rounded-lg overflow-hidden">
+      <div className="app-surface flex gap-0 flex-1 min-h-0 overflow-hidden">
         <div className="w-80 flex flex-col border-r bg-card shrink-0">
           <div className="p-3 space-y-2 border-b">
             <div className="relative">
@@ -373,9 +373,16 @@ export default function Inbox() {
           <ScrollArea className="flex-1">
             <div className="divide-y">
               {isLoading ? (
-                <div className="p-6 text-center text-muted-foreground">
-                  <RefreshCw className="h-5 w-5 mx-auto mb-2 animate-spin" />
-                  <p className="text-sm">Loading conversations...</p>
+                <div className="p-2 space-y-1">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="flex items-center gap-3 px-4 py-3 animate-in fade-in duration-300" style={{ animationDelay: `${i * 60}ms` }}>
+                      <div className="relative overflow-hidden h-10 w-10 rounded-full bg-[#075E54]/[0.06] before:absolute before:inset-0 before:-translate-x-full before:animate-[shimmer_1.8s_infinite] before:bg-gradient-to-r before:from-transparent before:via-white/60 before:to-transparent" />
+                      <div className="flex-1 space-y-2">
+                        <div className="relative overflow-hidden h-3.5 rounded bg-[#075E54]/[0.06] before:absolute before:inset-0 before:-translate-x-full before:animate-[shimmer_1.8s_infinite] before:bg-gradient-to-r before:from-transparent before:via-white/60 before:to-transparent" style={{ width: `${50 + Math.random() * 30}%` }} />
+                        <div className="relative overflow-hidden h-3 rounded bg-[#075E54]/[0.04] before:absolute before:inset-0 before:-translate-x-full before:animate-[shimmer_1.8s_infinite] before:bg-gradient-to-r before:from-transparent before:via-white/60 before:to-transparent" style={{ width: `${60 + Math.random() * 25}%` }} />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : filteredConversations.length === 0 ? (
                 <div className="p-6 text-center text-muted-foreground">

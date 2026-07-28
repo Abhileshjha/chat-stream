@@ -1,40 +1,68 @@
 import Razorpay from "razorpay";
 import crypto from "crypto";
-
-const PLAN_AMOUNT_PAISE = 79900; // ₹799.00
-const PLAN_NAME = "WhatsApp Broadcast - Unlimited Messaging";
+import type { BillingPlan } from "@shared/billingPlans";
+import {
+  getBillingPlanById,
+  getDefaultBillingPlan,
+  setBillingPlanRazorpayId,
+  clearBillingPlanRazorpayId,
+} from "./billingPlans";
 
 let client: Razorpay | null = null;
 
 function getClient(): Razorpay {
-  if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+  const keyId = process.env.RAZORPAY_KEY_ID?.trim().replace(/^["']|["']$/g, "");
+  const keySecret = process.env.RAZORPAY_KEY_SECRET?.trim().replace(/^["']|["']$/g, "");
+  if (!keyId || !keySecret) {
     throw new Error("RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET must be set");
   }
   if (!client) {
     client = new Razorpay({
-      key_id: process.env.RAZORPAY_KEY_ID,
-      key_secret: process.env.RAZORPAY_KEY_SECRET,
+      key_id: keyId,
+      key_secret: keySecret,
     });
   }
   return client;
 }
 
-// Finds the existing monthly ₹799 plan, or creates it if this is the first
-// time a subscription is ever requested. Avoids needing the user to click
-// through Razorpay's dashboard to set this up manually.
-let cachedPlanId: string | null = null;
+function safeCompareHex(expected: string, actual: string | undefined): boolean {
+  if (!actual || expected.length !== actual.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(Buffer.from(expected, "utf8"), Buffer.from(actual, "utf8"));
+}
 
-export async function getOrCreatePlanId(): Promise<string> {
-  if (process.env.RAZORPAY_PLAN_ID) return process.env.RAZORPAY_PLAN_ID;
-  if (cachedPlanId) return cachedPlanId;
+function razorpayPlanName(plan: BillingPlan): string {
+  return `Convora ${plan.name} — ${plan.priceLabel}/month`;
+}
 
+/** Finds or creates the Razorpay plan for a billing tier. */
+export async function getOrCreatePlanId(billingPlanId: string): Promise<string> {
+  const plan = await getBillingPlanById(billingPlanId);
+  if (!plan) {
+    throw new Error(`Unknown billing plan: ${billingPlanId}`);
+  }
+  if (!plan.active) {
+    throw new Error(`Plan "${plan.name}" is not available`);
+  }
+  if (!plan.razorpayEnabled) {
+    throw new Error(`Plan "${plan.name}" is not available for self-serve checkout`);
+  }
+
+  if (plan.razorpayPlanId) {
+    return plan.razorpayPlanId;
+  }
+
+  const amountPaise = plan.amountInr * 100;
+  const planName = razorpayPlanName(plan);
   const razorpay = getClient();
   const existing = await razorpay.plans.all({ count: 100 });
   const match = existing.items.find(
-    (p: any) => p.item?.name === PLAN_NAME && p.item?.amount === PLAN_AMOUNT_PAISE
+    (p: any) => p.item?.name === planName && Number(p.item?.amount) === amountPaise,
   );
+
   if (match) {
-    cachedPlanId = match.id;
+    await setBillingPlanRazorpayId(plan.id, match.id);
     return match.id;
   }
 
@@ -42,52 +70,218 @@ export async function getOrCreatePlanId(): Promise<string> {
     period: "monthly",
     interval: 1,
     item: {
-      name: PLAN_NAME,
-      amount: PLAN_AMOUNT_PAISE,
+      name: planName,
+      amount: amountPaise,
       currency: "INR",
-      description: "Unlimited WhatsApp broadcast messaging, billed monthly",
+      description: `${plan.name} plan — ${plan.tagline}`,
     },
-  } as any);
-  cachedPlanId = created.id;
+  } as Parameters<Razorpay["plans"]["create"]>[0]);
+
+  await setBillingPlanRazorpayId(plan.id, created.id);
   return created.id;
 }
 
-export async function createSubscription(customerEmail: string, customerName: string) {
+export async function createSubscription(
+  customerEmail: string,
+  customerName: string,
+  billingPlanId?: string,
+) {
+  const plan =
+    (billingPlanId ? await getBillingPlanById(billingPlanId) : undefined) ||
+    (await getDefaultBillingPlan());
+
+  if (!plan) {
+    throw new Error("No billing plans are configured");
+  }
+  if (!plan.active || !plan.razorpayEnabled) {
+    throw new Error("This plan requires contacting sales");
+  }
+
   const razorpay = getClient();
-  const planId = await getOrCreatePlanId();
+  const billingPlanRowId = plan.id;
+  let planId = await getOrCreatePlanId(billingPlanRowId);
 
-  const subscription = await razorpay.subscriptions.create({
-    plan_id: planId,
-    customer_notify: 1,
-    total_count: 120, // 10 years of monthly cycles - effectively "until cancelled"
-    notes: {
-      email: customerEmail,
-      name: customerName,
-    },
-  } as any);
+  async function create(planIdToUse: string) {
+    return await razorpay.subscriptions.create({
+      plan_id: planIdToUse,
+      customer_notify: 1,
+      total_count: 120,
+      notes: {
+        email: customerEmail,
+        name: customerName,
+        billingPlanId: billingPlanRowId,
+      },
+    } as Parameters<Razorpay["subscriptions"]["create"]>[0]);
+  }
 
-  return subscription;
+  let subscription: Awaited<ReturnType<typeof create>>;
+  try {
+    subscription = await create(planId);
+  } catch (error: any) {
+    const razorError = error?.error;
+    const isBadRequestIdNotFound =
+      error?.statusCode === 400 &&
+      razorError?.code === "BAD_REQUEST_ERROR" &&
+      typeof razorError?.description === "string" &&
+      razorError.description.toLowerCase().includes("invalid");
+
+    // If the saved Razorpay plan id doesn’t exist in the current Razorpay mode/account,
+    // clear it, recreate, and retry once.
+    if (isBadRequestIdNotFound) {
+      await clearBillingPlanRazorpayId(billingPlanRowId);
+      planId = await getOrCreatePlanId(billingPlanRowId);
+      subscription = await create(planId);
+    } else {
+      throw error;
+    }
+  }
+
+  return { subscription, plan };
 }
 
-export function verifyWebhookSignature(rawBody: string, signature: string): boolean {
-  const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
-  if (!secret) {
-    throw new Error("RAZORPAY_WEBHOOK_SECRET must be set");
+export type UpgradeQuote = {
+  fromPlan: BillingPlan;
+  toPlan: BillingPlan;
+  differenceInr: number;
+  differencePaise: number;
+};
+
+export async function quotePlanUpgrade(
+  currentPlanId: string,
+  targetPlanId: string,
+): Promise<UpgradeQuote> {
+  const fromPlan = await getBillingPlanById(currentPlanId);
+  const toPlan = await getBillingPlanById(targetPlanId);
+  if (!fromPlan || !toPlan) {
+    throw new Error("Plan not found");
+  }
+  if (!toPlan.active || !toPlan.razorpayEnabled) {
+    throw new Error("Target plan is not available for upgrade");
+  }
+  if (toPlan.amountInr <= fromPlan.amountInr) {
+    throw new Error("You can only upgrade to a higher-priced plan");
+  }
+  const differenceInr = toPlan.amountInr - fromPlan.amountInr;
+  return {
+    fromPlan,
+    toPlan,
+    differenceInr,
+    differencePaise: differenceInr * 100,
+  };
+}
+
+/** One-time order for the upgrade price difference. */
+export async function createUpgradeOrder(params: {
+  userId: string;
+  customerEmail: string;
+  customerName: string;
+  currentPlanId: string;
+  targetPlanId: string;
+}) {
+  const quote = await quotePlanUpgrade(params.currentPlanId, params.targetPlanId);
+  const razorpay = getClient();
+  const order = await razorpay.orders.create({
+    amount: quote.differencePaise,
+    currency: "INR",
+    receipt: `upgrade_${params.userId.slice(0, 8)}_${Date.now()}`.slice(0, 40),
+    notes: {
+      type: "plan_upgrade",
+      userId: params.userId,
+      fromPlanId: quote.fromPlan.id,
+      toPlanId: quote.toPlan.id,
+      email: params.customerEmail,
+      name: params.customerName,
+    },
+  });
+
+  return { order, quote };
+}
+
+export async function applyPlanUpgrade(params: {
+  userId: string;
+  razorpaySubscriptionId: string | null | undefined;
+  fromPlanId: string;
+  toPlanId: string;
+  orderId: string;
+  paymentId: string;
+  signature: string;
+}) {
+  if (!verifyPaymentSignature(params.orderId, params.paymentId, params.signature)) {
+    throw new Error("Invalid payment signature");
+  }
+
+  const quote = await quotePlanUpgrade(params.fromPlanId, params.toPlanId);
+  const newRazorpayPlanId = await getOrCreatePlanId(quote.toPlan.id);
+
+  if (params.razorpaySubscriptionId) {
+    try {
+      const razorpay = getClient();
+      await razorpay.subscriptions.update(params.razorpaySubscriptionId, {
+        plan_id: newRazorpayPlanId,
+        schedule_change_at: "now",
+      } as any);
+    } catch (error) {
+      console.error("[Razorpay] Failed to update subscription plan after upgrade:", error);
+      // Local upgrade still applies — recurring plan change can be retried later.
+    }
+  }
+
+  return quote;
+}
+
+/** Razorpay returns 401 for both bad keys and missing Subscriptions product access. */
+export async function describeUnauthorizedError(): Promise<string> {
+  try {
+    const razorpay = getClient();
+    await razorpay.payments.all({ count: 1 });
+    return (
+      "Razorpay Subscriptions is not enabled on your account. In the Razorpay Dashboard (Test mode), go to Payment Products → Subscriptions, activate it, enable Card under Settings, then try checkout again."
+    );
+  } catch {
+    return (
+      "Razorpay API authentication failed. Check that RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET match your Test mode keys in the Razorpay dashboard, then restart the server."
+    );
+  }
+}
+
+export function verifyWebhookSignature(rawBody: string, signature: string | undefined): boolean {
+  const secret = process.env.RAZORPAY_WEBHOOK_SECRET?.trim();
+  if (!secret || !signature?.trim()) {
+    return false;
   }
   const expected = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature || ""));
+  return safeCompareHex(expected, signature.trim());
 }
 
-export function verifyPaymentSignature(orderId: string, paymentId: string, signature: string): boolean {
-  const secret = process.env.RAZORPAY_KEY_SECRET;
-  if (!secret) {
-    throw new Error("RAZORPAY_KEY_SECRET must be set");
+export function verifyPaymentSignature(
+  orderId: string,
+  paymentId: string,
+  signature: string | undefined,
+): boolean {
+  const secret = process.env.RAZORPAY_KEY_SECRET?.trim().replace(/^["']|["']$/g, "");
+  if (!secret || !signature?.trim()) {
+    return false;
   }
   const expected = crypto
     .createHmac("sha256", secret)
     .update(`${orderId}|${paymentId}`)
     .digest("hex");
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature || ""));
+  return safeCompareHex(expected, signature.trim());
 }
 
-export { PLAN_AMOUNT_PAISE };
+/** Subscription checkout signs payment_id|subscription_id */
+export function verifySubscriptionPaymentSignature(
+  paymentId: string,
+  subscriptionId: string,
+  signature: string | undefined,
+): boolean {
+  const secret = process.env.RAZORPAY_KEY_SECRET?.trim().replace(/^["']|["']$/g, "");
+  if (!secret || !signature?.trim()) {
+    return false;
+  }
+  const expected = crypto
+    .createHmac("sha256", secret)
+    .update(`${paymentId}|${subscriptionId}`)
+    .digest("hex");
+  return safeCompareHex(expected, signature.trim());
+}

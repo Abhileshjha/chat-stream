@@ -48,7 +48,6 @@ app.get('/api/webhook', (req, res) => {
   const challenge = req.query['hub.challenge'];
 
   if (mode === 'subscribe' && token === process.env.META_VERIFY_TOKEN) {
-    console.log("✅ Webhook verified");
     return res.status(200).send(challenge);
   }
 
@@ -57,7 +56,6 @@ app.get('/api/webhook', (req, res) => {
 
 // Receiving messages
 app.post('/api/webhook', (req, res) => {
-  console.log("🔥 Webhook received:", JSON.stringify(req.body, null, 2));
   res.sendStatus(200);
 });
 

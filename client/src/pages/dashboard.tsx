@@ -18,7 +18,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton, PageSkeleton, KPIGridSkeleton, ChartSkeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ActivityFeed } from "@/components/activity-feed";
 import { StatusBadge } from "@/components/status-badge";
@@ -144,10 +144,10 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-2">
+      <div className="page-hero flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="font-heading text-2xl font-bold tracking-tight" data-testid="text-dashboard-title">Overview</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="page-title" data-testid="text-dashboard-title">Overview</h1>
+          <p className="page-subtitle">
             Monitor your messaging performance in real time
           </p>
         </div>
@@ -607,51 +607,26 @@ function ChartLegend({ color, label }: { color: string; label: string }) {
 
 function DashboardSkeleton() {
   return (
-    <div className="space-y-6">
-      <div>
-        <Skeleton className="h-7 w-32" />
-        <Skeleton className="h-4 w-56 mt-2" />
-      </div>
-      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-        {[...Array(4)].map((_, i) => (
-          <Card key={i}>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between mb-2">
-                <Skeleton className="h-3 w-16" />
-                <Skeleton className="h-7 w-7 rounded-md" />
-              </div>
-              <Skeleton className="h-7 w-20" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-        {[...Array(4)].map((_, i) => (
-          <Card key={i}>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <Skeleton className="h-8 w-8 rounded-lg" />
-                <div>
-                  <Skeleton className="h-3 w-12 mb-1" />
-                  <Skeleton className="h-4 w-20" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+    <PageSkeleton>
+      <KPIGridSkeleton count={4} />
+      <KPIGridSkeleton count={4} />
+      <div className="grid gap-4 lg:grid-cols-5">
+        <div className="lg:col-span-3">
+          <ChartSkeleton height="h-72" />
+        </div>
+        <div className="lg:col-span-2">
+          <ChartSkeleton height="h-72" />
+        </div>
       </div>
       <div className="grid gap-4 lg:grid-cols-5">
-        <Card className="lg:col-span-3">
-          <CardContent className="p-6">
-            <Skeleton className="h-72 w-full" />
-          </CardContent>
-        </Card>
-        <Card className="lg:col-span-2">
-          <CardContent className="p-6">
-            <Skeleton className="h-72 w-full" />
-          </CardContent>
-        </Card>
+        <div className="lg:col-span-3 space-y-4">
+          <ChartSkeleton height="h-48" />
+          <ChartSkeleton height="h-40" />
+        </div>
+        <div className="lg:col-span-2">
+          <ChartSkeleton height="h-[420px]" />
+        </div>
       </div>
-    </div>
+    </PageSkeleton>
   );
 }

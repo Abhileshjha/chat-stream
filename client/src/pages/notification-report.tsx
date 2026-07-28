@@ -70,7 +70,7 @@ export default function NotificationReport() {
   const [messageFilter, setMessageFilter] = useState("all");
   const { toast } = useToast();
 
-  const { data: report, isLoading } = useQuery<ReportData>({
+  const { data: report, isLoading, isError, error, refetch } = useQuery<ReportData>({
     queryKey: ["/api/notifications", params?.id, "report"],
     queryFn: async () => {
       const res = await fetch(`/api/notifications/${params?.id}/report`, { credentials: "include" });
@@ -78,7 +78,10 @@ export default function NotificationReport() {
       return res.json();
     },
     enabled: !!params?.id,
-    refetchInterval: 5000,
+    refetchInterval: (query) => {
+      const status = query.state.data?.notification?.status;
+      return status === "sending" ? 5000 : false;
+    },
   });
 
   const resumeMutation = useMutation({
@@ -95,7 +98,7 @@ export default function NotificationReport() {
     },
   });
 
-  if (isLoading || !report) {
+  if (isLoading) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-8 w-48" />
@@ -107,6 +110,32 @@ export default function NotificationReport() {
           ))}
         </div>
         <Card><CardContent className="p-6"><Skeleton className="h-64 w-full" /></CardContent></Card>
+      </div>
+    );
+  }
+
+  if (isError || !report) {
+    return (
+      <div className="space-y-4 max-w-lg">
+        <Button variant="ghost" size="icon" asChild data-testid="button-back-notifications">
+          <Link href="/notifications">
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+        </Button>
+        <Card>
+          <CardContent className="p-6 space-y-3">
+            <div className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              <p className="font-medium">Could not load report</p>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {(error as Error)?.message || "This notification may not exist or you may not have access."}
+            </p>
+            <Button variant="outline" onClick={() => refetch()} data-testid="button-retry-report">
+              Try again
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }

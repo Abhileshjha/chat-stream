@@ -9,6 +9,13 @@ import { eq } from "drizzle-orm";
 import { authStorage } from "./storage";
 import { getSession } from "./session";
 import { sendVerificationEmail } from "../email";
+import {
+  activateUserSession,
+  clearActiveSessionIfMatch,
+  getActiveSessionId,
+} from "./singleSession";
+import { TRIAL_DAYS } from "../trialLimits";
+import { blockExpiredTrialWrites } from "../subscriptionGate";
 
 interface SessionUser {
   claims: {
@@ -37,6 +44,7 @@ export async function setupAuth(app: Express) {
   app.use(getSession());
   app.use(passport.initialize());
   app.use(passport.session());
+  app.use(blockExpiredTrialWrites);
 
   passport.use(
     new LocalStrategy(
@@ -78,7 +86,7 @@ export async function setupAuth(app: Express) {
       }
 
       const passwordHash = await bcrypt.hash(password, 10);
-      const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
       const emailVerificationToken = crypto.randomBytes(32).toString("hex");
       const [user] = await db
         .insert(users)
@@ -97,10 +105,15 @@ export async function setupAuth(app: Express) {
         console.error("Failed to send verification email:", err);
       });
 
-      req.login(toSessionUser(user) as Express.User, (err) => {
+      req.login(toSessionUser(user) as Express.User, async (err) => {
         if (err) {
           console.error("Login after registration failed:", err);
           return res.status(500).json({ message: "Registered, but failed to start session" });
+        }
+        try {
+          await activateUserSession(user.id, req.sessionID);
+        } catch (e) {
+          console.error("Failed to activate session after registration:", e);
         }
         res.json({ success: true });
       });
@@ -119,27 +132,92 @@ export async function setupAuth(app: Express) {
       if (!user) {
         return res.status(401).json({ message: info?.message || "Incorrect email or password" });
       }
-      req.login(user, (loginErr) => {
+      req.login(user, async (loginErr) => {
         if (loginErr) {
           console.error("Session start error:", loginErr);
           return res.status(500).json({ message: "Failed to start session" });
         }
-        res.json({ success: true });
+        // Return the user payload so the client can hydrate auth state without
+        // a second Neon round-trip to GET /api/auth/user.
+        try {
+          const userId = (user as SessionUser).claims.sub;
+          await activateUserSession(userId, req.sessionID);
+          const fullUser = await authStorage.getUser(userId);
+          return res.json({ success: true, user: fullUser || null });
+        } catch (e) {
+          console.error("Login user hydrate error:", e);
+          return res.json({ success: true, user: null });
+        }
       });
     })(req, res, next);
   });
 
+  function destroySessionAndRespond(req: any, res: any, preferJson: boolean) {
+    const userId = (req.user as SessionUser | undefined)?.claims?.sub;
+    const sessionId = req.sessionID as string | undefined;
+
+    const finishLogout = () => {
+      req.logout((logoutErr: Error | null) => {
+        if (logoutErr) console.error("Logout error:", logoutErr);
+        // req.logout() only clears passport user — the session row in Neon must
+        // be destroyed too, or the next request still pays a slow session read.
+        req.session.destroy((destroyErr: Error | null) => {
+          if (destroyErr) console.error("Session destroy error:", destroyErr);
+          res.clearCookie("connect.sid", {
+            path: "/",
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "lax",
+          });
+          if (preferJson) {
+            return res.json({ success: true });
+          }
+          return res.redirect("/");
+        });
+      });
+    };
+
+    if (userId && sessionId) {
+      clearActiveSessionIfMatch(userId, sessionId)
+        .catch((err) => console.error("Clear active session error:", err))
+        .finally(finishLogout);
+      return;
+    }
+
+    finishLogout();
+  }
+
+  // Preferred by the SPA (no full page reload).
+  app.post("/api/logout", (req, res) => {
+    destroySessionAndRespond(req, res, true);
+  });
+
+  // Legacy link / bookmark support.
   app.get("/api/logout", (req, res) => {
-    req.logout(() => {
-      res.redirect("/");
-    });
+    const wantsJson = req.headers.accept?.includes("application/json");
+    destroySessionAndRespond(req, res, Boolean(wantsJson));
   });
 }
 
-export const isAuthenticated: RequestHandler = (req, res, next) => {
+export const isAuthenticated: RequestHandler = async (req, res, next) => {
   if (!req.isAuthenticated() || !(req.user as SessionUser | undefined)?.claims?.sub) {
     return res.status(401).json({ message: "Unauthorized" });
   }
+
+  const userId = (req.user as SessionUser).claims.sub;
+  try {
+    const activeSessionId = await getActiveSessionId(userId);
+    if (activeSessionId && activeSessionId !== req.sessionID) {
+      return res.status(401).json({
+        message: "Your account was signed in on another device.",
+        code: "SESSION_SUPERSEDED",
+      });
+    }
+  } catch (err) {
+    console.error("Active session check error:", err);
+    return res.status(500).json({ message: "Failed to verify session" });
+  }
+
   return next();
 };
 

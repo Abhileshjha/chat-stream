@@ -9,6 +9,7 @@ module.exports = {
       env: {
         NODE_ENV: "production",
       },
+      // With the BullMQ queue, heap should stay flat; keep a safety net.
       max_memory_restart: "500M",
       autorestart: true,
       watch: false,

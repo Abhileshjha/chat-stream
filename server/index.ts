@@ -62,7 +62,6 @@ export function log(message: string, source = "express") {
     hour12: true,
   });
 
-  console.log(`${formattedTime} [${source}] ${message}`);
 }
 
 app.use((req, res, next) => {
@@ -72,7 +71,23 @@ app.use((req, res, next) => {
 
   const originalResJson = res.json;
   res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
+    // Only keep a tiny summary for logs — stringifying full template/contact
+    // payloads on every response was blocking the event loop and making the
+    // whole API feel slow under normal UI navigation.
+    if (bodyJson == null) {
+      capturedJsonResponse = undefined;
+    } else if (Array.isArray(bodyJson)) {
+      capturedJsonResponse = { type: "array", length: bodyJson.length };
+    } else if (typeof bodyJson === "object") {
+      const keys = Object.keys(bodyJson);
+      capturedJsonResponse = {
+        keys: keys.slice(0, 12),
+        ...(typeof (bodyJson as any).error === "string" ? { error: (bodyJson as any).error } : {}),
+        ...(typeof (bodyJson as any).message === "string" ? { message: (bodyJson as any).message } : {}),
+      };
+    } else {
+      capturedJsonResponse = { value: String(bodyJson).slice(0, 120) };
+    }
     return originalResJson.apply(res, [bodyJson, ...args]);
   };
 
@@ -83,7 +98,6 @@ app.use((req, res, next) => {
       if (capturedJsonResponse) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
-
       log(logLine);
     }
   });
@@ -97,6 +111,32 @@ app.use((req, res, next) => {
   registerAuthRoutes(app);
   
   await registerRoutes(httpServer, app);
+
+  // Ensure indexes + counter columns exist, then backfill rollups once.
+  // Non-blocking for request serving — runs after routes are up.
+  void (async () => {
+    try {
+      const { ensureSchemaPerformance } = await import("../script/ensureIndexes");
+      await ensureSchemaPerformance();
+      log("db indexes/columns ensured");
+      const { backfillAccountCounters } = await import("./counters");
+      await backfillAccountCounters();
+      log("account counter backfill complete");
+    } catch (err: any) {
+      console.error("[db] ensure/backfill failed:", err.message);
+    }
+  })();
+
+  // BullMQ fair workers (per-account queues + round-robin dispatcher).
+  // Runs in-process on the same Render instance; Redis holds the backlog
+  // so restarts no longer lose in-flight audience arrays in memory.
+  const { startBroadcastWorkers, isQueueEnabled } = await import("./queues");
+  if (isQueueEnabled()) {
+    startBroadcastWorkers();
+    log("broadcast queue workers started");
+  } else {
+    log("broadcast queue disabled (set REDIS_URL or UPSTASH_REDIS_*)");
+  }
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

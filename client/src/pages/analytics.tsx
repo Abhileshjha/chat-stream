@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton, PageSkeleton, KPIGridSkeleton, ChartSkeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -104,10 +104,10 @@ export default function Analytics() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-2">
+      <div className="page-hero flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Analytics</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="page-title" data-testid="text-page-title">Analytics</h1>
+          <p className="page-subtitle">
             Detailed insights into your messaging performance
           </p>
         </div>
@@ -451,31 +451,19 @@ function LegendItem({ color, label }: { color: string; label: string }) {
 
 function AnalyticsSkeleton() {
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <Skeleton className="h-8 w-40" />
-          <Skeleton className="h-4 w-64 mt-2" />
+    <PageSkeleton>
+      <KPIGridSkeleton count={4} />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="lg:col-span-2">
+          <ChartSkeleton height="h-80" />
         </div>
-        <Skeleton className="h-10 w-40" />
-      </div>
-      <div className="grid gap-4 md:grid-cols-4">
-        {[...Array(4)].map((_, i) => (
-          <Card key={i}>
-            <CardContent className="p-6">
-              <Skeleton className="h-4 w-24 mb-2" />
-              <Skeleton className="h-8 w-20" />
-            </CardContent>
-          </Card>
-        ))}
+        <ChartSkeleton height="h-64" />
+        <ChartSkeleton height="h-64" />
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="lg:col-span-2">
-          <CardContent className="p-6">
-            <Skeleton className="h-80 w-full" />
-          </CardContent>
-        </Card>
+        <ChartSkeleton height="h-48" />
+        <ChartSkeleton height="h-52" />
       </div>
-    </div>
+    </PageSkeleton>
   );
 }

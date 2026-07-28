@@ -2,46 +2,52 @@
 @tailwind components;
 @tailwind utilities;
 
-/* LIGHT MODE - Convora brand: navy + cyan */
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* LIGHT MODE - Convora brand: WhatsApp green + clean neutrals */
 :root {
-  --button-outline: rgba(20,26,70, .10);
-  --badge-outline: rgba(20,26,70, .05);
+  --button-outline: rgba(7,94,84, .10);
+  --badge-outline: rgba(7,94,84, .05);
   --opaque-button-border-intensity: -8;
-  --elevate-1: rgba(20,26,70, .03);
-  --elevate-2: rgba(20,26,70, .08);
-  --background: 225 67% 99%;
-  --foreground: 233 56% 18%;
-  --border: 224 27% 92%;
+  --elevate-1: rgba(37,211,102, .06);
+  --elevate-2: rgba(18,140,126, .10);
+  --background: 156 43% 98%;
+  --foreground: 174 86% 18%;
+  --border: 158 20% 89%;
   --card: 0 0% 100%;
-  --card-foreground: 233 56% 18%;
-  --card-border: 224 27% 92%;
+  --card-foreground: 174 86% 18%;
+  --card-border: 158 20% 89%;
   --sidebar: 0 0% 100%;
-  --sidebar-foreground: 233 56% 18%;
-  --sidebar-border: 224 27% 92%;
-  --sidebar-primary: 190 80% 50%;
-  --sidebar-primary-foreground: 232 63% 12%;
-  --sidebar-accent: 220 43% 96%;
-  --sidebar-accent-foreground: 233 56% 18%;
-  --sidebar-ring: 190 80% 50%;
+  --sidebar-foreground: 174 86% 18%;
+  --sidebar-border: 158 20% 89%;
+  --sidebar-primary: 145 70% 49%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 150 54% 95%;
+  --sidebar-accent-foreground: 174 86% 18%;
+  --sidebar-ring: 145 70% 49%;
   --popover: 0 0% 100%;
-  --popover-foreground: 233 56% 18%;
-  --popover-border: 224 27% 92%;
-  --primary: 233 56% 18%;
+  --popover-foreground: 174 86% 18%;
+  --popover-border: 158 20% 89%;
+  --primary: 145 70% 49%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 220 43% 96%;
-  --secondary-foreground: 233 56% 18%;
-  --muted: 224 33% 94%;
-  --muted-foreground: 231 16% 50%;
-  --accent: 190 85% 95%;
-  --accent-foreground: 191 86% 42%;
+  --secondary: 150 54% 95%;
+  --secondary-foreground: 174 86% 18%;
+  --muted: 156 24% 95%;
+  --muted-foreground: 171 20% 39%;
+  --accent: 100 69% 90%;
+  --accent-foreground: 174 86% 18%;
   --destructive: 354 71% 61%;
   --destructive-foreground: 0 0% 100%;
-  --input: 224 27% 92%;
-  --ring: 190 80% 50%;
-  --chart-1: 233 56% 18%;
-  --chart-2: 190 80% 50%;
-  --chart-3: 232 23% 58%;
-  --chart-4: 41 92% 39%;
+  --input: 158 20% 89%;
+  --ring: 145 70% 49%;
+  --chart-1: 174 86% 18%;
+  --chart-2: 145 70% 49%;
+  --chart-3: 173 76% 31%;
+  --chart-4: 197 83% 56%;
   --chart-5: 354 71% 61%;
   --font-sans: 'IBM Plex Sans', sans-serif;
   --font-serif: Georgia, serif;
@@ -173,6 +179,11 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
+    background-image:
+      radial-gradient(circle at top left, rgba(37, 211, 102, 0.10), transparent 28%),
+      radial-gradient(circle at top right, rgba(52, 183, 241, 0.08), transparent 24%),
+      linear-gradient(180deg, rgba(255,255,255,0.85), rgba(247,251,248,1));
+    background-attachment: fixed;
   }
 }
 
@@ -208,6 +219,25 @@
     content: attr(data-placeholder);
     color: hsl(var(--muted-foreground));
     pointer-events: none;
+  }
+
+  .app-surface {
+    @apply rounded-3xl border border-white/60 bg-white/80 backdrop-blur-xl;
+    box-shadow: 0 24px 80px -28px rgba(7, 94, 84, 0.18);
+  }
+
+  .page-hero {
+    @apply rounded-3xl border border-white/60 p-6;
+    background-image: linear-gradient(to right, #fff, #fff, rgba(220, 248, 198, 0.75));
+    box-shadow: 0 20px 60px -30px rgba(7, 94, 84, 0.2);
+  }
+
+  .page-title {
+    @apply font-heading text-2xl font-bold tracking-tight text-foreground;
+  }
+
+  .page-subtitle {
+    @apply mt-1 text-sm text-muted-foreground;
   }
 
   /* .no-default-hover-elevate/no-default-active-elevate is an escape hatch so consumers of

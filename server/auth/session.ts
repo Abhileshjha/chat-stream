@@ -1,5 +1,6 @@
 import session from "express-session";
 import connectPg from "connect-pg-simple";
+import { pool } from "../db";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -12,8 +13,10 @@ function requireEnv(name: string): string {
 export function getSession() {
   const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
   const pgStore = connectPg(session);
+  // Reuse the app's pg Pool instead of opening a second connection string
+  // pool — every request hits sessions, and dual pools doubled Neon churn.
   const sessionStore = new pgStore({
-    conString: process.env.DATABASE_URL,
+    pool: pool as any,
     createTableIfMissing: false,
     ttl: sessionTtl,
     tableName: "sessions",

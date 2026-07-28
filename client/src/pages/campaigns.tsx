@@ -33,7 +33,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/status-badge";
 import { ProgressRing } from "@/components/progress-ring";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton, PageSkeleton, KPIGridSkeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Campaign, Template } from "@shared/schema";
@@ -174,10 +174,10 @@ export default function Campaigns() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="page-hero flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Campaigns</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="page-title">Campaigns</h1>
+          <p className="page-subtitle">
             Create and manage broadcast campaigns
           </p>
         </div>
@@ -542,22 +542,26 @@ function CampaignsGridSkeleton() {
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
       {[...Array(6)].map((_, i) => (
-        <Card key={i}>
-          <CardContent className="p-6">
-            <div className="flex items-start justify-between">
-              <div className="space-y-2 flex-1">
-                <Skeleton className="h-5 w-40" />
-                <Skeleton className="h-5 w-20" />
-              </div>
-              <Skeleton className="h-8 w-8" />
+        <div key={i} className="rounded-2xl border border-white/60 bg-white/80 p-6 space-y-4 animate-in fade-in duration-300" style={{ animationDelay: `${i * 80}ms` }}>
+          <div className="flex items-start justify-between">
+            <div className="space-y-2 flex-1">
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-5 w-20 rounded-full" />
             </div>
-            <Skeleton className="h-16 w-full mt-4" />
-            <div className="mt-4 pt-4 border-t flex items-center justify-between">
-              <Skeleton className="h-4 w-24" />
-              <Skeleton className="h-8 w-16" />
+            <Skeleton className="h-8 w-8 rounded-lg" />
+          </div>
+          <div className="flex items-center gap-4">
+            <Skeleton className="h-16 w-16 rounded-full" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-3/4" />
             </div>
-          </CardContent>
-        </Card>
+          </div>
+          <div className="pt-4 border-t border-[#075E54]/6 flex items-center justify-between">
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-8 w-16 rounded-lg" />
+          </div>
+        </div>
       ))}
     </div>
   );

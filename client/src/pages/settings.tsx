@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Save, Eye, EyeOff, RefreshCw, CheckCircle, XCircle, AlertTriangle, ExternalLink, HelpCircle, ChevronDown, ChevronUp, Copy, Plus, Smartphone, Trash2, MessageSquare, Search } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton, PageSkeleton, CardSkeleton } from "@/components/ui/skeleton";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -48,6 +48,17 @@ export default function Settings() {
     webhookVerifyToken: "",
     apiVersion: "v18.0",
   });
+
+  useEffect(() => {
+    if (!settings) return;
+    setFormData({
+      accessToken: settings.accessToken || "",
+      phoneNumberId: settings.phoneNumberId || "",
+      businessAccountId: settings.businessAccountId || "",
+      webhookVerifyToken: settings.webhookVerifyToken || "",
+      apiVersion: settings.apiVersion || "v18.0",
+    });
+  }, [settings]);
 
   const saveMutation = useMutation({
     mutationFn: async (data: Partial<ApiSettings>) => {
@@ -132,10 +143,10 @@ export default function Settings() {
   }
 
   return (
-    <div className="space-y-6 max-w-3xl">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="text-sm text-muted-foreground">
+    <div className="space-y-6">
+      <div className="page-hero">
+        <h1 className="page-title">Settings</h1>
+        <p className="page-subtitle">
           Configure your Meta WhatsApp Business API connection
         </p>
       </div>
@@ -346,26 +357,32 @@ export default function Settings() {
             <div className="relative">
               <Input
                 id="accessToken"
+                name="convora-api-access-token"
                 type={showToken ? "text" : "password"}
                 value={formData.accessToken}
                 onChange={(e) => handleInputChange("accessToken", e.target.value)}
                 placeholder="Enter your permanent access token"
                 className="pr-10 font-mono text-sm"
+                autoComplete="new-password"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                data-lpignore="true"
+                data-1p-ignore
                 data-testid="input-access-token"
               />
-              <Button
+              <button
                 type="button"
-                variant="ghost"
-                size="icon"
-                className="absolute right-0 top-0"
                 onClick={() => setShowToken(!showToken)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                aria-label={showToken ? "Hide access token" : "Show access token"}
               >
                 {showToken ? (
-                  <EyeOff className="h-4 w-4 text-muted-foreground" />
+                  <EyeOff className="h-4 w-4" />
                 ) : (
-                  <Eye className="h-4 w-4 text-muted-foreground" />
+                  <Eye className="h-4 w-4" />
                 )}
-              </Button>
+              </button>
             </div>
             <p className="text-xs text-muted-foreground">
               Generate a permanent token from Meta Business Suite
@@ -388,10 +405,15 @@ export default function Settings() {
               <Label htmlFor="businessAccountId">Business Account ID</Label>
               <Input
                 id="businessAccountId"
+                name="convora-api-waba-id"
                 value={formData.businessAccountId}
                 onChange={(e) => handleInputChange("businessAccountId", e.target.value)}
                 placeholder="e.g., 987654321098765"
                 className="font-mono text-sm"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
                 data-testid="input-business-account-id"
               />
             </div>
@@ -644,10 +666,17 @@ function AddNumberSection({
           <Label htmlFor="manual-waba-id">WABA ID (Business Account ID)</Label>
           <Input
             id="manual-waba-id"
+            name="convora-manual-waba-id"
             value={manualAccount.businessAccountId}
             onChange={(e) => setManualAccount((prev: any) => ({ ...prev, businessAccountId: e.target.value }))}
             placeholder="e.g., 987654321098765"
             className="font-mono text-sm"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            data-lpignore="true"
+            data-1p-ignore
             data-testid="input-manual-waba-id"
           />
           <p className="text-xs text-muted-foreground">
@@ -660,27 +689,33 @@ function AddNumberSection({
           <div className="relative">
             <Input
               id="manual-access-token"
+              name="convora-manual-access-token"
               type={showManualToken ? "text" : "password"}
               value={manualAccount.accessToken}
               onChange={(e) => setManualAccount((prev: any) => ({ ...prev, accessToken: e.target.value }))}
               placeholder="Enter your permanent access token"
               className="pr-10 font-mono text-sm"
+              autoComplete="new-password"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-lpignore="true"
+              data-1p-ignore
               data-testid="input-manual-access-token"
             />
-            <Button
+            <button
               type="button"
-              variant="ghost"
-              size="icon"
-              className="absolute right-0 top-0"
               onClick={() => setShowManualToken(!showManualToken)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
               data-testid="button-toggle-manual-token"
+              aria-label={showManualToken ? "Hide access token" : "Show access token"}
             >
               {showManualToken ? (
-                <EyeOff className="h-4 w-4 text-muted-foreground" />
+                <EyeOff className="h-4 w-4" />
               ) : (
-                <Eye className="h-4 w-4 text-muted-foreground" />
+                <Eye className="h-4 w-4" />
               )}
-            </Button>
+            </button>
           </div>
           <p className="text-xs text-muted-foreground">
             Generate a permanent System User token from Meta Business Settings
@@ -942,24 +977,34 @@ function WebhookToggle({ label, description, defaultChecked }: WebhookToggleProp
 
 function SettingsSkeleton() {
   return (
-    <div className="space-y-6 max-w-3xl">
-      <div>
-        <Skeleton className="h-8 w-32" />
-        <Skeleton className="h-4 w-64 mt-2" />
+    <PageSkeleton>
+      <CardSkeleton lines={2} />
+      <div className="rounded-2xl border border-white/60 bg-white/80 p-6 space-y-5">
+        <div className="flex items-center gap-3">
+          <Skeleton className="h-10 w-10 rounded-xl" />
+          <div className="space-y-2 flex-1">
+            <Skeleton className="h-4 w-48" />
+            <Skeleton className="h-3 w-32" />
+          </div>
+        </div>
+        <div className="space-y-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="flex items-center justify-between p-3 rounded-xl border border-[#075E54]/6">
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-10 w-10 rounded-lg" />
+                <div className="space-y-1.5">
+                  <Skeleton className="h-4 w-36" />
+                  <Skeleton className="h-3 w-24" />
+                </div>
+              </div>
+              <Skeleton className="h-6 w-20 rounded-full" />
+            </div>
+          ))}
+        </div>
       </div>
-      <Card>
-        <CardContent className="p-6">
-          <Skeleton className="h-20 w-full" />
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent className="p-6 space-y-4">
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-        </CardContent>
-      </Card>
-    </div>
+      <CardSkeleton lines={4} />
+      <CardSkeleton lines={3} />
+    </PageSkeleton>
   );
 }
 

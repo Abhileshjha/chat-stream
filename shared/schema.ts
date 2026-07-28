@@ -1,10 +1,74 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, decimal, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, decimal, jsonb, index, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // Re-export auth models (users and sessions tables)
 export * from "./models/auth";
+
+// Billing plans (admin-managed catalog shown on marketing + billing checkout)
+export const billingPlans = pgTable(
+  "billing_plans",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    slug: varchar("slug", { length: 64 }).notNull().unique(),
+    name: varchar("name", { length: 120 }).notNull(),
+    tagline: text("tagline").notNull().default(""),
+    amountInr: integer("amount_inr").notNull(),
+    period: varchar("period", { length: 20 }).notNull().default("month"),
+    featured: boolean("featured").notNull().default(false),
+    active: boolean("active").notNull().default(true),
+    razorpayEnabled: boolean("razorpay_enabled").notNull().default(true),
+    features: jsonb("features").$type<string[]>().notNull().default([]),
+    sortOrder: integer("sort_order").notNull().default(0),
+    /** null = unlimited */
+    maxContacts: integer("max_contacts"),
+    maxMessagesPerDay: integer("max_messages_per_day"),
+    maxWhatsappNumbers: integer("max_whatsapp_numbers"),
+    maxTemplates: integer("max_templates"),
+    maxTeamSeats: integer("max_team_seats"),
+    razorpayPlanId: varchar("razorpay_plan_id"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("billing_plans_active_sort_idx").on(table.active, table.sortOrder),
+  ],
+);
+
+export type BillingPlanRow = typeof billingPlans.$inferSelect;
+export type InsertBillingPlan = typeof billingPlans.$inferInsert;
+
+// Payment / billing history (subscriptions + upgrades)
+export const billingPayments = pgTable(
+  "billing_payments",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull(),
+    billingPlanId: varchar("billing_plan_id"),
+    fromPlanId: varchar("from_plan_id"),
+    type: varchar("type", { length: 40 }).notNull(), // subscription | upgrade | renewal | refund | failed
+    status: varchar("status", { length: 40 }).notNull().default("captured"), // captured | failed | refunded
+    amountInr: integer("amount_inr").notNull().default(0),
+    currency: varchar("currency", { length: 10 }).notNull().default("INR"),
+    razorpayPaymentId: varchar("razorpay_payment_id"),
+    razorpayOrderId: varchar("razorpay_order_id"),
+    razorpaySubscriptionId: varchar("razorpay_subscription_id"),
+    razorpayInvoiceId: varchar("razorpay_invoice_id"),
+    method: varchar("method", { length: 40 }),
+    email: varchar("email"),
+    description: text("description"),
+    rawPayload: jsonb("raw_payload"),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    index("billing_payments_user_idx").on(table.userId, table.createdAt),
+    index("billing_payments_payment_id_idx").on(table.razorpayPaymentId),
+  ],
+);
+
+export type BillingPayment = typeof billingPayments.$inferSelect;
+export type InsertBillingPayment = typeof billingPayments.$inferInsert;
 
 // Template status types
 export const templateStatusEnum = z.enum(["PENDING", "APPROVED", "REJECTED", "DISABLED", "PAUSED"]);
@@ -59,7 +123,12 @@ export const templates = pgTable("templates", {
   lastSyncedAt: timestamp("last_synced_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => [
+  index("templates_account_id_idx").on(table.accountId),
+  index("templates_account_status_idx").on(table.accountId, table.status),
+  index("templates_account_name_idx").on(table.accountId, table.name),
+  index("templates_meta_id_idx").on(table.metaTemplateId),
+]);
 
 export const insertTemplateSchema = createInsertSchema(templates).omit({
   id: true,
@@ -109,9 +178,15 @@ export const campaigns = pgTable("campaigns", {
   startedAt: timestamp("started_at"),
   completedAt: timestamp("completed_at"),
   recipients: jsonb("recipients").$type<string[]>(),
+  /** Denormalized length of recipients — avoids jsonb parse on list views. */
+  recipientCount: integer("recipient_count").default(0),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => [
+  index("campaigns_account_id_idx").on(table.accountId),
+  index("campaigns_account_created_idx").on(table.accountId, table.createdAt),
+  index("campaigns_account_status_idx").on(table.accountId, table.status),
+]);
 
 export const insertCampaignSchema = createInsertSchema(campaigns).omit({
   id: true,
@@ -139,7 +214,16 @@ export const messages = pgTable("messages", {
   errorDescription: text("error_description"),
   cost: decimal("cost", { precision: 10, scale: 4 }),
   metadata: jsonb("metadata"),
-});
+}, (table) => [
+  index("messages_account_id_idx").on(table.accountId),
+  index("messages_account_status_idx").on(table.accountId, table.status),
+  index("messages_campaign_id_idx").on(table.campaignId),
+  index("messages_campaign_status_idx").on(table.campaignId, table.status),
+  index("messages_account_queued_at_idx").on(table.accountId, table.queuedAt),
+  index("messages_account_sent_at_idx").on(table.accountId, table.sentAt),
+  index("messages_campaign_phone_idx").on(table.campaignId, table.recipientPhone),
+  index("messages_template_id_idx").on(table.templateId),
+]);
 
 export const insertMessageSchema = createInsertSchema(messages).omit({
   id: true,
@@ -206,9 +290,21 @@ export const whatsappAccounts = pgTable("whatsapp_accounts", {
   metaSentCount: integer("meta_sent_count").default(0),
   metaDeliveredCount: integer("meta_delivered_count").default(0),
   metaTotalCost: text("meta_total_cost").default("0"),
+  /** Local rollups — updated on message/contact/template writes (no full scans). */
+  messageTotalCount: integer("message_total_count").default(0),
+  messageSentCount: integer("message_sent_count").default(0),
+  messageDeliveredCount: integer("message_delivered_count").default(0),
+  messageReadCount: integer("message_read_count").default(0),
+  messageFailedCount: integer("message_failed_count").default(0),
+  contactTotalCount: integer("contact_total_count").default(0),
+  templateApprovedCount: integer("template_approved_count").default(0),
+  templatePendingCount: integer("template_pending_count").default(0),
   lastSyncedAt: timestamp("last_synced_at"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => [
+  index("whatsapp_accounts_user_id_idx").on(table.userId),
+  index("whatsapp_accounts_phone_number_id_idx").on(table.phoneNumberId),
+]);
 
 export const insertWhatsAppAccountSchema = createInsertSchema(whatsappAccounts).omit({
   id: true,
@@ -227,7 +323,9 @@ export const contactLists = pgTable("contact_lists", {
   contactCount: integer("contact_count").default(0),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => [
+  index("contact_lists_account_idx").on(table.accountId),
+]);
 
 export const insertContactListSchema = createInsertSchema(contactLists).omit({
   id: true,
@@ -246,7 +344,9 @@ export const contactTags = pgTable("contact_tags", {
   color: varchar("color", { length: 20 }).notNull(),
   contactCount: integer("contact_count").default(0),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => [
+  index("contact_tags_account_idx").on(table.accountId),
+]);
 
 export const insertContactTagSchema = createInsertSchema(contactTags).omit({
   id: true,
@@ -269,7 +369,13 @@ export const contacts = pgTable("contacts", {
   customFields: jsonb("custom_fields").$type<Record<string, string>>(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => [
+  index("contacts_account_id_idx").on(table.accountId),
+  index("contacts_account_status_idx").on(table.accountId, table.status),
+  index("contacts_account_created_idx").on(table.accountId, table.createdAt),
+  // GIN indexes for list_ids / tag_ids are created in script/ensureIndexes.ts
+  // (Drizzle's index helper doesn't express jsonb GIN cleanly across versions).
+]);
 
 export const insertContactSchema = createInsertSchema(contacts).omit({
   id: true,
@@ -299,6 +405,9 @@ export const conversations = pgTable("conversations", {
   // fast (28k+ rows on one account already) and was a full sequential scan
   // without this.
   index("IDX_conversations_account_last_message").on(table.accountId, table.lastMessageAt),
+  index("conversations_account_id_idx").on(table.accountId),
+  index("conversations_account_phone_idx").on(table.accountId, table.contactPhone),
+  index("conversations_account_status_idx").on(table.accountId, table.status),
 ]);
 
 export const insertConversationSchema = createInsertSchema(conversations).omit({
@@ -322,7 +431,9 @@ export const conversationMessages = pgTable("conversation_messages", {
   sentAt: timestamp("sent_at").defaultNow(),
   deliveredAt: timestamp("delivered_at"),
   readAt: timestamp("read_at"),
-});
+}, (table) => [
+  index("conversation_messages_conv_sent_idx").on(table.conversationId, table.sentAt),
+]);
 
 export const insertConversationMessageSchema = createInsertSchema(conversationMessages).omit({
   id: true,
@@ -374,7 +485,11 @@ export const notifications = pgTable("notifications", {
   templateVariables: jsonb("template_variables").$type<Record<string, string>>(),
   headerMediaUrl: text("header_media_url"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => [
+  index("notifications_account_id_idx").on(table.accountId),
+  index("notifications_account_created_idx").on(table.accountId, table.createdAt),
+  index("notifications_account_status_idx").on(table.accountId, table.status),
+]);
 
 export const insertNotificationSchema = createInsertSchema(notifications).omit({
   id: true,
@@ -393,7 +508,9 @@ export const activities = pgTable("activities", {
   description: text("description").notNull(),
   timestamp: timestamp("timestamp").defaultNow(),
   metadata: jsonb("metadata").$type<Record<string, unknown>>(),
-});
+}, (table) => [
+  index("activities_account_ts_idx").on(table.accountId, table.timestamp),
+]);
 
 export type ActivityItem = typeof activities.$inferSelect;
 
@@ -426,7 +543,11 @@ export const teamMembers = pgTable("team_members", {
   status: varchar("status", { length: 20 }).notNull().default("pending"),
   invitedAt: timestamp("invited_at").defaultNow(),
   acceptedAt: timestamp("accepted_at"),
-});
+}, (table) => [
+  index("team_members_account_idx").on(table.accountId),
+  index("team_members_member_user_idx").on(table.memberUserId, table.status),
+  index("team_members_member_email_idx").on(table.memberEmail, table.status),
+]);
 
 export const insertTeamMemberSchema = createInsertSchema(teamMembers).omit({
   id: true,

@@ -37,7 +37,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { StatusBadge } from "@/components/status-badge";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton, TableSkeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { parseApiError } from "@/lib/errors";
@@ -171,10 +171,10 @@ export default function Templates() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-2">
+      <div className="page-hero flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Templates</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="page-title" data-testid="text-page-title">Templates</h1>
+          <p className="page-subtitle">
             Manage your WhatsApp message templates
           </p>
         </div>
@@ -419,19 +419,5 @@ function FileTextIcon({ className }: { className?: string }) {
 }
 
 function TemplatesTableSkeleton() {
-  return (
-    <div className="p-4 space-y-4">
-      {[...Array(5)].map((_, i) => (
-        <div key={i} className="flex items-center gap-4">
-          <Skeleton className="h-10 w-48" />
-          <Skeleton className="h-6 w-20" />
-          <Skeleton className="h-6 w-12" />
-          <Skeleton className="h-6 w-24" />
-          <Skeleton className="h-6 w-16" />
-          <Skeleton className="h-6 w-28" />
-          <Skeleton className="h-8 w-8 ml-auto" />
-        </div>
-      ))}
-    </div>
-  );
+  return <TableSkeleton rows={6} cols={6} />;
 }

@@ -26,7 +26,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { StatusBadge } from "@/components/status-badge";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton, TableSkeleton, KPIGridSkeleton, PageSkeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import type { Message, Template } from "@shared/schema";
 
@@ -37,8 +37,25 @@ export default function Messages() {
   const perPage = 25;
   const { toast } = useToast();
 
-  const { data: messages = [], isLoading, refetch, isRefetching } = useQuery<Message[]>({
-    queryKey: ["/api/messages"],
+  type MessagesPage = {
+    messages: Message[];
+    total: number;
+    statusCounts: Record<string, number>;
+  };
+
+  const { data, isLoading, refetch, isRefetching } = useQuery<MessagesPage>({
+    queryKey: ["/api/messages", page, perPage, statusFilter, searchQuery],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(perPage),
+      });
+      if (statusFilter !== "all") params.set("status", statusFilter);
+      if (searchQuery.trim()) params.set("search", searchQuery.trim());
+      const res = await fetch(`/api/messages?${params}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch messages");
+      return res.json();
+    },
   });
 
   const { data: templates = [] } = useQuery<Template[]>({
@@ -51,23 +68,15 @@ export default function Messages() {
     return template?.name || templateId;
   };
 
-  const filteredMessages = messages.filter((message) => {
-    const matchesSearch = 
-      message.recipientPhone.includes(searchQuery) ||
-      (message.whatsappMessageId && message.whatsappMessageId.includes(searchQuery));
-    const matchesStatus = statusFilter === "all" || message.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
-
-  const totalPages = Math.ceil(filteredMessages.length / perPage);
-  const paginatedMessages = filteredMessages.slice((page - 1) * perPage, page * perPage);
-
+  const messages = data?.messages || [];
+  const total = data?.total || 0;
+  const totalPages = Math.max(1, Math.ceil(total / perPage));
   const statusCounts = {
-    all: messages.length,
-    sent: messages.filter((m) => m.status === "sent").length,
-    delivered: messages.filter((m) => m.status === "delivered").length,
-    read: messages.filter((m) => m.status === "read").length,
-    failed: messages.filter((m) => m.status === "failed").length,
+    all: data?.statusCounts?.all || 0,
+    sent: data?.statusCounts?.sent || 0,
+    delivered: data?.statusCounts?.delivered || 0,
+    read: data?.statusCounts?.read || 0,
+    failed: data?.statusCounts?.failed || 0,
   };
 
   const handleExport = () => {
@@ -77,12 +86,17 @@ export default function Messages() {
     });
   };
 
+  const handleStatusChange = (value: string) => {
+    setStatusFilter(value);
+    setPage(1);
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="page-hero flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Messages</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="page-title">Messages</h1>
+          <p className="page-subtitle">
             Track message delivery and view detailed logs
           </p>
         </div>
@@ -119,14 +133,17 @@ export default function Messages() {
           <Input
             placeholder="Search by phone or message ID..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setPage(1);
+            }}
             className="pl-9 font-mono"
             data-testid="input-search-messages"
           />
         </div>
         <div className="flex items-center gap-2">
           <Filter className="h-4 w-4 text-muted-foreground" />
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <Select value={statusFilter} onValueChange={handleStatusChange}>
             <SelectTrigger className="w-40" data-testid="select-status-filter">
               <SelectValue placeholder="Filter by status" />
             </SelectTrigger>
@@ -146,7 +163,7 @@ export default function Messages() {
         <CardContent className="p-0">
           {isLoading ? (
             <MessagesTableSkeleton />
-          ) : paginatedMessages.length === 0 ? (
+          ) : messages.length === 0 ? (
             <div className="py-16 text-center">
               <MessageIcon className="mx-auto h-12 w-12 text-muted-foreground/50" />
               <h3 className="mt-4 text-lg font-semibold">No messages found</h3>
@@ -172,7 +189,7 @@ export default function Messages() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {paginatedMessages.map((message) => (
+                  {messages.map((message) => (
                     <TableRow 
                       key={message.id}
                       className="transition-colors"
@@ -248,7 +265,7 @@ export default function Messages() {
               {totalPages > 1 && (
                 <div className="flex items-center justify-between px-4 py-3 border-t">
                   <p className="text-sm text-muted-foreground">
-                    Showing {((page - 1) * perPage) + 1} to {Math.min(page * perPage, filteredMessages.length)} of {filteredMessages.length} messages
+                    Showing {((page - 1) * perPage) + 1} to {Math.min(page * perPage, total)} of {total} messages
                   </p>
                   <div className="flex items-center gap-2">
                     <Button
@@ -320,20 +337,5 @@ function MessageIcon({ className }: { className?: string }) {
 }
 
 function MessagesTableSkeleton() {
-  return (
-    <div className="p-4 space-y-3">
-      {[...Array(10)].map((_, i) => (
-        <div key={i} className="flex items-center gap-4">
-          <Skeleton className="h-8 w-28" />
-          <Skeleton className="h-8 w-28" />
-          <Skeleton className="h-8 w-32" />
-          <Skeleton className="h-6 w-20" />
-          <Skeleton className="h-6 w-24" />
-          <Skeleton className="h-6 w-24" />
-          <Skeleton className="h-6 w-24" />
-          <Skeleton className="h-6 flex-1" />
-        </div>
-      ))}
-    </div>
-  );
+  return <TableSkeleton rows={8} cols={7} />;
 }

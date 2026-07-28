@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Plus,
   MoreVertical,
@@ -19,6 +20,7 @@ import {
   Play,
   Edit,
   BarChart3,
+  AlertTriangle,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -28,7 +30,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Notification, Template } from "@shared/schema";
+import type { Notification, Template, WhatsAppAccount } from "@shared/schema";
+
+function isConnectedAccount(account: WhatsAppAccount): boolean {
+  const status = (account.status || "").toLowerCase();
+  if (status && status !== "connected") return false;
+  return !!(account.accessToken && account.phoneNumberId);
+}
 
 export default function Notifications() {
   const [, navigate] = useLocation();
@@ -41,6 +49,12 @@ export default function Notifications() {
   const { data: templates = [] } = useQuery<Template[]>({
     queryKey: ["/api/templates"],
   });
+
+  const { data: accountsData } = useQuery<{ accounts: WhatsAppAccount[]; activeAccountId?: string }>({
+    queryKey: ["/api/accounts"],
+  });
+
+  const hasConnectedMeta = (accountsData?.accounts ?? []).some(isConnectedAccount);
 
   const deleteNotificationMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -109,20 +123,54 @@ export default function Notifications() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-2">
+      <div className="page-hero flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Notifications</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="page-title" data-testid="text-page-title">Notifications</h1>
+          <p className="page-subtitle">
             Create and schedule broadcast notifications
           </p>
         </div>
-        <Button asChild data-testid="button-create-notification">
-          <Link href="/notifications/new">
-            <Plus className="h-4 w-4 mr-2" />
-            New Notification
-          </Link>
+        <Button
+          asChild={hasConnectedMeta}
+          disabled={!hasConnectedMeta}
+          data-testid="button-create-notification"
+          onClick={() => {
+            if (!hasConnectedMeta) {
+              toast({
+                title: "Connect WhatsApp first",
+                description: "Connect a WhatsApp Business number (Meta API) before creating notifications.",
+                variant: "destructive",
+              });
+            }
+          }}
+        >
+          {hasConnectedMeta ? (
+            <Link href="/notifications/new">
+              <Plus className="h-4 w-4 mr-2" />
+              New Notification
+            </Link>
+          ) : (
+            <span className="inline-flex items-center">
+              <Plus className="h-4 w-4 mr-2" />
+              New Notification
+            </span>
+          )}
         </Button>
       </div>
+
+      {!hasConnectedMeta && (
+        <Card className="border-amber-200 bg-amber-50">
+          <CardContent className="flex flex-col sm:flex-row sm:items-center gap-3 py-4 text-amber-950">
+            <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
+            <div className="flex-1 text-sm">
+              Connect an active WhatsApp Business number with Meta API before creating notifications.
+            </div>
+            <Button asChild variant="outline" size="sm" className="border-amber-300">
+              <Link href="/settings">Go to Settings</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <Card>
@@ -186,7 +234,33 @@ export default function Notifications() {
         <CardContent>
           <ScrollArea className="h-[500px]">
             {isLoading ? (
-              <div className="text-center text-muted-foreground py-8">Loading...</div>
+              <div className="space-y-3">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="rounded-2xl border border-white/60 bg-white/80 p-4 space-y-3 animate-in fade-in duration-300"
+                    style={{ animationDelay: `${i * 100}ms` }}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <Skeleton className="h-5 w-5 rounded-md mt-0.5" />
+                        <div className="space-y-2">
+                          <Skeleton className="h-4 w-40" />
+                          <Skeleton className="h-3.5 w-28" />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Skeleton className="h-5 w-16 rounded-full" />
+                        <Skeleton className="h-8 w-8 rounded-md" />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <Skeleton className="h-4 w-24" />
+                      <Skeleton className="h-4 w-32" />
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : notifications.length === 0 ? (
               <div className="text-center text-muted-foreground py-8">
                 <Bell className="h-12 w-12 mx-auto mb-2 opacity-30" />
