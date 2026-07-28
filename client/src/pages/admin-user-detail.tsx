@@ -163,7 +163,6 @@ export default function AdminUserDetail() {
 
   const invalidateDetail = () => {
     queryClient.invalidateQueries({ queryKey: detailQueryKey });
-    queryClient.invalidateQueries({ queryKey: ["/api/admin/contacts-usage"] });
   };
 
   const deleteAllContactsMutation = useMutation({

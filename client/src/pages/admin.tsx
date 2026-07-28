@@ -9,12 +9,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -45,12 +39,10 @@ import {
   Globe,
   AlertTriangle,
   Trash2,
-  List as ListIcon,
   BarChart3,
   Settings,
 } from "lucide-react";
 import type { User } from "@shared/models/auth";
-import type { Contact, ContactList } from "@shared/schema";
 import { AdminPlansPanel } from "@/components/admin-plans";
 import { AdminPaymentsPanel } from "@/components/admin-payments";
 import { AdminRevenuePanel } from "@/components/admin-revenue";
@@ -135,19 +127,6 @@ interface AdminUploadsResponse {
   totalSize: number;
   page: number;
   pageSize: number;
-}
-
-interface AdminContactsUsage {
-  id: string;
-  name: string;
-  phoneNumber: string;
-  contactCount: number;
-  listCount: number;
-}
-
-interface AdminAccountContactsResponse {
-  contacts: Contact[];
-  lists: ContactList[];
 }
 
 function formatBytes(bytes: number): string {
@@ -254,60 +233,15 @@ export default function Admin() {
     onError: () => toast({ title: "Error", description: "Failed to delete file", variant: "destructive" }),
   });
 
-  // ---- Contacts tab ----
-  const { data: contactsUsage = [] } = useQuery<AdminContactsUsage[]>({
-    queryKey: ["/api/admin/contacts-usage"],
-    enabled: tab === "contacts",
-  });
-
-  const [drilldownAccount, setDrilldownAccount] = useState<AdminContactsUsage | null>(null);
-
-  const { data: accountContacts } = useQuery<AdminAccountContactsResponse>({
-    queryKey: ["/api/admin/accounts", drilldownAccount?.id, "contacts"],
-    queryFn: async () => {
-      const res = await apiRequest("GET", `/api/admin/accounts/${drilldownAccount!.id}/contacts`);
-      return res.json();
-    },
-    enabled: !!drilldownAccount,
-  });
-
-  const invalidateContactsAdmin = () => {
-    queryClient.invalidateQueries({ queryKey: ["/api/admin/accounts", drilldownAccount?.id, "contacts"] });
-    queryClient.invalidateQueries({ queryKey: ["/api/admin/contacts-usage"] });
-  };
-
-  const deleteAdminContactMutation = useMutation({
-    mutationFn: async (contactId: string) => apiRequest("DELETE", `/api/admin/accounts/${drilldownAccount!.id}/contacts/${contactId}`),
-    onSuccess: () => {
-      invalidateContactsAdmin();
-      toast({ title: "Contact deleted" });
-    },
-    onError: () => toast({ title: "Error", description: "Failed to delete contact", variant: "destructive" }),
-  });
-
-  const deleteAdminListMutation = useMutation({
-    mutationFn: async (listId: string) => apiRequest("DELETE", `/api/admin/contact-lists/${listId}`),
-    onSuccess: () => {
-      invalidateContactsAdmin();
-      toast({ title: "List deleted" });
-    },
-    onError: () => toast({ title: "Error", description: "Failed to delete list", variant: "destructive" }),
-  });
-
-  // Shared confirm-delete dialog for the Files/Contacts tabs, instead of one
-  // AlertDialog instance per row.
+  // Shared confirm-delete dialog for the Files tab.
   const [confirmAction, setConfirmAction] = useState<
     | null
     | { type: "file"; id: string; label: string }
-    | { type: "contact"; id: string; label: string }
-    | { type: "list"; id: string; label: string }
   >(null);
 
   const runConfirmedAction = () => {
     if (!confirmAction) return;
     if (confirmAction.type === "file") deleteUploadMutation.mutate(confirmAction.id);
-    if (confirmAction.type === "contact") deleteAdminContactMutation.mutate(confirmAction.id);
-    if (confirmAction.type === "list") deleteAdminListMutation.mutate(confirmAction.id);
     setConfirmAction(null);
   };
 
@@ -1018,128 +952,12 @@ export default function Admin() {
           </>
         )}
 
-        {tab === "contacts" && (
-          <>
-            <div>
-              <h1 className="font-heading text-2xl font-bold">Contacts</h1>
-              <p className="text-sm text-muted-foreground">Contact counts per tenant - drill in to view or delete</p>
-            </div>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Account</TableHead>
-                        <TableHead>Phone number</TableHead>
-                        <TableHead>Contacts</TableHead>
-                        <TableHead>Lists</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {contactsUsage.length === 0 ? (
-                        <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No accounts found</TableCell></TableRow>
-                      ) : (
-                        contactsUsage.map((account) => (
-                          <TableRow key={account.id} data-testid={`row-contacts-account-${account.id}`}>
-                            <TableCell className="font-medium">{account.name}</TableCell>
-                            <TableCell className="text-muted-foreground">{account.phoneNumber}</TableCell>
-                            <TableCell>{account.contactCount}</TableCell>
-                            <TableCell>{account.listCount}</TableCell>
-                            <TableCell className="text-right">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setDrilldownAccount(account)}
-                                data-testid={`button-view-contacts-${account.id}`}
-                              >
-                                View
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
-          </>
-        )}
-
-      <Dialog open={!!drilldownAccount} onOpenChange={(open) => !open && setDrilldownAccount(null)}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{drilldownAccount?.name} &ndash; contacts</DialogTitle>
-          </DialogHeader>
-          {!!accountContacts?.lists?.length && (
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Lists</p>
-              <div className="flex flex-wrap gap-2">
-                {accountContacts.lists.map((list) => (
-                  <Badge key={list.id} variant="outline" className="flex items-center gap-1.5 pr-1.5">
-                    <ListIcon className="h-3 w-3" /> {list.name} ({list.contactCount || 0})
-                    <button
-                      type="button"
-                      onClick={() => setConfirmAction({ type: "list", id: list.id, label: list.name })}
-                      className="ml-1 text-destructive hover:opacity-70"
-                      data-testid={`button-delete-list-${list.id}`}
-                      aria-label={`Delete list ${list.name}`}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="rounded-md border mt-2 max-h-96 overflow-y-auto">
-            <Table>
-              <TableHeader className="sticky top-0 z-10 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
-                <TableRow>
-                  <TableHead>Phone</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {!accountContacts?.contacts?.length ? (
-                  <TableRow><TableCell colSpan={3} className="text-center py-8 text-muted-foreground">No contacts</TableCell></TableRow>
-                ) : (
-                  accountContacts.contacts.map((contact) => (
-                    <TableRow key={contact.id} data-testid={`row-admin-contact-${contact.id}`}>
-                      <TableCell className="font-mono">{contact.phone}</TableCell>
-                      <TableCell>{contact.name || "-"}</TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => setConfirmAction({ type: "contact", id: contact.id, label: contact.name || contact.phone })}
-                          data-testid={`button-delete-admin-contact-${contact.id}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </DialogContent>
-      </Dialog>
-
       <AlertDialog open={!!confirmAction} onOpenChange={(open) => !open && setConfirmAction(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this {confirmAction?.type}?</AlertDialogTitle>
+            <AlertDialogTitle>Delete this file?</AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmAction?.type === "list"
-                ? `The list "${confirmAction.label}" will be deleted. Contacts in it are not deleted.`
-                : confirmAction?.type === "contact"
-                ? `"${confirmAction.label}" and their message history and Inbox conversations will be permanently removed. This cannot be undone.`
-                : `"${confirmAction?.label}" will be permanently removed. This cannot be undone.`}
+              &quot;{confirmAction?.label}&quot; will be permanently removed. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

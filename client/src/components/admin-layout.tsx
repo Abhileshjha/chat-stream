@@ -8,7 +8,6 @@ import {
   ScrollText,
   LogOut,
   FileText,
-  Contact as ContactIcon,
   BarChart3,
   type LucideIcon,
 } from "lucide-react";
@@ -23,7 +22,6 @@ export type AdminTab =
   | "revenue"
   | "payments"
   | "files"
-  | "contacts"
   | "audit";
 
 const ADMIN_TABS: AdminTab[] = [
@@ -34,7 +32,6 @@ const ADMIN_TABS: AdminTab[] = [
   "revenue",
   "payments",
   "files",
-  "contacts",
   "audit",
 ];
 
@@ -87,7 +84,6 @@ export function AdminLayout({ activeTab, onTabSelect, children }: AdminLayoutPro
     { id: "revenue", label: "Subscriptions & Revenue", icon: BarChart3 },
     { id: "payments", label: "Payments", icon: CreditCard },
     { id: "files", label: "Uploaded files", icon: FileText },
-    { id: "contacts", label: "Contacts", icon: ContactIcon },
     { id: "audit", label: "Audit log", icon: ScrollText },
   ];
 
