@@ -26,6 +26,9 @@ import {
   Eye,
   Server,
   Clock,
+  Search,
+  MoreVertical,
+  CheckCheck,
 } from "lucide-react";
 import { FaWhatsapp } from "react-icons/fa";
 import { AnimatedSection } from "@/components/section-backdrop";
@@ -243,6 +246,29 @@ const guarantees = [
   },
 ];
 
+const heroChatMessages = [
+  {
+    id: "out-1",
+    side: "out" as const,
+    text:
+      "Hi Priya! Premium retail shops are now open for booking from ₹28L. Want the brochure and current price list?",
+    time: "10:14",
+  },
+  {
+    id: "in-1",
+    side: "in" as const,
+    text: "Yes, please share the brochure. Also let me know if a corner unit is available.",
+    time: "10:15",
+  },
+  {
+    id: "out-2",
+    side: "out" as const,
+    text:
+      "Sent. Corner inventory is available right now. I can arrange a callback in 10 mins or book a site visit for tomorrow.",
+    time: "10:15",
+  },
+];
+
 function WaMark({ className = "h-9 w-9" }: { className?: string }) {
   return (
     <div
@@ -337,7 +363,7 @@ export default function Landing() {
               transition={{ duration: 0.8, delay: 0.3 }}
               className="relative flex justify-center"
             >
-              <div className="absolute -top-4 -left-4 md:-left-10 z-10 rounded-xl border border-[#075E54]/10 bg-white/95 backdrop-blur-sm px-4 py-3 shadow-xl hidden sm:block">
+              <div className="absolute -top-12 left-1/2 z-10 hidden -translate-x-1/2 rounded-xl border border-[#075E54]/10 bg-white/95 px-4 py-3 shadow-xl backdrop-blur-sm sm:block">
                 <p className="text-[10px] uppercase tracking-wide text-[#075E54]/45">Messages sent</p>
                 <p className="text-xl font-heading font-semibold text-[#075E54]">7,839</p>
                 <p className="text-[11px] text-[#128C7E] flex items-center gap-1">
@@ -350,39 +376,70 @@ export default function Landing() {
                 <p className="text-[11px] text-[#128C7E]">quality: high</p>
               </div>
 
-              <div className="w-full max-w-[min(100%,300px)] mx-auto lg:mx-0 rounded-[2rem] border border-[#075E54]/10 bg-white shadow-2xl shadow-[#25D366]/15 overflow-hidden">
-                <div className="bg-[#075E54] px-4 py-3 flex items-center gap-2.5">
-                  <div className="h-8 w-8 rounded-full bg-[#25D366] flex items-center justify-center">
+              <div className="mx-auto w-full max-w-[min(100%,320px)] overflow-hidden rounded-[2rem] border border-[#075E54]/10 bg-white shadow-2xl shadow-[#25D366]/15 lg:mx-0">
+                <div className="flex items-center gap-2.5 bg-[#0b6157] px-4 py-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#25D366]">
                     <FaWhatsapp className="h-4 w-4 text-white" />
                   </div>
-                  <div className="text-left">
+                  <div className="min-w-0 flex-1 text-left">
                     <p className="text-sm font-semibold text-white">Your Business</p>
-                    <p className="text-xs text-[#DCF8C6]">online · verified</p>
+                    <p className="text-xs text-[#dcf8c6]">online now</p>
                   </div>
+                  <Search className="h-4 w-4 text-white/85" />
+                  <MoreVertical className="h-4 w-4 text-white/85" />
                 </div>
-                <div className="p-4 space-y-3 text-left" style={{ backgroundColor: WA.chat }}>
-                  <div className="flex justify-end">
-                    <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-[#DCF8C6] px-3.5 py-2 shadow-sm">
-                      <p className="text-sm text-[#075E54] leading-snug">
-                        🎉 New Launch Alert! Premium retail shops now open for booking from ₹28L*. Assured
-                        footfall location, limited units.
-                      </p>
-                      <p className="text-xs text-[#128C7E] mt-1.5 border-t border-[#075E54]/10 pt-1.5 text-center font-medium">📅 Book a site visit</p>
+                <div
+                  className="space-y-3 p-4 text-left"
+                  style={{
+                    backgroundColor: WA.chat,
+                    backgroundImage:
+                      "radial-gradient(rgba(7,94,84,0.05) 1px, transparent 1px), radial-gradient(rgba(7,94,84,0.04) 1px, transparent 1px)",
+                    backgroundPosition: "0 0, 12px 12px",
+                    backgroundSize: "24px 24px",
+                  }}
+                >
+                  <div className="flex justify-center">
+                    <div className="rounded-full bg-white/80 px-3 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-[#075E54]/55 shadow-sm">
+                      Today
                     </div>
                   </div>
-                  <div className="flex justify-start">
-                    <div className="max-w-[85%] rounded-2xl rounded-tl-sm bg-white px-3.5 py-2 shadow-sm">
-                      <p className="text-sm text-[#075E54] leading-snug">Interested! Can you share the price list and floor plan?</p>
+                  {heroChatMessages.map((message, index) => (
+                    <motion.div
+                      key={message.id}
+                      className={`flex ${message.side === "out" ? "justify-end" : "justify-start"}`}
+                      initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      transition={{
+                        duration: 0.55,
+                        delay: index * 1.6,
+                        ease: [0.22, 1, 0.36, 1],
+                      }}
+                    >
+                      <div
+                        className={`max-w-[86%] rounded-2xl px-3.5 py-2.5 shadow-sm ${
+                          message.side === "out"
+                            ? "rounded-tr-sm bg-[#dcf8c6]"
+                            : "rounded-tl-sm bg-white"
+                        }`}
+                      >
+                        <p className="text-sm leading-snug text-[#075E54]">{message.text}</p>
+                        <div className="mt-1.5 flex items-center justify-end gap-1 text-[11px] text-[#128C7E]/85">
+                          <span>{message.time}</span>
+                          {message.side === "out" && <CheckCheck className="h-3.5 w-3.5 text-[#53bdeb]" />}
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                  <motion.div
+                    className="flex justify-end"
+                    initial={{ opacity: 0.35 }}
+                    animate={{ opacity: [0.35, 1, 0.35] }}
+                    transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                  >
+                    <div className="rounded-full bg-white/70 px-3 py-1.5 text-[11px] text-[#075E54]/60 shadow-sm">
+                      typing...
                     </div>
-                  </div>
-                  <div className="flex justify-end">
-                    <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-[#DCF8C6] px-3.5 py-2 shadow-sm">
-                      <p className="text-sm text-[#075E54] leading-snug">
-                        Sure — sending the brochure now. Our team will call you within 10 minutes to
-                        schedule your visit. 🤝
-                      </p>
-                    </div>
-                  </div>
+                  </motion.div>
                 </div>
               </div>
             </motion.div>
