@@ -50,6 +50,7 @@ import {
   addMonths,
   endsAtFromRazorpay,
 } from "./subscriptionLifecycle";
+import { deleteAllUserData } from "./userDeletion";
 import { getAdminRevenueSnapshot } from "./adminRevenue";
 import { pageViews, users } from "@shared/models/auth";
 import * as razorpayApi from "./razorpay";
@@ -3816,78 +3817,16 @@ export async function registerRoutes(
       }
 
       const userId = user.claims.sub;
-      
-      // Get the user from database to verify they exist
       const dbUser = await authStorage.getUser(userId);
       if (!dbUser) {
         return res.status(404).json({ error: "User not found" });
       }
 
-      // Delete all user-associated data
-      // 1. Get all accounts belonging to this user and delete associated data
-      const accounts = await storage.getAccountsByUser(userId);
-      for (const account of accounts) {
-        // Delete contacts for this account
-        const contacts = await storage.getContactsByAccount(account.id);
-        for (const contact of contacts) {
-          await storage.deleteContact(contact.id);
-        }
-        
-        // Delete contact lists for this account
-        const lists = await storage.getContactListsByAccount(account.id);
-        for (const list of lists) {
-          await storage.deleteContactList(list.id);
-        }
-        
-        // Delete tags for this account
-        const tags = await storage.getContactTagsByAccount(account.id);
-        for (const tag of tags) {
-          await storage.deleteContactTag(tag.id);
-        }
-        
-        // Delete conversations for this account
-        const conversations = await storage.getConversationsByAccount(account.id);
-        for (const conversation of conversations) {
-          await storage.deleteConversation(conversation.id);
-        }
-        
-        // Delete notifications for this account
-        const notifications = await storage.getNotificationsByAccount(account.id);
-        for (const notification of notifications) {
-          await storage.deleteNotification(notification.id);
-        }
-        
-        // Delete the account itself
-        await storage.deleteAccount(account.id);
-      }
-
-      // 2. Delete templates
-      const templates = await storage.getTemplates();
-      for (const template of templates) {
-        await storage.deleteTemplate(template.id);
-      }
-
-      // 3. Delete campaigns and messages
-      const campaigns = await storage.getCampaigns();
-      for (const campaign of campaigns) {
-        const messages = await storage.getMessagesByCampaign(campaign.id);
-        for (const message of messages) {
-          await storage.deleteMessage(message.id);
-        }
-        await storage.deleteCampaign(campaign.id);
-      }
-
-      // 4. Delete API settings
-      const settings = await storage.getApiSettings();
-      if (settings) {
-        await storage.deleteApiSettings();
-      }
-
-      // 5. Finally, delete the user account
-      await authStorage.deleteUser(userId);
+      await deleteAllUserData(userId);
 
       res.json({ success: true, message: "Account and all associated data have been deleted" });
     } catch (error) {
+      console.error("Failed to delete user account:", error);
       res.status(500).json({ error: "Failed to delete account. Please contact support." });
     }
   });
@@ -4141,6 +4080,66 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Failed to delete user lists:", error);
       res.status(500).json({ error: "Failed to delete lists" });
+    }
+  });
+
+  app.delete("/api/admin/users/:userId", requireSuperAdmin, async (req: any, res) => {
+    try {
+      const targetUserId = req.params.userId as string;
+      const actorId = req.user?.claims?.sub as string;
+
+      if (targetUserId === actorId) {
+        return res.status(400).json({
+          error: "cannot_delete_self",
+          message: "You cannot delete your own account from the admin panel.",
+        });
+      }
+
+      const targetUser = await authStorage.getUser(targetUserId);
+      if (!targetUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      if (targetUser.role === "super_admin") {
+        const allUsers = await authStorage.getAllUsers();
+        const superAdminCount = allUsers.filter((u) => u.role === "super_admin").length;
+        if (superAdminCount <= 1) {
+          return res.status(400).json({
+            error: "last_super_admin",
+            message: "Cannot delete the last super admin.",
+          });
+        }
+      }
+
+      const result = await deleteAllUserData(targetUserId);
+
+      try {
+        const actor = await authStorage.getUser(actorId);
+        await authStorage.addAuditLogEntry({
+          actorUserId: actorId,
+          actorLabel: actor?.email || "Admin",
+          action: "delete_user",
+          targetUserId,
+          targetLabel: targetUser.email || `${targetUser.firstName || ""} ${targetUser.lastName || ""}`.trim() || targetUserId,
+          description: `Permanently deleted user and all data (${result.accountsDeleted} WhatsApp account(s))`,
+        });
+      } catch (auditError) {
+        console.error("[Admin] Failed to write delete_user audit entry:", auditError);
+      }
+
+      res.json({
+        success: true,
+        message: "User and all associated data deleted",
+        accountsDeleted: result.accountsDeleted,
+        filesDeleted: result.filesDeleted,
+      });
+    } catch (error: any) {
+      console.error("Failed to delete user:", error);
+      const message =
+        error?.message ||
+        (typeof error?.detail === "string" ? error.detail : undefined) ||
+        "Failed to delete user. Please try again.";
+      res.status(500).json({ error: message, message });
     }
   });
 

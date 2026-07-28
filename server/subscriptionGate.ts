@@ -35,6 +35,7 @@ const MUTATION_WHITELIST_PREFIXES = [
   "/api/resend-verification",
   "/api/webhooks/",
   "/api/verify-email",
+  "/api/admin/",
 ];
 
 // Checks whether a user is allowed to send messages right now: super admins

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useLocation } from "wouter";
+import { useRef, useState } from "react";
+import { Link, useLocation, useSearch } from "wouter";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
 import {
   Users,
   UserCheck,
@@ -143,9 +144,11 @@ function formatBytes(bytes: number): string {
 
 export default function Admin() {
   const [, setLocation] = useLocation();
+  const search = useSearch();
+  const { user: currentUser } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const tab = parseAdminTab(new URLSearchParams(window.location.search).get("tab"));
+  const tab = parseAdminTab(new URLSearchParams(search).get("tab"));
 
   const setTab = (next: AdminTab) => {
     if (next === "dashboard") {
@@ -238,6 +241,25 @@ export default function Admin() {
     | null
     | { type: "file"; id: string; label: string }
   >(null);
+  const [userToDelete, setUserToDelete] = useState<AdminUser | null>(null);
+  const deleteTargetUserIdRef = useRef<string | null>(null);
+
+  const openDeleteUserDialog = (user: AdminUser) => {
+    deleteTargetUserIdRef.current = user.id;
+    setUserToDelete(user);
+  };
+
+  const closeDeleteUserDialog = () => {
+    if (deleteUserMutation.isPending) return;
+    deleteTargetUserIdRef.current = null;
+    setUserToDelete(null);
+  };
+
+  const confirmDeleteUser = () => {
+    const userId = deleteTargetUserIdRef.current ?? userToDelete?.id;
+    if (!userId) return;
+    deleteUserMutation.mutate(userId);
+  };
 
   const runConfirmedAction = () => {
     if (!confirmAction) return;
@@ -277,6 +299,28 @@ export default function Admin() {
     },
     onError: () => {
       toast({ title: "Error", description: "Failed to update user access", variant: "destructive" });
+    },
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: async (userId: string) => apiRequest("DELETE", `/api/admin/users/${userId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/audit-log"] });
+      deleteTargetUserIdRef.current = null;
+      setUserToDelete(null);
+      toast({
+        title: "User deleted",
+        description: "The user and all associated data have been permanently removed.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Delete failed",
+        description: error.message?.replace(/^\d+:\s*/, "") || "Could not delete user",
+        variant: "destructive",
+      });
     },
   });
 
@@ -816,6 +860,21 @@ export default function Admin() {
                                     <CreditCard className="h-4 w-4 mr-1" />
                                     {user.hasPaid ? "Remove Premium" : "Mark Premium"}
                                   </Button>
+
+                                  <Button
+                                    variant="destructive"
+                                    size="icon"
+                                    title={
+                                      user.id === currentUser?.id
+                                        ? "You cannot delete your own account"
+                                        : "Delete user and all data"
+                                    }
+                                    disabled={user.id === currentUser?.id || deleteUserMutation.isPending}
+                                    onClick={() => openDeleteUserDialog(user)}
+                                    data-testid={`button-delete-user-${user.id}`}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -968,6 +1027,47 @@ export default function Admin() {
               data-testid="button-confirm-admin-delete"
             >
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!userToDelete} onOpenChange={(open) => !open && closeDeleteUserDialog()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete user permanently?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm text-muted-foreground">
+                <p>
+                  This will permanently delete{" "}
+                  <span className="font-semibold text-foreground">
+                    {userToDelete?.email || userToDelete?.id}
+                  </span>{" "}
+                  and <strong className="text-foreground">all</strong> associated data, including:
+                </p>
+                <ul className="list-disc space-y-1 pl-5">
+                  <li>WhatsApp accounts and phone numbers</li>
+                  <li>Contacts, lists, and tags</li>
+                  <li>Campaigns, notifications, and messages</li>
+                  <li>Templates, inbox conversations, and uploaded media</li>
+                  <li>Billing history and team memberships</li>
+                </ul>
+                <p className="font-medium text-destructive">This action cannot be undone.</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteUserMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                confirmDeleteUser();
+              }}
+              disabled={deleteUserMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="button-confirm-delete-user"
+            >
+              {deleteUserMutation.isPending ? "Deleting..." : "Delete everything"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
