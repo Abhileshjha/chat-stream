@@ -3975,6 +3975,175 @@ export async function registerRoutes(
   });
 
   // Update user role (super_admin only)
+  app.get("/api/admin/users/:userId/detail", requireSuperAdmin, async (req: any, res) => {
+    try {
+      const user = await authStorage.getUser(req.params.userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const plan = user.billingPlanId ? await getBillingPlanById(user.billingPlanId) : undefined;
+      const accounts = await storage.getAccountsByUser(user.id);
+      const accountsWithData = await Promise.all(
+        accounts.map(async (account) => {
+          const [contacts, lists] = await Promise.all([
+            storage.getContacts(account.id),
+            storage.getLists(account.id),
+          ]);
+          return {
+            id: account.id,
+            name: account.name,
+            phoneNumber: account.phoneNumber,
+            status: account.status,
+            contactCount: contacts.length,
+            listCount: lists.length,
+            contacts,
+            lists,
+            createdAt: account.createdAt,
+          };
+        }),
+      );
+
+      res.json({
+        user: {
+          id: user.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          profileImageUrl: user.profileImageUrl,
+          role: user.role,
+          subscriptionStatus: user.subscriptionStatus,
+          hasPaid: user.hasPaid,
+          grantedFreeAccess: user.grantedFreeAccess,
+          billingPlanId: user.billingPlanId,
+          subscriptionEndsAt: user.subscriptionEndsAt,
+          createdAt: user.createdAt,
+          billingPlan: plan
+            ? {
+                id: plan.id,
+                name: plan.name,
+                slug: plan.slug,
+                priceLabel: plan.priceLabel,
+                amountInr: plan.amountInr,
+              }
+            : null,
+        },
+        accounts: accountsWithData,
+        totals: {
+          accountCount: accountsWithData.length,
+          contactCount: accountsWithData.reduce((sum, a) => sum + a.contactCount, 0),
+          listCount: accountsWithData.reduce((sum, a) => sum + a.listCount, 0),
+        },
+      });
+    } catch (error) {
+      console.error("Failed to fetch admin user detail:", error);
+      res.status(500).json({ error: "Failed to fetch user detail" });
+    }
+  });
+
+  app.get("/api/admin/users/:userId/contacts/export", requireSuperAdmin, async (req: any, res) => {
+    try {
+      const user = await authStorage.getUser(req.params.userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const accountId = req.query.accountId as string | undefined;
+      const accounts = await storage.getAccountsByUser(user.id);
+      const targetAccounts = accountId
+        ? accounts.filter((a) => a.id === accountId)
+        : accounts;
+
+      if (accountId && targetAccounts.length === 0) {
+        return res.status(404).json({ error: "Account not found for this user" });
+      }
+
+      const rows: string[] = ["Account,Phone,Name,Email,Status,Lists"];
+      for (const account of targetAccounts) {
+        const [contacts, lists] = await Promise.all([
+          storage.getContacts(account.id),
+          storage.getLists(account.id),
+        ]);
+        const listById = new Map(lists.map((l) => [l.id, l.name]));
+        for (const contact of contacts) {
+          const listNames = ((contact.listIds as string[]) || [])
+            .map((id) => listById.get(id) || id)
+            .join("; ");
+          const cols = [
+            account.name,
+            contact.phone,
+            contact.name || "",
+            contact.email || "",
+            contact.status || "",
+            listNames,
+          ].map((v) => `"${String(v).replace(/"/g, '""')}"`);
+          rows.push(cols.join(","));
+        }
+      }
+
+      const filename = accountId
+        ? `contacts-${user.email || user.id}-${accountId}.csv`
+        : `contacts-${user.email || user.id}-all.csv`;
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(rows.join("\n"));
+    } catch (error) {
+      console.error("Failed to export user contacts:", error);
+      res.status(500).json({ error: "Failed to export contacts" });
+    }
+  });
+
+  app.delete("/api/admin/users/:userId/contacts", requireSuperAdmin, async (req: any, res) => {
+    try {
+      const user = await authStorage.getUser(req.params.userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const accountId = req.query.accountId as string | undefined;
+      const accounts = await storage.getAccountsByUser(user.id);
+      const targetAccounts = accountId
+        ? accounts.filter((a) => a.id === accountId)
+        : accounts;
+
+      if (accountId && targetAccounts.length === 0) {
+        return res.status(404).json({ error: "Account not found for this user" });
+      }
+
+      let deleted = 0;
+      for (const account of targetAccounts) {
+        deleted += await storage.deleteAllContactsForAccount(account.id);
+      }
+
+      res.json({ deleted, scope: accountId ? "account" : "user" });
+    } catch (error) {
+      console.error("Failed to delete user contacts:", error);
+      res.status(500).json({ error: "Failed to delete contacts" });
+    }
+  });
+
+  app.delete("/api/admin/users/:userId/lists", requireSuperAdmin, async (req: any, res) => {
+    try {
+      const user = await authStorage.getUser(req.params.userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const accountId = req.query.accountId as string | undefined;
+      const accounts = await storage.getAccountsByUser(user.id);
+      const targetAccounts = accountId
+        ? accounts.filter((a) => a.id === accountId)
+        : accounts;
+
+      if (accountId && targetAccounts.length === 0) {
+        return res.status(404).json({ error: "Account not found for this user" });
+      }
+
+      let deleted = 0;
+      for (const account of targetAccounts) {
+        deleted += await storage.deleteAllListsForAccount(account.id);
+      }
+
+      res.json({ deleted, scope: accountId ? "account" : "user" });
+    } catch (error) {
+      console.error("Failed to delete user lists:", error);
+      res.status(500).json({ error: "Failed to delete lists" });
+    }
+  });
+
   app.patch("/api/admin/users/:id/role", requireSuperAdmin, async (req: any, res) => {
     try {
       const { role } = req.body;

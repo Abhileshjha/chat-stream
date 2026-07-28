@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, MessageSquare } from "lucide-react";
+import { EMAIL_INFO } from "@/lib/marketing-content";
 
 export default function Privacy() {
   return (
@@ -116,7 +117,7 @@ export default function Privacy() {
               If you have any questions about this Privacy Policy, please contact us at:
             </p>
             <p className="text-muted-foreground mt-2">
-              Email: <a href="mailto:privacy@whatsappbroadcast.com" className="text-primary hover:underline">privacy@whatsappbroadcast.com</a>
+              Email: <a href={`mailto:${EMAIL_INFO}`} className="text-primary hover:underline">{EMAIL_INFO}</a>
             </p>
           </section>
         </div>

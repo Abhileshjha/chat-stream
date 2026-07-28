@@ -15,7 +15,11 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-export const HELP_NUMBER = "8766350093";
+export const HELP_NUMBER = "9217730926";
+export const HELP_NUMBER_DISPLAY = "+91 9217730926";
+export const EMAIL_INFO = "info@convora.tech";
+export const EMAIL_SUPPORT = "support@convora.tech";
+export const EMAIL_BILLING = "billing@convora.tech";
 
 export const WA = {
   green: "#25D366",

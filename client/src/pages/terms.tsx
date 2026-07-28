@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, MessageSquare } from "lucide-react";
+import { EMAIL_INFO } from "@/lib/marketing-content";
 
 export default function Terms() {
   return (
@@ -133,7 +134,7 @@ export default function Terms() {
               If you have any questions about these Terms, please contact us at:
             </p>
             <p className="text-muted-foreground mt-2">
-              Email: <a href="mailto:legal@whatsappbroadcast.com" className="text-primary hover:underline">legal@whatsappbroadcast.com</a>
+              Email: <a href={`mailto:${EMAIL_INFO}`} className="text-primary hover:underline">{EMAIL_INFO}</a>
             </p>
           </section>
         </div>

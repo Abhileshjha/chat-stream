@@ -109,6 +109,8 @@ export interface IStorage {
   updateContact(id: string, updates: Partial<Contact>): Promise<Contact | undefined>;
   deleteContact(id: string): Promise<boolean>;
   bulkDeleteContacts(ids: string[], accountId: string): Promise<number>;
+  deleteAllContactsForAccount(accountId: string): Promise<number>;
+  deleteAllListsForAccount(accountId: string): Promise<number>;
   // Deletes broadcast/campaign message records and Inbox conversation
   // history for a set of phone numbers on an account - called whenever a
   // contact is deleted, so removing someone from the contact list also
@@ -1214,6 +1216,38 @@ export class DatabaseStorage implements IStorage {
       await this.deleteMessagesForPhones(accountId, toDelete.map((c) => c.phone));
     }
     return deletedCount;
+  }
+
+  async deleteAllContactsForAccount(accountId: string): Promise<number> {
+    const rows = await db
+      .select({ phone: contacts.phone })
+      .from(contacts)
+      .where(eq(contacts.accountId, accountId));
+    if (rows.length === 0) return 0;
+
+    await this.deleteMessagesForPhones(accountId, rows.map((r) => r.phone));
+    const result = await db.delete(contacts).where(eq(contacts.accountId, accountId));
+    const deletedCount = result.rowCount ?? 0;
+
+    if (deletedCount > 0) {
+      await bumpAccountContactDelta(accountId, -deletedCount);
+      await db
+        .update(contactLists)
+        .set({ contactCount: 0, updatedAt: new Date() })
+        .where(eq(contactLists.accountId, accountId));
+    }
+
+    return deletedCount;
+  }
+
+  async deleteAllListsForAccount(accountId: string): Promise<number> {
+    await db
+      .update(contacts)
+      .set({ listIds: [], updatedAt: new Date() })
+      .where(eq(contacts.accountId, accountId));
+
+    const result = await db.delete(contactLists).where(eq(contactLists.accountId, accountId));
+    return result.rowCount ?? 0;
   }
 
   async deleteMessagesForPhones(accountId: string, phones: string[]): Promise<void> {

@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, MessageSquare } from "lucide-react";
+import { EMAIL_SUPPORT, EMAIL_BILLING } from "@/lib/marketing-content";
 
 export default function Refund() {
   return (
@@ -63,7 +64,7 @@ export default function Refund() {
             <h2 className="text-2xl font-semibold mb-4">4. How to Request a Refund</h2>
             <p className="text-muted-foreground leading-relaxed mb-4">To request a refund:</p>
             <ol className="list-decimal pl-6 space-y-2 text-muted-foreground">
-              <li>Email us at <a href="mailto:support@whatsappbroadcast.com" className="text-primary hover:underline">support@whatsappbroadcast.com</a></li>
+              <li>Email us at <a href={`mailto:${EMAIL_SUPPORT}`} className="text-primary hover:underline">{EMAIL_SUPPORT}</a></li>
               <li>Include your account email and reason for the refund request</li>
               <li>We will review your request within 2 business days</li>
               <li>If approved, refunds will be processed within 5-7 business days</li>
@@ -94,7 +95,7 @@ export default function Refund() {
               If you have any questions about our Refund Policy, please contact us:
             </p>
             <p className="text-muted-foreground mt-2">
-              Email: <a href="mailto:support@whatsappbroadcast.com" className="text-primary hover:underline">support@whatsappbroadcast.com</a>
+              Email: <a href={`mailto:${EMAIL_BILLING}`} className="text-primary hover:underline">{EMAIL_BILLING}</a>
             </p>
           </section>
         </div>

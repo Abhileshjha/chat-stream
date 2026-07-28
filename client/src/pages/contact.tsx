@@ -1,12 +1,18 @@
 import { Link } from "wouter";
+import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ArrowLeft, MessageSquare, Mail, Phone, MapPin } from "lucide-react";
-import { useState } from "react";
-import { useToast } from "@/hooks/use-toast";
+import {
+  HELP_NUMBER,
+  HELP_NUMBER_DISPLAY,
+  EMAIL_SUPPORT,
+  EMAIL_BILLING,
+} from "@/lib/marketing-content";
 
 export default function Contact() {
   const { toast } = useToast();
@@ -83,7 +89,7 @@ export default function Contact() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="phone">Phone Number</Label>
-                    <Input id="phone" type="tel" placeholder="+91 98765 43210" data-testid="input-phone" />
+                    <Input id="phone" type="tel" placeholder={HELP_NUMBER_DISPLAY} data-testid="input-phone" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="subject">Subject</Label>
@@ -117,12 +123,12 @@ export default function Contact() {
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground mb-2">For general inquiries and support:</p>
-                <a href="mailto:support@whatsappbroadcast.com" className="text-primary hover:underline font-medium">
-                  support@whatsappbroadcast.com
+                <a href={`mailto:${EMAIL_SUPPORT}`} className="text-primary hover:underline font-medium">
+                  {EMAIL_SUPPORT}
                 </a>
                 <p className="text-muted-foreground mt-4 mb-2">For billing and payment issues:</p>
-                <a href="mailto:billing@whatsappbroadcast.com" className="text-primary hover:underline font-medium">
-                  billing@whatsappbroadcast.com
+                <a href={`mailto:${EMAIL_BILLING}`} className="text-primary hover:underline font-medium">
+                  {EMAIL_BILLING}
                 </a>
               </CardContent>
             </Card>
@@ -136,7 +142,9 @@ export default function Contact() {
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground mb-2">Call us during business hours:</p>
-                <p className="font-medium">+91 98765 43210</p>
+                <a href={`tel:+91${HELP_NUMBER}`} className="font-medium hover:underline">
+                  {HELP_NUMBER_DISPLAY}
+                </a>
                 <p className="text-sm text-muted-foreground mt-2">
                   Monday - Friday: 9:00 AM - 6:00 PM IST
                 </p>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,7 +27,6 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/hooks/use-auth";
 import {
   Users,
   UserCheck,
@@ -43,27 +43,25 @@ import {
   ChevronRight,
   Eye,
   Globe,
-  LayoutDashboard,
-  ScrollText,
-  LogOut,
   AlertTriangle,
-  FileText,
-  Contact as ContactIcon,
   Trash2,
   List as ListIcon,
   BarChart3,
+  Settings,
 } from "lucide-react";
 import type { User } from "@shared/models/auth";
 import type { Contact, ContactList } from "@shared/schema";
 import { AdminPlansPanel } from "@/components/admin-plans";
 import { AdminPaymentsPanel } from "@/components/admin-payments";
 import { AdminRevenuePanel } from "@/components/admin-revenue";
+import { AdminLayout, parseAdminTab, type AdminTab } from "@/components/admin-layout";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { TableSkeleton } from "@/components/ui/skeleton";
 
 const MONTHLY_PLAN_PRICE_INR = 1999;
 
@@ -120,8 +118,6 @@ interface AuditLogEntry {
   timestamp: string;
 }
 
-type AdminTab = "dashboard" | "visitors" | "users" | "audit" | "files" | "contacts" | "plans" | "payments" | "revenue";
-
 interface AdminUploadFile {
   id: string;
   originalName: string | null;
@@ -167,10 +163,19 @@ function formatBytes(bytes: number): string {
 }
 
 export default function Admin() {
-  const { logout, isLoggingOut } = useAuth();
+  const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<AdminTab>("dashboard");
+  const tab = parseAdminTab(new URLSearchParams(window.location.search).get("tab"));
+
+  const setTab = (next: AdminTab) => {
+    if (next === "dashboard") {
+      setLocation("/admin");
+      return;
+    }
+    setLocation(`/admin?tab=${next}`);
+  };
+
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -445,95 +450,8 @@ export default function Admin() {
   const mrr = stats?.mrrInr ?? paidUsers * MONTHLY_PLAN_PRICE_INR;
   const trialToPaidPct = totalUsers > 0 ? Math.round((paidUsers / totalUsers) * 100) : 0;
 
-  const navItems: { id: AdminTab; label: string; icon: typeof LayoutDashboard; badge?: number }[] = [
-    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { id: "visitors", label: "Visitors", icon: Eye, badge: visitors?.visitors24h },
-    { id: "users", label: "User management", icon: Users, badge: pendingApproval || undefined },
-    { id: "plans", label: "Billing plans", icon: CreditCard },
-    { id: "revenue", label: "Subscriptions & Revenue", icon: BarChart3 },
-    { id: "payments", label: "Payments", icon: CreditCard },
-    { id: "files", label: "Uploaded files", icon: FileText },
-    { id: "contacts", label: "Contacts", icon: ContactIcon },
-    { id: "audit", label: "Audit log", icon: ScrollText },
-  ];
-
   return (
-    <div className="flex h-screen overflow-hidden bg-[#F7FAFF]">
-      {/* Light admin sidebar — navy/cyan accents on white */}
-      <aside className="w-60 shrink-0 h-screen bg-white border-r border-[#14205a]/10 text-[#14205a] flex flex-col py-5 overflow-hidden">
-        <div className="flex items-center gap-2.5 px-5 pb-5 shrink-0">
-          <div className="relative h-8 w-8 shrink-0">
-            <div className="absolute inset-0 translate-x-[-3px] translate-y-[3px] rounded-lg bg-cyan-400" />
-            <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-[#14205a] font-heading text-base font-bold text-white">
-              c
-            </div>
-          </div>
-          <div>
-            <div className="font-heading font-bold text-[15px]">
-              convora<span className="text-cyan-500">.tech</span>
-            </div>
-            <div className="text-[10px] tracking-widest uppercase text-[#14205a]/45">
-              Admin panel
-            </div>
-          </div>
-        </div>
-        <div className="px-5 pb-2 text-[10px] tracking-widest uppercase text-[#14205a]/40 shrink-0">
-          Menu
-        </div>
-        <nav className="flex flex-col gap-0.5 px-3 flex-1 min-h-0 overflow-hidden">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setTab(item.id)}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-colors duration-200",
-                tab === item.id
-                  ? "bg-cyan-500/15 text-[#14205a] font-semibold"
-                  : "text-[#14205a]/70 hover:bg-[#14205a]/5 hover:text-[#14205a]",
-              )}
-              data-testid={`admin-nav-${item.id}`}
-            >
-              <item.icon
-                className={cn(
-                  "h-4 w-4 shrink-0",
-                  tab === item.id ? "text-cyan-600" : "text-[#14205a]/50",
-                )}
-              />
-              <span className="flex-1">{item.label}</span>
-              {!!item.badge && (
-                <span className="bg-cyan-500 text-[#0B1030] rounded-full text-[11px] font-bold px-1.5 min-w-5 text-center">
-                  {item.badge}
-                </span>
-              )}
-            </button>
-          ))}
-        </nav>
-        <div className="shrink-0 px-5 pt-3.5 border-t border-[#14205a]/10 mx-3.5">
-          <div className="flex items-center gap-2 text-xs text-[#14205a]/50">
-            <span className="w-2 h-2 rounded-full bg-cyan-500" />
-            Live &middot; refreshes 30s
-          </div>
-          <div className="flex items-center justify-between mt-2.5">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-full bg-cyan-500 text-[#0B1030] flex items-center justify-center font-bold text-xs">
-                SA
-              </div>
-              <div className="text-xs font-medium">Admin</div>
-            </div>
-            <button
-              type="button"
-              onClick={() => logout()}
-              disabled={isLoggingOut}
-              className="text-xs font-semibold text-cyan-600 hover:text-cyan-700 flex items-center gap-1 transition-colors"
-            >
-              <LogOut className="h-3 w-3" /> {isLoggingOut ? "…" : "Log out"}
-            </button>
-          </div>
-        </div>
-      </aside>
-
-      {/* Main content — only this region scrolls */}
-      <div className="flex-1 min-w-0 h-screen overflow-y-auto p-6 space-y-6 bg-[#F7FAFF]">
+    <AdminLayout activeTab={tab} onTabSelect={setTab}>
         {tab === "dashboard" && (
           <>
             <div>
@@ -864,7 +782,9 @@ export default function Admin() {
                 </div>
 
                 {usersLoading ? (
-                  <div className="flex items-center justify-center py-12"><RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" /></div>
+                  <div className="rounded-md border animate-in fade-in duration-300">
+                    <TableSkeleton rows={8} cols={6} />
+                  </div>
                 ) : (
                   <div className="rounded-md border">
                     <Table>
@@ -913,6 +833,16 @@ export default function Admin() {
                               <TableCell className="text-muted-foreground">{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "N/A"}</TableCell>
                               <TableCell className="text-right">
                                 <div className="flex items-center justify-end gap-2">
+                                  <Link href={`/admin/users/${user.id}`}>
+                                    <Button
+                                      variant="outline"
+                                      size="icon"
+                                      title="Manage user workspace"
+                                      data-testid={`button-user-settings-${user.id}`}
+                                    >
+                                      <Settings className="h-4 w-4" />
+                                    </Button>
+                                  </Link>
                                   <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
                                       <Button variant="outline" size="sm" data-testid={`button-role-${user.id}`}>Role <ChevronDown className="ml-1 h-4 w-4" /></Button>
@@ -1137,7 +1067,6 @@ export default function Admin() {
             </Card>
           </>
         )}
-      </div>
 
       <Dialog open={!!drilldownAccount} onOpenChange={(open) => !open && setDrilldownAccount(null)}>
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
@@ -1165,9 +1094,9 @@ export default function Admin() {
               </div>
             </div>
           )}
-          <div className="rounded-md border mt-2">
+          <div className="rounded-md border mt-2 max-h-96 overflow-y-auto">
             <Table>
-              <TableHeader>
+              <TableHeader className="sticky top-0 z-10 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
                 <TableRow>
                   <TableHead>Phone</TableHead>
                   <TableHead>Name</TableHead>
@@ -1225,6 +1154,6 @@ export default function Admin() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </AdminLayout>
   );
 }

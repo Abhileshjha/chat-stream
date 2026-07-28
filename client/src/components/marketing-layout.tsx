@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/sheet";
 import { Phone, ArrowRight, Menu } from "lucide-react";
 import { FaWhatsapp } from "react-icons/fa";
-import { HELP_NUMBER, MARKETING_NAV, WA } from "@/lib/marketing-content";
+import { HELP_NUMBER, MARKETING_NAV, WA, EMAIL_INFO, EMAIL_SUPPORT } from "@/lib/marketing-content";
 
 /** Section padding — tighter on mobile, unchanged from md/lg up */
 export const sectionPad = "py-16 md:py-20 lg:py-24 px-4";
@@ -288,6 +288,16 @@ function MarketingFooter() {
               <li>
                 <a href={`tel:+91${HELP_NUMBER}`} className="hover:text-[#075E54] flex items-center gap-1.5">
                   <Phone className="h-3.5 w-3.5 text-[#25D366]" /> +91 {HELP_NUMBER}
+                </a>
+              </li>
+              <li>
+                <a href={`mailto:${EMAIL_INFO}`} className="hover:text-[#075E54]">
+                  {EMAIL_INFO}
+                </a>
+              </li>
+              <li>
+                <a href={`mailto:${EMAIL_SUPPORT}`} className="hover:text-[#075E54]">
+                  {EMAIL_SUPPORT}
                 </a>
               </li>
             </ul>

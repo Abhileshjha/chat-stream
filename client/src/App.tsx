@@ -35,6 +35,7 @@ import Terms from "@/pages/terms";
 import Refund from "@/pages/refund";
 import Contact from "@/pages/contact";
 import Admin from "@/pages/admin";
+import AdminUserDetail from "@/pages/admin-user-detail";
 import Billing from "@/pages/billing";
 import DeleteData from "@/pages/delete-data";
 import Features from "@/pages/features";
@@ -206,17 +207,15 @@ function AuthenticatedApp() {
 }
 
 function AdminApp() {
-  const [location, setLocation] = useLocation();
-
-  useEffect(() => {
-    if (location !== "/admin") {
-      setLocation("/admin");
-    }
-  }, [location, setLocation]);
-
   return (
     <div className="h-screen overflow-hidden bg-background">
-      <Admin />
+      <Switch>
+        <Route path="/admin/users/:userId" component={AdminUserDetail} />
+        <Route path="/admin" component={Admin} />
+        <Route>
+          <Redirect to="/admin" />
+        </Route>
+      </Switch>
     </div>
   );
 }
@@ -229,12 +228,13 @@ function PageTracking() {
 function AppContent() {
   const { user, isLoading } = useAuth();
   const [location, setLocation] = useLocation();
+  const isAdminRoute = location === "/admin" || location.startsWith("/admin/users/");
 
   useEffect(() => {
     if (isLoading || !user) return;
 
     if (user.role === "super_admin") {
-      if (location !== "/admin") {
+      if (!isAdminRoute) {
         setLocation("/admin");
       }
       return;
@@ -243,7 +243,7 @@ function AppContent() {
     if (location === "/" || location === "/login" || location === "/admin-login") {
       setLocation("/dashboard");
     }
-  }, [user, isLoading, location, setLocation]);
+  }, [user, isLoading, location, setLocation, isAdminRoute]);
 
   if (isLoading) {
     return (
@@ -258,7 +258,7 @@ function AppContent() {
   }
 
   if (user.role === "super_admin") {
-    if (location === "/admin") {
+    if (isAdminRoute) {
       return <AdminApp />;
     }
     return (

@@ -2,6 +2,7 @@ import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, MessageSquare, Mail, Clock, Shield } from "lucide-react";
+import { EMAIL_INFO } from "@/lib/marketing-content";
 
 export default function DeleteData() {
   return (
@@ -62,8 +63,8 @@ export default function DeleteData() {
                 To request deletion of your account and all associated data, please send an email to:
               </p>
               <p className="text-lg font-medium">
-                <a href="mailto:privacy@whatsappbroadcast.com" className="text-primary hover:underline" data-testid="link-privacy-email">
-                  privacy@whatsappbroadcast.com
+                <a href={`mailto:${EMAIL_INFO}`} className="text-primary hover:underline" data-testid="link-privacy-email">
+                  {EMAIL_INFO}
                 </a>
               </p>
               <p className="text-muted-foreground">
