@@ -66,7 +66,7 @@ export function buildPlanComparison(plans: PublicBillingPlan[]) {
       values: plans.map((p) => formatLimit(p.maxTemplates)),
     },
     {
-      feature: "Messages / day",
+      feature: "Messages / subscription",
       values: plans.map((p) => formatLimit(p.maxMessagesPerDay)),
     },
   ];

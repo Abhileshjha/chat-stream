@@ -55,9 +55,9 @@ interface SubscriptionStatus {
     contactCount: number;
     contactLimit: number;
     contactsRemaining: number;
-    messagesSentToday: number;
-    messageDailyLimit: number;
-    messagesRemainingToday: number;
+    messagesSentTotal: number;
+    messageTotalLimit: number;
+    messagesRemainingTotal: number;
   } | null;
   planUsage?: {
     mode: string;
@@ -65,9 +65,9 @@ interface SubscriptionStatus {
     contactCount: number;
     contactLimit: number | null;
     contactsRemaining: number | null;
-    messagesSentToday: number;
-    messageDailyLimit: number | null;
-    messagesRemainingToday: number | null;
+    messagesSentTotal: number;
+    messageTotalLimit: number | null;
+    messagesRemainingTotal: number | null;
   } | null;
 }
 
@@ -400,8 +400,8 @@ export default function Billing() {
                     ({status.trialUsage.contactsRemaining} remaining)
                   </li>
                   <li>
-                    Messages today (all numbers combined): {status.trialUsage.messagesSentToday}/{status.trialUsage.messageDailyLimit} sent
-                    ({status.trialUsage.messagesRemainingToday} remaining today)
+                    Messages (total for trial): {status.trialUsage.messagesSentTotal}/{status.trialUsage.messageTotalLimit} sent
+                    ({status.trialUsage.messagesRemainingTotal} remaining)
                   </li>
                 </ul>
               )}

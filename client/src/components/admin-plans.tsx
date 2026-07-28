@@ -251,7 +251,7 @@ export function AdminPlansPanel() {
                 </div>
                 <ul className="text-xs text-muted-foreground space-y-1">
                   <li>Contacts: {formatLimit(plan.maxContacts)}</li>
-                  <li>Messages/day: {formatLimit(plan.maxMessagesPerDay)}</li>
+                  <li>Messages/subscription: {formatLimit(plan.maxMessagesPerDay)}</li>
                   <li>WhatsApp numbers: {formatLimit(plan.maxWhatsappNumbers)}</li>
                   <li>Templates: {formatLimit(plan.maxTemplates)}</li>
                   <li>Team seats: {formatLimit(plan.maxTeamSeats)}</li>
@@ -358,7 +358,7 @@ export function AdminPlansPanel() {
               {(
                 [
                   ["maxContacts", "Max contacts", form.maxContacts],
-                  ["maxMessagesPerDay", "Max messages / day", form.maxMessagesPerDay],
+                  ["maxMessagesPerDay", "Max messages / subscription", form.maxMessagesPerDay],
                   ["maxWhatsappNumbers", "Max WhatsApp numbers", form.maxWhatsappNumbers],
                   ["maxTemplates", "Max templates", form.maxTemplates],
                   ["maxTeamSeats", "Max team seats", form.maxTeamSeats],

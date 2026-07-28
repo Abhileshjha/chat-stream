@@ -8,9 +8,9 @@ interface TrialUsage {
   contactCount: number;
   contactLimit: number;
   contactsRemaining: number;
-  messagesSentToday: number;
-  messageDailyLimit: number;
-  messagesRemainingToday: number;
+  messagesSentTotal: number;
+  messageTotalLimit: number;
+  messagesRemainingTotal: number;
 }
 
 interface SubscriptionStatus {
@@ -74,7 +74,7 @@ export function TrialLimitsBanner() {
         </span>
         <span className="inline-flex items-center gap-1.5">
           <MessageSquare className="h-3.5 w-3.5" />
-          {trialUsage.messagesSentToday}/{trialUsage.messageDailyLimit} messages sent today
+          {trialUsage.messagesSentTotal}/{trialUsage.messageTotalLimit} messages used
         </span>
         <Link href="/billing" className="ml-auto text-primary underline-offset-4 hover:underline">
           Upgrade for unlimited access

@@ -1,6 +1,6 @@
 import type { RequestHandler } from "express";
 import { authStorage } from "./auth/storage";
-import { getEffectiveTrialEndsAt } from "./trialLimits";
+import { getEffectiveTrialEndsAt, hasExceededMessageQuota } from "./trialLimits";
 import { getCheapestActivePlan } from "./billingPlans";
 import {
   ensureSubscriptionFresh,
@@ -73,6 +73,14 @@ export const blockExpiredTrialWrites: RequestHandler = async (req, res, next) =>
   }
 
   if (await hasActiveSubscription(userId)) {
+    const user = await authStorage.getUser(userId);
+    if (user && (await hasExceededMessageQuota(user))) {
+      return res.status(402).json({
+        error: "message_quota_exhausted",
+        message:
+          "You've exhausted your message quota for the current trial/subscription period. Upgrade your plan to continue.",
+      });
+    }
     return next();
   }
 

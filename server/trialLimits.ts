@@ -13,12 +13,12 @@ import type { BillingPlan } from "@shared/billingPlans";
 import { and, eq, gte, inArray, or, sql } from "drizzle-orm";
 import { getBillingPlanById } from "./billingPlans";
 
-export const TRIAL_DAYS = 3;
+export const TRIAL_DAYS = 7;
 export const TRIAL_MAX_CONTACTS = 100;
-export const TRIAL_MAX_MESSAGES_PER_DAY = 100;
+export const TRIAL_MAX_MESSAGES_TOTAL = 1000;
 
 export const TRIAL_CONTACT_LIMIT_MESSAGE = `Trial accounts can add up to ${TRIAL_MAX_CONTACTS} contacts. Subscribe to add more.`;
-export const TRIAL_MESSAGE_LIMIT_MESSAGE = `Trial accounts can send up to ${TRIAL_MAX_MESSAGES_PER_DAY} messages per day. Subscribe to send more.`;
+export const TRIAL_MESSAGE_LIMIT_MESSAGE = `Trial accounts can send up to ${TRIAL_MAX_MESSAGES_TOTAL} total messages in the trial period. Subscribe to send more.`;
 
 const MS_PER_TRIAL_DAY = 24 * 60 * 60 * 1000;
 
@@ -50,9 +50,10 @@ export function isPaidActiveUser(user: User): boolean {
   return true;
 }
 
-function startOfTodayUtc(): Date {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+function addMonths(from: Date, months = 1): Date {
+  const d = new Date(from);
+  d.setMonth(d.getMonth() + months);
+  return d;
 }
 
 async function getUserAccountIds(userId: string): Promise<string[]> {
@@ -75,13 +76,14 @@ export async function countUserContacts(userId: string): Promise<number> {
   return Number(row?.count) || 0;
 }
 
-export async function countUserMessagesSentToday(userId: string): Promise<number> {
-  // Aggregate across ALL WhatsApp numbers owned by the user — sending 10k
-  // from number A and 10k from number B both count toward the same daily cap.
+export async function countUserMessagesSentInWindow(
+  userId: string,
+  since?: Date | null,
+): Promise<number> {
+  // Aggregate across ALL WhatsApp numbers owned by the user.
+  // Count only successfully sent messages (exclude queued/draft/failed).
   const accountIds = await getUserAccountIds(userId);
   if (accountIds.length === 0) return 0;
-
-  const since = startOfTodayUtc();
 
   const [broadcastRow] = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -89,8 +91,9 @@ export async function countUserMessagesSentToday(userId: string): Promise<number
     .where(
       and(
         inArray(messages.accountId, accountIds),
-        gte(messages.queuedAt, since),
-        sql`${messages.status} <> 'failed'`,
+        sql`${messages.sentAt} IS NOT NULL`,
+        since ? gte(messages.sentAt, since) : sql`true`,
+        inArray(messages.status, ["sent", "delivered", "read"]),
       ),
     );
 
@@ -105,7 +108,9 @@ export async function countUserMessagesSentToday(userId: string): Promise<number
           eq(conversationMessages.direction, "outbound"),
           eq(conversationMessages.direction, "outgoing"),
         ),
-        gte(conversationMessages.sentAt, since),
+        sql`${conversationMessages.sentAt} IS NOT NULL`,
+        since ? gte(conversationMessages.sentAt, since) : sql`true`,
+        sql`${conversationMessages.status} IS NULL OR ${conversationMessages.status} <> 'failed'`,
       ),
     );
 
@@ -145,19 +150,21 @@ async function resolvePlanLimits(user: User): Promise<{
   mode: "none" | "trial" | "plan";
   plan?: BillingPlan;
   maxContacts: number | null;
-  maxMessagesPerDay: number | null;
+  maxMessagesTotal: number | null;
   maxWhatsappNumbers: number | null;
   maxTemplates: number | null;
   maxTeamSeats: number | null;
+  usageWindowStart: Date | null;
 }> {
   if (user.role === "super_admin" || user.grantedFreeAccess) {
     return {
       mode: "none",
       maxContacts: null,
-      maxMessagesPerDay: null,
+      maxMessagesTotal: null,
       maxWhatsappNumbers: null,
       maxTemplates: null,
       maxTeamSeats: null,
+      usageWindowStart: null,
     };
   }
 
@@ -165,10 +172,11 @@ async function resolvePlanLimits(user: User): Promise<{
     return {
       mode: "trial",
       maxContacts: TRIAL_MAX_CONTACTS,
-      maxMessagesPerDay: TRIAL_MAX_MESSAGES_PER_DAY,
+      maxMessagesTotal: TRIAL_MAX_MESSAGES_TOTAL,
       maxWhatsappNumbers: 1,
       maxTemplates: null,
       maxTeamSeats: 1,
+      usageWindowStart: user.createdAt ? new Date(user.createdAt) : null,
     };
   }
 
@@ -179,10 +187,15 @@ async function resolvePlanLimits(user: User): Promise<{
         mode: "plan",
         plan,
         maxContacts: plan.maxContacts,
-        maxMessagesPerDay: plan.maxMessagesPerDay,
+        maxMessagesTotal: plan.maxMessagesPerDay,
         maxWhatsappNumbers: plan.maxWhatsappNumbers,
         maxTemplates: plan.maxTemplates,
         maxTeamSeats: plan.maxTeamSeats,
+        usageWindowStart: user.subscriptionEndsAt
+          ? addMonths(new Date(user.subscriptionEndsAt), -1)
+          : user.createdAt
+            ? new Date(user.createdAt)
+            : null,
       };
     }
   }
@@ -190,34 +203,35 @@ async function resolvePlanLimits(user: User): Promise<{
   return {
     mode: "none",
     maxContacts: null,
-    maxMessagesPerDay: null,
+    maxMessagesTotal: null,
     maxWhatsappNumbers: null,
     maxTemplates: null,
     maxTeamSeats: null,
+    usageWindowStart: null,
   };
 }
 
 export async function getTrialUsage(userId: string) {
-  const [contactCount, messagesSentToday] = await Promise.all([
+  const [contactCount, messagesSentTotal] = await Promise.all([
     countUserContacts(userId),
-    countUserMessagesSentToday(userId),
+    countUserMessagesSentInWindow(userId),
   ]);
 
   return {
     contactCount,
     contactLimit: TRIAL_MAX_CONTACTS,
     contactsRemaining: Math.max(0, TRIAL_MAX_CONTACTS - contactCount),
-    messagesSentToday,
-    messageDailyLimit: TRIAL_MAX_MESSAGES_PER_DAY,
-    messagesRemainingToday: Math.max(0, TRIAL_MAX_MESSAGES_PER_DAY - messagesSentToday),
+    messagesSentTotal,
+    messageTotalLimit: TRIAL_MAX_MESSAGES_TOTAL,
+    messagesRemainingTotal: Math.max(0, TRIAL_MAX_MESSAGES_TOTAL - messagesSentTotal),
   };
 }
 
 export async function getPlanUsage(user: User) {
   const limits = await resolvePlanLimits(user);
-  const [contactCount, messagesSentToday, whatsappNumbers, templateCount] = await Promise.all([
+  const [contactCount, messagesSentTotal, whatsappNumbers, templateCount] = await Promise.all([
     countUserContacts(user.id),
-    countUserMessagesSentToday(user.id),
+    countUserMessagesSentInWindow(user.id, limits.usageWindowStart),
     countUserWhatsappNumbers(user.id),
     countUserTemplates(user.id),
   ]);
@@ -233,9 +247,9 @@ export async function getPlanUsage(user: User) {
     contactCount,
     contactLimit: limits.maxContacts,
     contactsRemaining: remaining(limits.maxContacts, contactCount),
-    messagesSentToday,
-    messageDailyLimit: limits.maxMessagesPerDay,
-    messagesRemainingToday: remaining(limits.maxMessagesPerDay, messagesSentToday),
+    messagesSentTotal,
+    messageTotalLimit: limits.maxMessagesTotal,
+    messagesRemainingTotal: remaining(limits.maxMessagesTotal, messagesSentTotal),
     whatsappNumbers,
     whatsappNumberLimit: limits.maxWhatsappNumbers,
     templateCount,
@@ -271,23 +285,30 @@ export async function assertCanSendMessages(
 ): Promise<LimitResult> {
   if (messageCount <= 0) return { ok: true };
   const limits = await resolvePlanLimits(user);
-  if (limits.maxMessagesPerDay == null) return { ok: true };
+  if (limits.maxMessagesTotal == null) return { ok: true };
 
-  const sentToday = await countUserMessagesSentToday(user.id);
-  if (sentToday + messageCount > limits.maxMessagesPerDay) {
-    const remaining = Math.max(0, limits.maxMessagesPerDay - sentToday);
+  const sentTotal = await countUserMessagesSentInWindow(user.id, limits.usageWindowStart);
+  if (sentTotal + messageCount > limits.maxMessagesTotal) {
+    const remaining = Math.max(0, limits.maxMessagesTotal - sentTotal);
     return {
       ok: false,
       code: limits.mode === "trial" ? "trial_message_limit" : "plan_message_limit",
       message:
         remaining > 0
-          ? `You can only send ${remaining} more message${remaining === 1 ? "" : "s"} today on your ${limits.mode === "trial" ? "trial" : "plan"}.`
+          ? `You can only send ${remaining} more message${remaining === 1 ? "" : "s"} in your current ${limits.mode === "trial" ? "trial" : "subscription"} period.`
           : limits.mode === "trial"
             ? TRIAL_MESSAGE_LIMIT_MESSAGE
-            : `Your ${limits.plan?.name ?? "current"} plan allows ${limits.maxMessagesPerDay} messages per day. Upgrade to send more.`,
+            : `Your ${limits.plan?.name ?? "current"} plan allows ${limits.maxMessagesTotal.toLocaleString("en-IN")} total messages per subscription period. Upgrade to send more.`,
     };
   }
   return { ok: true };
+}
+
+export async function hasExceededMessageQuota(user: User): Promise<boolean> {
+  const limits = await resolvePlanLimits(user);
+  if (limits.maxMessagesTotal == null) return false;
+  const sentTotal = await countUserMessagesSentInWindow(user.id, limits.usageWindowStart);
+  return sentTotal >= limits.maxMessagesTotal;
 }
 
 export async function assertCanAddWhatsappNumber(user: User): Promise<LimitResult> {
