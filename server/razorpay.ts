@@ -1,6 +1,7 @@
 import Razorpay from "razorpay";
 import crypto from "crypto";
 import type { BillingPlan } from "@shared/billingPlans";
+import { calculateProRataUpgrade } from "@shared/upgradePricing";
 import {
   getBillingPlanById,
   getDefaultBillingPlan,
@@ -142,13 +143,21 @@ export async function createSubscription(
 export type UpgradeQuote = {
   fromPlan: BillingPlan;
   toPlan: BillingPlan;
+  /** Amount charged at checkout (pro-rata payable). */
   differenceInr: number;
   differencePaise: number;
+  remainingCreditInr: number;
+  usedValueInr: number;
+  daysUsed: number;
+  daysRemaining: number;
+  totalDays: number;
+  usesProRata: boolean;
 };
 
 export async function quotePlanUpgrade(
   currentPlanId: string,
   targetPlanId: string,
+  subscriptionEndsAt?: Date | string | null,
 ): Promise<UpgradeQuote> {
   const fromPlan = await getBillingPlanById(currentPlanId);
   const toPlan = await getBillingPlanById(targetPlanId);
@@ -161,24 +170,41 @@ export async function quotePlanUpgrade(
   if (toPlan.amountInr <= fromPlan.amountInr) {
     throw new Error("You can only upgrade to a higher-priced plan");
   }
-  const differenceInr = toPlan.amountInr - fromPlan.amountInr;
+
+  const breakdown = calculateProRataUpgrade({
+    fromPlanAmountInr: fromPlan.amountInr,
+    toPlanAmountInr: toPlan.amountInr,
+    subscriptionEndsAt,
+  });
+
   return {
     fromPlan,
     toPlan,
-    differenceInr,
-    differencePaise: differenceInr * 100,
+    differenceInr: breakdown.payableInr,
+    differencePaise: breakdown.payableInr * 100,
+    remainingCreditInr: breakdown.remainingCreditInr,
+    usedValueInr: breakdown.usedValueInr,
+    daysUsed: breakdown.daysUsed,
+    daysRemaining: breakdown.daysRemaining,
+    totalDays: breakdown.totalDays,
+    usesProRata: breakdown.usesProRata,
   };
 }
 
-/** One-time order for the upgrade price difference. */
+/** One-time order for the pro-rata upgrade amount. */
 export async function createUpgradeOrder(params: {
   userId: string;
   customerEmail: string;
   customerName: string;
   currentPlanId: string;
   targetPlanId: string;
+  subscriptionEndsAt?: Date | string | null;
 }) {
-  const quote = await quotePlanUpgrade(params.currentPlanId, params.targetPlanId);
+  const quote = await quotePlanUpgrade(
+    params.currentPlanId,
+    params.targetPlanId,
+    params.subscriptionEndsAt,
+  );
   const razorpay = getClient();
   const order = await razorpay.orders.create({
     amount: quote.differencePaise,
@@ -189,6 +215,8 @@ export async function createUpgradeOrder(params: {
       userId: params.userId,
       fromPlanId: quote.fromPlan.id,
       toPlanId: quote.toPlan.id,
+      payableInr: String(quote.differenceInr),
+      creditInr: String(quote.remainingCreditInr),
       email: params.customerEmail,
       name: params.customerName,
     },
@@ -205,12 +233,17 @@ export async function applyPlanUpgrade(params: {
   orderId: string;
   paymentId: string;
   signature: string;
+  subscriptionEndsAt?: Date | string | null;
 }) {
   if (!verifyPaymentSignature(params.orderId, params.paymentId, params.signature)) {
     throw new Error("Invalid payment signature");
   }
 
-  const quote = await quotePlanUpgrade(params.fromPlanId, params.toPlanId);
+  const quote = await quotePlanUpgrade(
+    params.fromPlanId,
+    params.toPlanId,
+    params.subscriptionEndsAt,
+  );
   const newRazorpayPlanId = await getOrCreatePlanId(quote.toPlan.id);
 
   if (params.razorpaySubscriptionId) {

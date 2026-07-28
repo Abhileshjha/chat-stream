@@ -4580,6 +4580,7 @@ export async function registerRoutes(
           `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email || "Customer",
         currentPlanId: user.billingPlanId,
         targetPlanId,
+        subscriptionEndsAt: user.subscriptionEndsAt,
       });
 
       res.json({
@@ -4589,15 +4590,23 @@ export async function registerRoutes(
         currency: order.currency,
         keyId: process.env.RAZORPAY_KEY_ID?.replace(/^["']|["']$/g, ""),
         differenceInr: quote.differenceInr,
+        remainingCreditInr: quote.remainingCreditInr,
+        usedValueInr: quote.usedValueInr,
+        daysUsed: quote.daysUsed,
+        daysRemaining: quote.daysRemaining,
+        totalDays: quote.totalDays,
+        usesProRata: quote.usesProRata,
         fromPlan: {
           id: quote.fromPlan.id,
           name: quote.fromPlan.name,
           priceLabel: quote.fromPlan.priceLabel,
+          amountInr: quote.fromPlan.amountInr,
         },
         toPlan: {
           id: quote.toPlan.id,
           name: quote.toPlan.name,
           priceLabel: quote.toPlan.priceLabel,
+          amountInr: quote.toPlan.amountInr,
         },
       });
     } catch (error: any) {
@@ -4639,19 +4648,17 @@ export async function registerRoutes(
         orderId,
         paymentId,
         signature,
+        subscriptionEndsAt: user.subscriptionEndsAt,
       });
 
-      // Keep existing period end if still in future; otherwise start a fresh month.
-      const currentEnd =
-        user.subscriptionEndsAt && new Date(user.subscriptionEndsAt) > new Date()
-          ? new Date(user.subscriptionEndsAt)
-          : addMonths(new Date(), 1);
+      // Fresh billing period on upgrade (pro-rata credit applied at checkout).
+      const newPeriodEnd = addMonths(new Date(), 1);
 
       await activatePaidPlan({
         userId,
         billingPlanId: quote.toPlan.id,
         razorpaySubscriptionId: user.razorpaySubscriptionId,
-        subscriptionEndsAt: currentEnd,
+        subscriptionEndsAt: newPeriodEnd,
       });
 
       await recordBillingPayment({
@@ -4676,7 +4683,8 @@ export async function registerRoutes(
           priceLabel: quote.toPlan.priceLabel,
         },
         differenceInr: quote.differenceInr,
-        subscriptionEndsAt: currentEnd.toISOString(),
+        remainingCreditInr: quote.remainingCreditInr,
+        subscriptionEndsAt: newPeriodEnd.toISOString(),
       });
     } catch (error: any) {
       console.error("Failed to confirm plan upgrade:", error);
@@ -4819,16 +4827,12 @@ export async function registerRoutes(
         const notes = paymentEntity?.notes || {};
         if (notes.type === "plan_upgrade" && notes.userId && notes.toPlanId) {
           const upgradeUser = await authStorage.getUser(String(notes.userId));
-          const keepEnd =
-            upgradeUser?.subscriptionEndsAt &&
-            new Date(upgradeUser.subscriptionEndsAt) > new Date()
-              ? new Date(upgradeUser.subscriptionEndsAt)
-              : addMonths(new Date(), 1);
+          const newPeriodEnd = addMonths(new Date(), 1);
           await activatePaidPlan({
             userId: String(notes.userId),
             billingPlanId: String(notes.toPlanId),
             razorpaySubscriptionId: upgradeUser?.razorpaySubscriptionId,
-            subscriptionEndsAt: keepEnd,
+            subscriptionEndsAt: newPeriodEnd,
           });
           await recordBillingPayment({
             userId: String(notes.userId),

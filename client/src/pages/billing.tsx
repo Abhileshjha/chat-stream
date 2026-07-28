@@ -23,6 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TrialCountdown } from "@/components/trial-countdown";
 import { getTrialRemainingMs } from "@/lib/trial-countdown";
 import { cn } from "@/lib/utils";
+import { calculateProRataUpgrade } from "@shared/upgradePricing";
 
 interface BillingPlan {
   id: string;
@@ -144,8 +145,15 @@ export default function Billing() {
   }, [eligiblePlans, selectedPlanId]);
 
   const selectedPlan = visiblePlans.find((p) => p.id === selectedPlanId) ?? null;
-  const upgradeDifference =
-    isPaidActive && selectedPlan ? Math.max(0, selectedPlan.amountInr - currentAmount) : 0;
+  const upgradeBreakdown =
+    isPaidActive && selectedPlan && currentPlan
+      ? calculateProRataUpgrade({
+          fromPlanAmountInr: currentAmount,
+          toPlanAmountInr: selectedPlan.amountInr,
+          subscriptionEndsAt: status?.subscriptionEndsAt,
+        })
+      : null;
+  const upgradePayable = upgradeBreakdown?.payableInr ?? 0;
   const canCheckoutSelectedPlan =
     !!selectedPlan &&
     selectedPlan.razorpayEnabled &&
@@ -197,7 +205,7 @@ export default function Billing() {
           currency: data.currency || "INR",
           order_id: data.orderId,
           name: "Convora",
-          description: `Upgrade to ${data.toPlan?.name ?? selectedPlan.name} — pay ${formatInr(data.differenceInr)} difference`,
+          description: `Upgrade to ${data.toPlan?.name ?? selectedPlan.name} — pay ${formatInr(data.differenceInr)}`,
           theme: { color: "#14205a" },
           handler: async (response: {
             razorpay_order_id: string;
@@ -527,13 +535,20 @@ export default function Billing() {
                 <p className="text-sm font-medium text-[#075E54]">
                   {selectedPlan
                     ? isPaidActive
-                      ? `Upgrade to ${selectedPlan.name} — pay ${formatInr(upgradeDifference)} difference`
+                      ? `Upgrade to ${selectedPlan.name} — pay ${formatInr(upgradePayable)}`
                       : `${selectedPlan.name} plan — ${selectedPlan.priceLabel}/month`
                     : "Select a plan to continue"}
                 </p>
+                {isPaidActive && upgradeBreakdown?.usesProRata && selectedPlan && currentPlan && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {selectedPlan.priceLabel}/month − {formatInr(upgradeBreakdown.remainingCreditInr)} unused
+                    credit from {currentPlan.name} ({upgradeBreakdown.daysRemaining} day
+                    {upgradeBreakdown.daysRemaining === 1 ? "" : "s"} left)
+                  </p>
+                )}
                 <p className="text-xs text-muted-foreground mt-1">
                   {isPaidActive
-                    ? "One-time upgrade charge via Razorpay · recurring plan updates to the new price"
+                    ? "Pro-rata upgrade via Razorpay · new 30-day period starts after payment"
                     : "Secure checkout via Razorpay · Cancel anytime"}
                 </p>
               </div>
@@ -553,7 +568,7 @@ export default function Billing() {
                   {isSubscribing
                     ? "Opening Razorpay..."
                     : isPaidActive
-                      ? `Upgrade — pay ${formatInr(upgradeDifference)}`
+                      ? `Upgrade — pay ${formatInr(upgradePayable)}`
                       : `Continue with Razorpay — ${selectedPlan.priceLabel}/mo`}
                   {!isSubscribing && <ArrowRight className="h-4 w-4" />}
                 </Button>
