@@ -17,6 +17,7 @@ import {
   MessageCircle,
   ArrowUpRight,
   Download,
+  Crown,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TrialCountdown } from "@/components/trial-countdown";
@@ -365,19 +366,39 @@ export default function Billing() {
             </p>
           )}
           {isPaidActive && (
-            <p className="text-sm text-[#14205a]/70">
-              You&apos;re subscribed
-              {status?.plan || currentPlan
-                ? ` to ${(status?.plan ?? currentPlan)!.name} (${(status?.plan ?? currentPlan)!.priceLabel}/month)`
-                : ""}
-              — messaging is active.
-              {status?.subscriptionEndsAt && (
-                <> Renews / ends {new Date(status.subscriptionEndsAt).toLocaleDateString()}.</>
-              )}
-              {canUpgrade
-                ? " Your current plan is marked below, and lower-priced plans are disabled."
-                : " Your current plan is marked below. You're already on the highest available plan."}
-            </p>
+            <div className="rounded-xl border border-[#25D366]/30 bg-gradient-to-r from-[#25D366]/10 via-white to-white p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#075E54]/55">
+                    Active subscription
+                  </p>
+                  <p className="mt-1 text-lg font-semibold text-[#075E54]">
+                    {(status?.plan ?? currentPlan)?.name ?? "Current Plan"}
+                  </p>
+                  <p className="text-sm text-[#075E54]/70">
+                    {(status?.plan ?? currentPlan)?.priceLabel
+                      ? `${(status?.plan ?? currentPlan)!.priceLabel}/month`
+                      : "Monthly plan"}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge className="gap-1.5 rounded-full border-0 bg-gradient-to-r from-[#128C7E] to-[#25D366] px-3 py-1.5 text-white shadow-md shadow-[#25D366]/30 hover:from-[#0f7a6f] hover:to-[#22c35f]">
+                    <Crown className="h-3.5 w-3.5" />
+                    Current active plan
+                  </Badge>
+                  {status?.subscriptionEndsAt && (
+                    <Badge variant="outline" className="border-[#075E54]/20 text-[#075E54]/80">
+                      Renews {new Date(status.subscriptionEndsAt).toLocaleDateString()}
+                    </Badge>
+                  )}
+                </div>
+              </div>
+              <p className="mt-3 text-sm text-[#075E54]/70">
+                {canUpgrade
+                  ? "Upgrade anytime. Lower-priced plans are disabled for your current subscription."
+                  : "You're on the highest available plan right now."}
+              </p>
+            </div>
           )}
           {status?.subscriptionStatus === "trial" && !status.hasPaid && (
             <div className="flex flex-col gap-2 text-sm rounded-xl bg-amber-50 border border-amber-200/80 px-4 py-3 text-amber-900">
@@ -456,14 +477,15 @@ export default function Billing() {
                       Most popular
                     </Badge>
                   )}
-                  {isCurrent && (
-                    <Badge className="absolute top-4 right-4 bg-[#075E54] text-white hover:bg-[#075E54]">
-                      Current plan
-                    </Badge>
-                  )}
                   <div className="space-y-4 pt-1">
                     <div>
                       <h3 className="text-xl font-semibold text-[#075E54]">{plan.name}</h3>
+                      {isCurrent && (
+                        <Badge className="mt-2 inline-flex gap-1 rounded-full border-0 bg-gradient-to-r from-[#128C7E] to-[#25D366] px-2.5 py-1 text-white shadow-md shadow-[#25D366]/30 hover:from-[#128C7E] hover:to-[#25D366]">
+                          <Crown className="h-3 w-3" />
+                          Current plan
+                        </Badge>
+                      )}
                       <p className="text-sm text-muted-foreground mt-1">{plan.tagline}</p>
                     </div>
                     <div className="flex items-baseline gap-1">
