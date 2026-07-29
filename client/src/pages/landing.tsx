@@ -1,5 +1,5 @@
 import { Link } from "wouter";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import {
@@ -286,6 +286,28 @@ function WaMark({ className = "h-9 w-9" }: { className?: string }) {
 export default function Landing() {
   const { data: plansData, isLoading: plansLoading } = usePublicPlans();
   const plans = toMarketingPlanCards(plansData?.plans ?? []);
+  const [showScene, setShowScene] = useState(false);
+
+  useEffect(() => {
+    // Defer Three.js scene until the browser is idle so first paint / TTI stay fast.
+    const win = window as Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    let idleId: number | undefined;
+    let timeoutId: number | undefined;
+    if (typeof win.requestIdleCallback === "function") {
+      idleId = win.requestIdleCallback(() => setShowScene(true), { timeout: 2500 });
+    } else {
+      timeoutId = window.setTimeout(() => setShowScene(true), 1200);
+    }
+    return () => {
+      if (idleId != null && typeof win.cancelIdleCallback === "function") {
+        win.cancelIdleCallback(idleId);
+      }
+      if (timeoutId != null) window.clearTimeout(timeoutId);
+    };
+  }, []);
 
   return (
     <div
@@ -293,9 +315,11 @@ export default function Landing() {
       style={{ backgroundColor: WA.mist }}
     >
       <ContentSeo path="/" />
-      <Suspense fallback={null}>
-        <ScrollScene />
-      </Suspense>
+      {showScene && (
+        <Suspense fallback={null}>
+          <ScrollScene />
+        </Suspense>
+      )}
 
       <div
         className="pointer-events-none fixed inset-0 -z-[5]"
@@ -901,7 +925,7 @@ export default function Landing() {
               </p>
             </div>
             <div>
-              <h2 className="font-semibold mb-4 text-[#075E54] text-sm">Product</h2>
+              <p className="font-semibold mb-4 text-[#075E54] text-sm">Product</p>
               <ul className="space-y-2 text-sm text-[#075E54]/50">
                 {MARKETING_NAV.map(({ href, label }) => (
                   <li key={href}>
@@ -911,7 +935,7 @@ export default function Landing() {
               </ul>
             </div>
             <div>
-              <h2 className="font-semibold mb-4 text-[#075E54] text-sm">Legal</h2>
+              <p className="font-semibold mb-4 text-[#075E54] text-sm">Legal</p>
               <ul className="space-y-2 text-sm text-[#075E54]/50">
                 <li><Link href="/privacy" title="Convora Privacy Policy" className="hover:text-[#075E54]">Privacy Policy</Link></li>
                 <li><Link href="/terms" title="Convora Terms of Service" className="hover:text-[#075E54]">Terms of Service</Link></li>
@@ -920,7 +944,7 @@ export default function Landing() {
               </ul>
             </div>
             <div>
-              <h2 className="font-semibold mb-4 text-[#075E54] text-sm">Support</h2>
+              <p className="font-semibold mb-4 text-[#075E54] text-sm">Support</p>
               <ul className="space-y-2 text-sm text-[#075E54]/50">
                 <li><Link href="/contact" title="Contact Convora support" className="hover:text-[#075E54]">Contact Us</Link></li>
                 <li>

@@ -28,12 +28,6 @@ import {
   LogOut,
 } from "lucide-react";
 
-declare global {
-  interface Window {
-    FB: any;
-    __FB_APP_ID__: string;
-  }
-}
 import {
   Sidebar,
   SidebarContent,
@@ -210,25 +204,18 @@ export function AppSidebar({
     return 0;
   };
 
-  // Fetch Facebook App ID for SDK initialization
+  // Fetch Facebook App ID and load SDK only for authenticated workspace (embedded signup).
   const { data: fbConfig } = useQuery<{ appId: string }>({
     queryKey: ["/api/auth/facebook/config"],
   });
 
-  // Set the FB App ID for the SDK when config is loaded
   useEffect(() => {
-    if (fbConfig?.appId) {
-      window.__FB_APP_ID__ = fbConfig.appId;
-      // Reinitialize FB SDK if it's already loaded
-      if (window.FB) {
-        window.FB.init({
-          appId: fbConfig.appId,
-          cookie: true,
-          xfbml: true,
-          version: 'v18.0'
-        });
-      }
-    }
+    if (!fbConfig?.appId) return;
+    void import("@/lib/facebook-sdk").then(({ loadFacebookSdk }) => {
+      loadFacebookSdk(fbConfig.appId).catch(() => {
+        // SDK optional — manual token connect still works without it.
+      });
+    });
   }, [fbConfig?.appId]);
 
   // Mutation to process the embedded signup response
@@ -302,6 +289,11 @@ export function AppSidebar({
     setIsConnecting(true);
     
     try {
+      const { loadFacebookSdk } = await import("@/lib/facebook-sdk");
+      await loadFacebookSdk(fbConfig?.appId);
+      if (!window.FB) {
+        throw new Error("Facebook SDK failed to load");
+      }
       // Use Meta's Embedded Signup flow
       // Note: business_management scope is required to access /me/businesses endpoint
       window.FB.login(

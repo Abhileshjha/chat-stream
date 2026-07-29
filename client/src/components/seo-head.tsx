@@ -17,9 +17,10 @@ import {
 const MANAGED_ATTR = "data-convora-seo";
 
 function upsertMeta(attr: "name" | "property", key: string, content: string) {
-  let el = document.head.querySelector<HTMLMetaElement>(
-    `meta[${attr}="${key}"][${MANAGED_ATTR}]`,
-  );
+  // Prefer updating an existing static tag so we never create duplicate canonicals/metas.
+  let el =
+    document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"][${MANAGED_ATTR}]`) ||
+    document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`);
   if (!el) {
     el = document.createElement("meta");
     el.setAttribute(attr, key);
@@ -30,9 +31,9 @@ function upsertMeta(attr: "name" | "property", key: string, content: string) {
 }
 
 function upsertLink(rel: string, href: string) {
-  let el = document.head.querySelector<HTMLLinkElement>(
-    `link[rel="${rel}"][${MANAGED_ATTR}]`,
-  );
+  let el =
+    document.head.querySelector<HTMLLinkElement>(`link[rel="${rel}"][${MANAGED_ATTR}]`) ||
+    document.head.querySelector<HTMLLinkElement>(`link[rel="${rel}"]`);
   if (!el) {
     el = document.createElement("link");
     el.setAttribute("rel", rel);
@@ -57,6 +58,7 @@ function upsertJsonLd(id: string, data: Record<string, unknown>[]) {
 }
 
 function clearManagedSeo() {
+  // Only remove tags we created — leave the static index.html baseline intact.
   document.head.querySelectorAll(`[${MANAGED_ATTR}]`).forEach((node) => node.remove());
 }
 

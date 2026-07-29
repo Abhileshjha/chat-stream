@@ -266,7 +266,7 @@ function MarketingFooter() {
             </p>
           </div>
           <div>
-            <h2 className="font-semibold mb-4 text-[#075E54] text-sm">Product</h2>
+            <p className="font-semibold mb-4 text-[#075E54] text-sm">Product</p>
             <ul className="space-y-2 text-sm text-[#075E54]/50">
               {MARKETING_NAV.map(({ href, label }) => (
                 <li key={href}>
@@ -278,7 +278,7 @@ function MarketingFooter() {
             </ul>
           </div>
           <div>
-            <h2 className="font-semibold mb-4 text-[#075E54] text-sm">Legal</h2>
+            <p className="font-semibold mb-4 text-[#075E54] text-sm">Legal</p>
             <ul className="space-y-2 text-sm text-[#075E54]/50">
               <li><Link href="/privacy" title="Convora Privacy Policy" className="hover:text-[#075E54]">Privacy Policy</Link></li>
               <li><Link href="/terms" title="Convora Terms of Service" className="hover:text-[#075E54]">Terms of Service</Link></li>
@@ -287,7 +287,7 @@ function MarketingFooter() {
             </ul>
           </div>
           <div>
-            <h2 className="font-semibold mb-4 text-[#075E54] text-sm">Support</h2>
+            <p className="font-semibold mb-4 text-[#075E54] text-sm">Support</p>
             <ul className="space-y-2 text-sm text-[#075E54]/50">
               <li><Link href="/contact" className="hover:text-[#075E54]">Contact Us</Link></li>
               <li>

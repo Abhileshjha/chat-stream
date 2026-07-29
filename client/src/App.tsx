@@ -46,8 +46,10 @@ import UseCases from "@/pages/use-cases";
 import Proof from "@/pages/proof";
 import Pricing from "@/pages/pricing";
 import Faq from "@/pages/faq";
+import NotFound from "@/pages/not-found";
 import { useQuery } from "@tanstack/react-query";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { GoogleAnalytics } from "@/components/google-analytics";
 import type { Template, Campaign, DashboardMetrics } from "@shared/schema";
 
 const PUBLIC_PATHS = new Set([
@@ -114,9 +116,7 @@ function AppRouter() {
       <Route path="/">
         <Redirect to="/dashboard" />
       </Route>
-      <Route>
-        <Redirect to="/" />
-      </Route>
+      <Route component={NotFound} />
     </Switch>
   );
 }
@@ -140,9 +140,7 @@ function PublicRouter() {
       <Route path="/refund" component={Refund} />
       <Route path="/contact" component={Contact} />
       <Route path="/delete-data" component={DeleteData} />
-      <Route>
-        <Redirect to="/" />
-      </Route>
+      <Route component={NotFound} />
     </Switch>
   );
 }
@@ -291,6 +289,7 @@ function App() {
         <QueryClientProvider client={queryClient}>
           <TooltipProvider>
             <PageTracking />
+            <GoogleAnalytics />
             <AppContent />
             <Toaster />
           </TooltipProvider>

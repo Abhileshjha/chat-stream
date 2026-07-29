@@ -4,6 +4,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { setupAuth, registerAuthRoutes } from "./auth";
+import { registerSecurityAndCanonicalMiddleware } from "./security";
 
 // Without these, a single unhandled error anywhere in the app - a bad
 // webhook payload, a failed Meta API call in a fire-and-forget send loop,
@@ -25,8 +26,7 @@ process.on("uncaughtException", (err) => {
 const app = express();
 const httpServer = createServer(app);
 
-// Hide Express fingerprint from response headers (SEO / security scanners).
-app.disable("x-powered-by");
+registerSecurityAndCanonicalMiddleware(app);
 
 // Dedicated health check target for Render (Settings -> Health Check Path).
 // Registered before any other middleware so it never waits on auth/session
