@@ -129,7 +129,7 @@ export const CONTENT_SEO: Record<string, SeoPageConfig> = {
     path: "/",
     title: "WhatsApp Business API Platform for Teams | Convora",
     description:
-      "Broadcast WhatsApp campaigns, manage Meta-approved templates, and reply from a shared team inbox with live delivery analytics — start your free Convora trial today.",
+      "Broadcast WhatsApp campaigns with Meta-approved templates, shared team inbox and live delivery analytics. Start free with Convora.",
     keywords: DEFAULT_KEYWORDS,
     jsonLd: [softwareApplicationJsonLd()],
   },
