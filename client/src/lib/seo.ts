@@ -1,9 +1,14 @@
 import { faqs, EMAIL_INFO, EMAIL_SUPPORT, HELP_NUMBER } from "./marketing-content";
 
-/** Canonical production origin for marketing SEO. */
-export const SITE_URL = "https://convora.tech";
+/** Canonical production origin — must match the live app host. */
+export const SITE_URL = "https://app.convora.tech";
 export const SITE_NAME = "Convora";
+export const SITE_AUTHOR = "Convora";
+export const SITE_PUBLISHER = "Convora";
 export const DEFAULT_OG_IMAGE = `${SITE_URL}/og-image.jpg`;
+
+export const DEFAULT_KEYWORDS =
+  "WhatsApp Business API, WhatsApp marketing, WhatsApp broadcast, WhatsApp campaigns, Meta Cloud API, WhatsApp inbox, message templates, Convora";
 
 export type SeoRobots = "index, follow" | "noindex, nofollow" | "noindex, follow";
 
@@ -11,6 +16,7 @@ export type SeoPageConfig = {
   path: string;
   title: string;
   description: string;
+  keywords?: string;
   robots?: SeoRobots;
   ogType?: "website" | "article";
   /** Extra JSON-LD objects beyond Organization (merged into script array). */
@@ -124,6 +130,7 @@ export const CONTENT_SEO: Record<string, SeoPageConfig> = {
     title: "WhatsApp Business API Platform for Teams | Convora",
     description:
       "Broadcast campaigns, approved templates, shared team inbox and live delivery analytics on the official Meta WhatsApp Business API. Start your free Convora trial today.",
+    keywords: DEFAULT_KEYWORDS,
     jsonLd: [softwareApplicationJsonLd()],
   },
   "/features": {
@@ -131,6 +138,8 @@ export const CONTENT_SEO: Record<string, SeoPageConfig> = {
     title: "WhatsApp Marketing Features & Inbox | Convora",
     description:
       "Explore Convora features: broadcast campaigns, Meta template manager, shared inbox, contact lists, tags and real-time WhatsApp delivery analytics for growing teams.",
+    keywords:
+      "WhatsApp marketing features, WhatsApp broadcast, WhatsApp shared inbox, Meta template manager, WhatsApp analytics, Convora",
     jsonLd: [
       crumbs({ name: "Features", path: "/features" }),
       softwareApplicationJsonLd(),
@@ -141,6 +150,8 @@ export const CONTENT_SEO: Record<string, SeoPageConfig> = {
     title: "Trusted Official Meta WhatsApp API | Convora",
     description:
       "Convora runs on the official Meta WhatsApp Business Platform. Transparent delivery, secure workspaces and reliable Cloud API messaging your customers can trust.",
+    keywords:
+      "official WhatsApp Business API, Meta Cloud API, WhatsApp trust, secure WhatsApp messaging, Convora",
     jsonLd: [crumbs({ name: "Trust", path: "/trust" })],
   },
   "/how-it-works": {
@@ -148,6 +159,8 @@ export const CONTENT_SEO: Record<string, SeoPageConfig> = {
     title: "How WhatsApp Campaigns Work on Convora",
     description:
       "Connect Meta API, create approved templates, then launch and track WhatsApp broadcast campaigns in real time with Convora — from signup to first send in days.",
+    keywords:
+      "how WhatsApp campaigns work, WhatsApp broadcast steps, Meta API setup, WhatsApp templates, Convora",
     jsonLd: [crumbs({ name: "How it works", path: "/how-it-works" })],
   },
   "/setup-guide": {
@@ -155,6 +168,8 @@ export const CONTENT_SEO: Record<string, SeoPageConfig> = {
     title: "WhatsApp Business API Setup Guide | Convora",
     description:
       "Step-by-step guide to connect Meta Business, WhatsApp Cloud API, message templates and your first Convora campaign so your team can go live in days, not weeks.",
+    keywords:
+      "WhatsApp Business API setup, Meta embedded signup, WABA setup guide, WhatsApp Cloud API, Convora",
     jsonLd: [crumbs({ name: "Setup guide", path: "/setup-guide" })],
   },
   "/use-cases": {
@@ -162,6 +177,8 @@ export const CONTENT_SEO: Record<string, SeoPageConfig> = {
     title: "WhatsApp Business Use Cases for Teams | Convora",
     description:
       "See how sales, support and marketing teams use Convora for WhatsApp broadcasts, follow-ups, order notifications and shared inbox replies that convert conversations.",
+    keywords:
+      "WhatsApp use cases, WhatsApp for sales, WhatsApp customer support, WhatsApp notifications, Convora",
     jsonLd: [crumbs({ name: "Use cases", path: "/use-cases" })],
   },
   "/proof": {
@@ -169,6 +186,8 @@ export const CONTENT_SEO: Record<string, SeoPageConfig> = {
     title: "WhatsApp Delivery Results & Campaign Proof",
     description:
       "Real delivery transparency on WhatsApp: sent, delivered, read and failed tracked live per campaign with Convora analytics so you always know what customers received.",
+    keywords:
+      "WhatsApp delivery reports, WhatsApp read receipts, campaign analytics, message tracking, Convora",
     jsonLd: [crumbs({ name: "Proof", path: "/proof" })],
   },
   "/pricing": {
@@ -176,6 +195,8 @@ export const CONTENT_SEO: Record<string, SeoPageConfig> = {
     title: "WhatsApp API Pricing Plans & Free Trial",
     description:
       "Simple Convora plans for WhatsApp Business API broadcasting. Free trial included — Meta conversation fees billed at Meta rates with no platform markup on messages.",
+    keywords:
+      "WhatsApp API pricing, WhatsApp Business API cost, Convora plans, WhatsApp free trial, Meta conversation fees",
     jsonLd: [
       crumbs({ name: "Pricing", path: "/pricing" }),
       softwareApplicationJsonLd(),
@@ -186,6 +207,8 @@ export const CONTENT_SEO: Record<string, SeoPageConfig> = {
     title: "WhatsApp Business API FAQ Answered | Convora",
     description:
       "Answers about official WhatsApp Business API, Meta conversation charges, template approval times, shared team inbox and Convora free trials — clear and up to date.",
+    keywords:
+      "WhatsApp Business API FAQ, Meta conversation charges, WhatsApp template approval, Convora help",
     jsonLd: [crumbs({ name: "FAQ", path: "/faq" }), faqPageJsonLd()],
   },
   "/contact": {
@@ -193,6 +216,8 @@ export const CONTENT_SEO: Record<string, SeoPageConfig> = {
     title: "Contact Convora Support | WhatsApp API Help",
     description:
       "Contact Convora for WhatsApp Business API setup, billing and support. Call +91 9217730926 or email info@convora.tech and support@convora.tech — we reply within 24 hours.",
+    keywords:
+      "contact Convora, WhatsApp API support, Convora help desk, billing support, Convora phone",
     jsonLd: [crumbs({ name: "Contact", path: "/contact" }), contactPageJsonLd()],
   },
   "/privacy": {
@@ -200,6 +225,7 @@ export const CONTENT_SEO: Record<string, SeoPageConfig> = {
     title: "Privacy Policy | Convora WhatsApp Platform",
     description:
       "How Convora collects, uses and protects personal data on our WhatsApp Business API broadcasting platform. Read our privacy practices before you create an account.",
+    keywords: "Convora privacy policy, WhatsApp data privacy, personal data protection",
     jsonLd: [crumbs({ name: "Privacy Policy", path: "/privacy" })],
   },
   "/terms": {
@@ -207,6 +233,7 @@ export const CONTENT_SEO: Record<string, SeoPageConfig> = {
     title: "Terms of Service | Convora WhatsApp Platform",
     description:
       "Terms governing use of Convora’s WhatsApp Business API platform, including accounts, acceptable use, billing, service limits and your responsibilities as a customer.",
+    keywords: "Convora terms of service, WhatsApp platform terms, acceptable use policy",
     jsonLd: [crumbs({ name: "Terms of Service", path: "/terms" })],
   },
   "/refund": {
@@ -214,6 +241,7 @@ export const CONTENT_SEO: Record<string, SeoPageConfig> = {
     title: "Refund Policy for Convora Billing Plans",
     description:
       "Convora refund policy for subscription billing on our WhatsApp Business API platform. Learn when refunds apply, what is excluded, and how to request billing help.",
+    keywords: "Convora refund policy, WhatsApp API billing refund, subscription refund",
     jsonLd: [crumbs({ name: "Refund Policy", path: "/refund" })],
   },
   "/delete-data": {
@@ -221,6 +249,7 @@ export const CONTENT_SEO: Record<string, SeoPageConfig> = {
     title: "User Data Deletion Requests | Convora Privacy",
     description:
       "Request deletion of your Convora account and associated WhatsApp workspace data. Steps for GDPR-style user data removal requests, timelines and support contacts.",
+    keywords: "data deletion request, GDPR delete account, Convora delete data, WhatsApp data removal",
     jsonLd: [crumbs({ name: "Data Deletion", path: "/delete-data" })],
   },
 };

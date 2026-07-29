@@ -1,7 +1,11 @@
 import { useEffect } from "react";
 import {
   SITE_NAME,
+  SITE_AUTHOR,
+  SITE_PUBLISHER,
+  SITE_URL,
   DEFAULT_OG_IMAGE,
+  DEFAULT_KEYWORDS,
   buildCanonical,
   organizationJsonLd,
   getContentSeo,
@@ -60,6 +64,7 @@ export type SeoHeadProps = {
   title: string;
   description: string;
   path: string;
+  keywords?: string;
   robots?: SeoRobots;
   ogType?: "website" | "article";
   image?: string;
@@ -72,6 +77,7 @@ export function SeoHead({
   title,
   description,
   path,
+  keywords = DEFAULT_KEYWORDS,
   robots = "index, follow",
   ogType = "website",
   image = DEFAULT_OG_IMAGE,
@@ -88,9 +94,14 @@ export function SeoHead({
     document.documentElement.lang = "en";
 
     upsertMeta("name", "description", description);
+    upsertMeta("name", "keywords", keywords);
+    upsertMeta("name", "author", SITE_AUTHOR);
+    upsertMeta("name", "publisher", SITE_PUBLISHER);
     upsertMeta("name", "robots", robots);
     upsertMeta("name", "googlebot", robots);
     upsertLink("canonical", canonical);
+    upsertLink("author", SITE_URL);
+    upsertLink("publisher", SITE_URL);
 
     upsertMeta("property", "og:title", fullTitle);
     upsertMeta("property", "og:description", description);
@@ -99,6 +110,8 @@ export function SeoHead({
     upsertMeta("property", "og:image", image);
     upsertMeta("property", "og:site_name", SITE_NAME);
     upsertMeta("property", "og:locale", "en_IN");
+    upsertMeta("property", "article:author", SITE_AUTHOR);
+    upsertMeta("property", "article:publisher", SITE_URL);
 
     upsertMeta("name", "twitter:card", "summary_large_image");
     upsertMeta("name", "twitter:title", fullTitle);
@@ -119,7 +132,18 @@ export function SeoHead({
     return () => {
       clearManagedSeo();
     };
-  }, [title, description, path, robots, ogType, image, jsonLdKey, includeOrganization, jsonLd]);
+  }, [
+    title,
+    description,
+    path,
+    keywords,
+    robots,
+    ogType,
+    image,
+    jsonLdKey,
+    includeOrganization,
+    jsonLd,
+  ]);
 
   return null;
 }
@@ -136,6 +160,7 @@ export function SeoFromConfig({
       title={config.title}
       description={config.description}
       path={config.path}
+      keywords={config.keywords}
       robots={config.robots}
       ogType={config.ogType}
       jsonLd={config.jsonLd}
