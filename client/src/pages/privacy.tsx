@@ -2,10 +2,12 @@ import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, MessageSquare } from "lucide-react";
 import { EMAIL_INFO } from "@/lib/marketing-content";
+import { ContentSeo } from "@/components/seo-head";
 
 export default function Privacy() {
   return (
     <div className="min-h-screen bg-background">
+      <ContentSeo path="/privacy" />
       <nav className="border-b">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
           <Link href="/">

@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Shield } from "lucide-react";
 import { SESSION_SUPERSEDED_KEY } from "@/hooks/use-auth";
+import { AuthSeo } from "@/components/seo-head";
 
 export default function AdminLogin() {
   const [, navigate] = useLocation();
@@ -61,6 +62,7 @@ export default function AdminLogin() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#F7FAFF] px-4">
+      <AuthSeo path="/admin-login" />
       <div
         className="pointer-events-none fixed inset-0"
         style={{

@@ -13,6 +13,7 @@ import {
 import { Phone, ArrowRight, Menu } from "lucide-react";
 import { FaWhatsapp } from "react-icons/fa";
 import { HELP_NUMBER, MARKETING_NAV, WA, EMAIL_INFO, EMAIL_SUPPORT } from "@/lib/marketing-content";
+import { ContentSeo } from "@/components/seo-head";
 
 /** Section padding — tighter on mobile, unchanged from md/lg up */
 export const sectionPad = "py-16 md:py-20 lg:py-24 px-4";
@@ -45,8 +46,10 @@ export function WaMark({ className = "h-9 w-9" }: { className?: string }) {
   return (
     <div
       className={`flex items-center justify-center rounded-full bg-[#25D366] text-white shadow-md shadow-[#25D366]/30 ${className}`}
+      role="img"
+      aria-label="Convora WhatsApp logo"
     >
-      <FaWhatsapp className="h-[58%] w-[58%]" />
+      <FaWhatsapp className="h-[58%] w-[58%]" aria-hidden />
     </div>
   );
 }
@@ -165,6 +168,7 @@ function MarketingNav() {
             <Link
               key={href}
               href={href}
+              title={`${label} — Convora WhatsApp Business API`}
               className={`text-sm font-medium transition-colors ${
                 location === href ? "text-[#075E54]" : "text-[#075E54]/60 hover:text-[#075E54]"
               }`}
@@ -261,11 +265,11 @@ function MarketingFooter() {
             </p>
           </div>
           <div>
-            <h4 className="font-semibold mb-4 text-[#075E54]">Product</h4>
+            <h2 className="font-semibold mb-4 text-[#075E54] text-sm">Product</h2>
             <ul className="space-y-2 text-sm text-[#075E54]/50">
               {MARKETING_NAV.map(({ href, label }) => (
                 <li key={href}>
-                  <Link href={href} className="hover:text-[#075E54]">
+                  <Link href={href} title={`${label} — Convora`} className="hover:text-[#075E54]">
                     {label}
                   </Link>
                 </li>
@@ -273,16 +277,16 @@ function MarketingFooter() {
             </ul>
           </div>
           <div>
-            <h4 className="font-semibold mb-4 text-[#075E54]">Legal</h4>
+            <h2 className="font-semibold mb-4 text-[#075E54] text-sm">Legal</h2>
             <ul className="space-y-2 text-sm text-[#075E54]/50">
-              <li><Link href="/privacy" className="hover:text-[#075E54]">Privacy Policy</Link></li>
-              <li><Link href="/terms" className="hover:text-[#075E54]">Terms of Service</Link></li>
-              <li><Link href="/refund" className="hover:text-[#075E54]">Refund Policy</Link></li>
-              <li><Link href="/delete-data" className="hover:text-[#075E54]">Data Deletion</Link></li>
+              <li><Link href="/privacy" title="Convora Privacy Policy" className="hover:text-[#075E54]">Privacy Policy</Link></li>
+              <li><Link href="/terms" title="Convora Terms of Service" className="hover:text-[#075E54]">Terms of Service</Link></li>
+              <li><Link href="/refund" title="Convora Refund Policy" className="hover:text-[#075E54]">Refund Policy</Link></li>
+              <li><Link href="/delete-data" title="Request user data deletion" className="hover:text-[#075E54]">Data Deletion</Link></li>
             </ul>
           </div>
           <div>
-            <h4 className="font-semibold mb-4 text-[#075E54]">Support</h4>
+            <h2 className="font-semibold mb-4 text-[#075E54] text-sm">Support</h2>
             <ul className="space-y-2 text-sm text-[#075E54]/50">
               <li><Link href="/contact" className="hover:text-[#075E54]">Contact Us</Link></li>
               <li>
@@ -315,11 +319,14 @@ function MarketingFooter() {
 }
 
 export function MarketingLayout({ children }: { children: React.ReactNode }) {
+  const [location] = useLocation();
+
   return (
     <div
       className="relative min-h-screen text-[#075E54] selection:bg-[#25D366]/30"
       style={{ backgroundColor: WA.mist }}
     >
+      <ContentSeo path={location} />
       <div
         className="pointer-events-none fixed inset-0 -z-[5]"
         style={{

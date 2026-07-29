@@ -11,6 +11,7 @@ import { Eye, EyeOff, ArrowRight, ArrowLeft, CheckCircle2, MessageCircle, Shield
 import * as THREE from "three";
 import { SESSION_SUPERSEDED_KEY } from "@/hooks/use-auth";
 import { cheapestPlan, usePublicPlans } from "@/hooks/use-public-plans";
+import { AuthSeo } from "@/components/seo-head";
 
 function LoginScene() {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -271,6 +272,7 @@ export default function Login() {
 
   return (
     <div className="relative min-h-screen flex overflow-hidden">
+      <AuthSeo path="/login" />
       <LoginScene />
 
       {/* Background gradient overlay */}

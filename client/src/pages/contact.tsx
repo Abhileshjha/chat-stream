@@ -13,6 +13,7 @@ import {
   EMAIL_SUPPORT,
   EMAIL_BILLING,
 } from "@/lib/marketing-content";
+import { ContentSeo } from "@/components/seo-head";
 
 export default function Contact() {
   const { toast } = useToast();
@@ -36,6 +37,7 @@ export default function Contact() {
 
   return (
     <div className="min-h-screen bg-background">
+      <ContentSeo path="/contact" />
       <nav className="border-b">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
           <Link href="/">

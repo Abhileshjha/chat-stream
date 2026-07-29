@@ -3,10 +3,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, MessageSquare, Mail, Clock, Shield } from "lucide-react";
 import { EMAIL_INFO } from "@/lib/marketing-content";
+import { ContentSeo } from "@/components/seo-head";
 
 export default function DeleteData() {
   return (
     <div className="min-h-screen bg-background">
+      <ContentSeo path="/delete-data" />
       <nav className="border-b">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
           <Link href="/" data-testid="link-home-logo">

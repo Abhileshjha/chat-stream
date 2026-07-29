@@ -35,6 +35,7 @@ import { AnimatedSection } from "@/components/section-backdrop";
 import { TrustBadgeBanner } from "@/components/trust-badges";
 import { MARKETING_NAV, HELP_NUMBER } from "@/lib/marketing-content";
 import { MarketingHeader } from "@/components/marketing-layout";
+import { ContentSeo } from "@/components/seo-head";
 import { toMarketingPlanCards, usePublicPlans } from "@/hooks/use-public-plans";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -273,8 +274,10 @@ function WaMark({ className = "h-9 w-9" }: { className?: string }) {
   return (
     <div
       className={`flex items-center justify-center rounded-full bg-[#25D366] text-white shadow-md shadow-[#25D366]/30 ${className}`}
+      role="img"
+      aria-label="Convora WhatsApp logo"
     >
-      <FaWhatsapp className="h-[58%] w-[58%]" />
+      <FaWhatsapp className="h-[58%] w-[58%]" aria-hidden />
     </div>
   );
 }
@@ -288,6 +291,7 @@ export default function Landing() {
       className="relative min-h-screen text-[#075E54] selection:bg-[#25D366]/30"
       style={{ backgroundColor: WA.mist }}
     >
+      <ContentSeo path="/" />
       <Suspense fallback={null}>
         <ScrollScene />
       </Suspense>
@@ -896,30 +900,30 @@ export default function Landing() {
               </p>
             </div>
             <div>
-              <h4 className="font-semibold mb-4 text-[#075E54]">Product</h4>
+              <h2 className="font-semibold mb-4 text-[#075E54] text-sm">Product</h2>
               <ul className="space-y-2 text-sm text-[#075E54]/50">
                 {MARKETING_NAV.map(({ href, label }) => (
                   <li key={href}>
-                    <Link href={href} className="hover:text-[#075E54]">{label}</Link>
+                    <Link href={href} title={`${label} — Convora`} className="hover:text-[#075E54]">{label}</Link>
                   </li>
                 ))}
               </ul>
             </div>
             <div>
-              <h4 className="font-semibold mb-4 text-[#075E54]">Legal</h4>
+              <h2 className="font-semibold mb-4 text-[#075E54] text-sm">Legal</h2>
               <ul className="space-y-2 text-sm text-[#075E54]/50">
-                <li><Link href="/privacy" className="hover:text-[#075E54]">Privacy Policy</Link></li>
-                <li><Link href="/terms" className="hover:text-[#075E54]">Terms of Service</Link></li>
-                <li><Link href="/refund" className="hover:text-[#075E54]">Refund Policy</Link></li>
-                <li><Link href="/delete-data" className="hover:text-[#075E54]">Data Deletion</Link></li>
+                <li><Link href="/privacy" title="Convora Privacy Policy" className="hover:text-[#075E54]">Privacy Policy</Link></li>
+                <li><Link href="/terms" title="Convora Terms of Service" className="hover:text-[#075E54]">Terms of Service</Link></li>
+                <li><Link href="/refund" title="Convora Refund Policy" className="hover:text-[#075E54]">Refund Policy</Link></li>
+                <li><Link href="/delete-data" title="Request user data deletion" className="hover:text-[#075E54]">Data Deletion</Link></li>
               </ul>
             </div>
             <div>
-              <h4 className="font-semibold mb-4 text-[#075E54]">Support</h4>
+              <h2 className="font-semibold mb-4 text-[#075E54] text-sm">Support</h2>
               <ul className="space-y-2 text-sm text-[#075E54]/50">
-                <li><Link href="/contact" className="hover:text-[#075E54]">Contact Us</Link></li>
+                <li><Link href="/contact" title="Contact Convora support" className="hover:text-[#075E54]">Contact Us</Link></li>
                 <li>
-                  <a href={`tel:+91${HELP_NUMBER}`} className="hover:text-[#075E54] flex items-center gap-1.5">
+                  <a href={`tel:+91${HELP_NUMBER}`} title="Call Convora support" className="hover:text-[#075E54] flex items-center gap-1.5">
                     <Phone className="h-3.5 w-3.5 text-[#25D366]" /> +91 {HELP_NUMBER}
                   </a>
                 </li>
