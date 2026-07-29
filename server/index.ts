@@ -25,6 +25,9 @@ process.on("uncaughtException", (err) => {
 const app = express();
 const httpServer = createServer(app);
 
+// Hide Express fingerprint from response headers (SEO / security scanners).
+app.disable("x-powered-by");
+
 // Dedicated health check target for Render (Settings -> Health Check Path).
 // Registered before any other middleware so it never waits on auth/session
 // setup and does no DB work - Render polls this on the new instance before

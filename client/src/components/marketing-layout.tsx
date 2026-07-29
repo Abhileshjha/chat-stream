@@ -14,6 +14,7 @@ import { Phone, ArrowRight, Menu } from "lucide-react";
 import { FaWhatsapp } from "react-icons/fa";
 import { HELP_NUMBER, MARKETING_NAV, WA, EMAIL_INFO, EMAIL_SUPPORT } from "@/lib/marketing-content";
 import { ContentSeo } from "@/components/seo-head";
+import { SocialShare } from "@/components/social-share";
 
 /** Section padding — tighter on mobile, unchanged from md/lg up */
 export const sectionPad = "py-16 md:py-20 lg:py-24 px-4";
@@ -307,11 +308,25 @@ function MarketingFooter() {
             </ul>
           </div>
         </div>
-        <div className="border-t border-[#075E54]/10 mt-8 pt-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs sm:text-sm text-[#075E54]/40 text-center sm:text-left">
-          <p>&copy; {new Date().getFullYear()} Convora. All rights reserved.</p>
-          <p className="flex items-center justify-center gap-1.5 max-w-xs sm:max-w-none">
-            <FaWhatsapp className="h-3.5 w-3.5 text-[#25D366]" /> Built on the official Meta WhatsApp Business Platform
-          </p>
+        <div className="border-t border-[#075E54]/10 mt-8 pt-8 flex flex-col gap-4">
+          <SocialShare />
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs sm:text-sm text-[#075E54]/40 text-center sm:text-left">
+            <p>&copy; {new Date().getFullYear()} Convora. All rights reserved.</p>
+            <p className="flex flex-col sm:flex-row items-center justify-center gap-1.5 sm:gap-3 max-w-md sm:max-w-none">
+              <span className="inline-flex items-center gap-1.5">
+                <FaWhatsapp className="h-3.5 w-3.5 text-[#25D366]" /> Built on the official{" "}
+                <a
+                  href="https://developers.facebook.com/docs/whatsapp/cloud-api"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Meta WhatsApp Cloud API documentation"
+                  className="underline underline-offset-2 hover:text-[#075E54]"
+                >
+                  Meta WhatsApp Business Platform
+                </a>
+              </span>
+            </p>
+          </div>
         </div>
       </div>
     </footer>
