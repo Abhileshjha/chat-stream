@@ -463,13 +463,24 @@
             };
 
             var clock = new THREE.Clock();
+            var elapsedTime = 0; // FIX: track elapsed time manually instead of calling
+                                  // clock.getElapsedTime() (which itself calls getDelta()
+                                  // internally and was starving our own getDelta() call
+                                  // below of any meaningful time, keeping dt ~ 0 and the
+                                  // progress bar stuck near 0%).
 
             function animate() {
               if (!document.getElementById('three-canvas-container')) return;
               requestAnimationFrame(animate);
 
-              var t = clock.getElapsedTime();
+              // FIX: pull the frame delta exactly once per frame, then derive
+              // our own running clock from it. Previously this called
+              // clock.getElapsedTime() first (which secretly advances/reads
+              // the clock's internal delta tracking) and then clock.getDelta()
+              // right after, so the second call almost always returned ~0.
               var dt = Math.min(clock.getDelta(), 0.05);
+              elapsedTime += dt;
+              var t = elapsedTime;
 
               tickBubble(t);
               tickProgress(dt);
@@ -542,7 +553,7 @@
           layer on top of personal chat apps.
         </p>
         <p>
-          Unlike unofficial bulk-sender tools, Convora connects to Meta’s WhatsApp Business Platform
+          Unlike unofficial bulk-sender tools, Convora connects to Meta's WhatsApp Business Platform
           so your number keeps a verified business profile, quality rating visibility, and compliant
           messaging limits. Teams across India use Convora to launch offers, follow up leads, send
           order updates, and support customers where they already chat every day. Whether you run a
@@ -586,7 +597,7 @@
         <p>
           Billing stays predictable: compare options on the
           <a href="/pricing">subscription plan comparison</a> page. Every plan includes a free trial so
-          you can send real campaigns before you pay. Meta conversation fees are billed at Meta’s
+          you can send real campaigns before you pay. Meta conversation fees are billed at Meta's
           rates with no markup from Convora; your subscription covers the software platform for teams,
           not a hidden premium on each customer chat. After go-live, most teams iterate weekly: refine
           template copy, tighten audience segments, and coach agents from inbox transcripts.
@@ -595,7 +606,7 @@
         <h2>Campaigns, inbox and analytics in one workspace</h2>
         <h3>Outbound campaigns that stay compliant</h3>
         <p>
-          Marketing and utility messages must use Meta-approved templates. Convora’s editor helps you
+          Marketing and utility messages must use Meta-approved templates. Convora's editor helps you
           structure headers, body variables, buttons and footer text, then tracks approval status so
           you are not guessing whether a template is live. Campaigns can target lists or tagged
           segments, and you can schedule sends for peak engagement windows in your market.
@@ -629,7 +640,7 @@
         </p>
         <p>
           Founders, agencies and support managers use Convora to scale WhatsApp without grey tools.
-          Technical readers can review Meta’s
+          Technical readers can review Meta's
           <a href="https://developers.facebook.com/docs/whatsapp/cloud-api" rel="noopener noreferrer" target="_blank" title="Meta WhatsApp Cloud API docs">Cloud API reference on developers.facebook.com</a>.
           When your team is ready,
           <a href="%VITE_LOGIN_URL%" title="Create or open a Convora workspace">open a free Convora trial account</a>
