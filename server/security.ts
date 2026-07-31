@@ -32,35 +32,5 @@ export function registerSecurityAndCanonicalMiddleware(app: Express) {
     next();
   };
 
-  const canonicalHostRedirect: RequestHandler = (req, res, next) => {
-    if (process.env.NODE_ENV !== "production") return next();
-
-    const preferred = preferredOrigin();
-    if (!preferred) return next();
-
-    // Skip health checks and local probes
-    if (req.path === "/healthz") return next();
-
-    const forwardedProto = (req.headers["x-forwarded-proto"] as string | undefined)
-      ?.split(",")[0]
-      ?.trim();
-    const proto = forwardedProto || req.protocol || "https";
-    const hostHeader = (req.headers["x-forwarded-host"] as string | undefined) || req.headers.host || "";
-    const requestHost = hostHeader.split(":")[0].toLowerCase();
-    const preferredHost = preferred.hostname.toLowerCase();
-    const preferredProto = preferred.protocol.replace(":", "");
-
-    const hostMismatch = requestHost && requestHost !== preferredHost;
-    const protoMismatch = proto !== preferredProto;
-
-    if (hostMismatch || protoMismatch) {
-      const target = `${preferred.origin}${req.originalUrl || "/"}`;
-      return res.redirect(301, target);
-    }
-
-    next();
-  };
-
   app.use(securityHeaders);
-  app.use(canonicalHostRedirect);
 }
