@@ -85,7 +85,7 @@
       />
     </noscript>
     <style>
-      .seo-bootstrap { max-width: 48rem; margin: 0 auto; padding: 2rem 1.25rem 3rem; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: #075E54; line-height: 1.65; }
+      .seo-bootstrap { display: none; max-width: 48rem; margin: 0 auto; padding: 2rem 1.25rem 3rem; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: #075E54; line-height: 1.65; }
       .seo-bootstrap h1 { font-size: 1.75rem; line-height: 1.25; margin: 0 0 1rem; }
       .seo-bootstrap h2 { font-size: 1.25rem; margin: 1.75rem 0 0.75rem; }
       .seo-bootstrap h3 { font-size: 1.05rem; margin: 1.25rem 0 0.5rem; }
@@ -95,6 +95,7 @@
       .seo-bootstrap nav ul { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; margin-bottom: 1.5rem; }
       .seo-bootstrap nav a { font-weight: 600; text-decoration: none; }
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   </head>
   <body>
     <!--
@@ -103,6 +104,120 @@
       Keep H2 count under 10. Every anchor text is unique.
     -->
     <div id="root">
+      <div id="three-loader" style="position: fixed; inset: 0; background: linear-gradient(135deg, rgba(247,251,248,1), rgba(255,255,255,1)); z-index: 9999; display: flex; justify-content: center; align-items: center; flex-direction: column;">
+        <div id="three-canvas-container" style="width: 200px; height: 200px;"></div>
+        <div style="margin-top: 1rem; font-family: 'Poppins', sans-serif; font-size: 1.5rem; font-weight: 700; color: #075E54; animation: pulse 1.5s ease-in-out infinite;">
+          convora<span style="color: #25D366;">.tech</span>
+        </div>
+        <style>
+          @keyframes pulse {
+            0%, 100% { opacity: 0.5; transform: scale(0.98); }
+            50% { opacity: 1; transform: scale(1); }
+          }
+        </style>
+        <script>
+          (function() {
+            if (typeof THREE === 'undefined') return;
+            var container = document.getElementById('three-canvas-container');
+            if (!container) return;
+            
+            var scene = new THREE.Scene();
+            var camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+            camera.position.z = 8;
+
+            var renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+            renderer.setSize(200, 200);
+            renderer.setPixelRatio(window.devicePixelRatio > 1 ? 2 : 1);
+            container.appendChild(renderer.domElement);
+
+            // 1. Aura (Glowing background)
+            var auraCanvas = document.createElement('canvas');
+            auraCanvas.width = 128; auraCanvas.height = 128;
+            var ctx = auraCanvas.getContext('2d');
+            var gradient = ctx.createRadialGradient(64,64,0, 64,64,64);
+            gradient.addColorStop(0, 'rgba(37, 211, 102, 0.3)');
+            gradient.addColorStop(1, 'rgba(37, 211, 102, 0)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0,0,128,128);
+            var auraTex = new THREE.Texture(auraCanvas);
+            auraTex.needsUpdate = true;
+            var auraMat = new THREE.SpriteMaterial({ map: auraTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+            var aura = new THREE.Sprite(auraMat);
+            aura.scale.set(7, 7, 1);
+            scene.add(aura);
+
+            // 2. WhatsApp Logo
+            var svgStr = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="512" height="512"><path fill="%2325D366" d="M12.031 0C5.385 0 0 5.386 0 12.031c0 2.12.553 4.195 1.602 6.015L.177 23.327l5.421-1.423A11.968 11.968 0 0 0 12.03 24.06c6.645 0 12.03-5.386 12.03-12.03C24.061 5.385 18.675 0 12.031 0z"/><path fill="%23FFF" d="M19.167 16.915c-.328 1.01-1.636 1.83-2.617 1.954-.847.106-1.929.281-5.617-1.246-4.44-1.837-7.299-6.398-7.518-6.69-.219-.292-1.795-2.39-1.795-4.557 0-2.167 1.135-3.23 1.541-3.655.405-.425.875-.53 1.164-.53.288 0 .576 0 .825.013.264.013.62-.102.97.747.362.875 1.238 3.018 1.344 3.23.106.212.176.459.043.725-.133.264-.2.424-.397.653-.198.228-.413.51-.595.69-.2.197-.41.41-.184.797.228.388 1.012 1.666 2.166 2.693 1.492 1.328 2.748 1.738 3.136 1.922.387.185.613.153.842-.11.23-.263.993-1.156 1.258-1.554.265-.398.53-.332.883-.198.353.133 2.234 1.053 2.617 1.246.383.193.64.288.733.447.094.159.094.922-.234 1.932z"/></svg>';
+            var img = new Image();
+            img.src = 'data:image/svg+xml;charset=utf-8,' + svgStr;
+            var logoTex = new THREE.Texture(img);
+            img.onload = function() { logoTex.needsUpdate = true; };
+            var logoMat = new THREE.SpriteMaterial({ map: logoTex, transparent: true, depthTest: false });
+            var logo = new THREE.Sprite(logoMat);
+            logo.scale.set(3, 3, 1);
+            scene.add(logo);
+
+            // 3. High-Tech Rings (Gyroscope effect)
+            var ringGroup = new THREE.Group();
+            var r1 = new THREE.Mesh(new THREE.TorusGeometry(3, 0.02, 16, 100), new THREE.MeshBasicMaterial({ color: 0x25D366, transparent: true, opacity: 0.5 }));
+            var r2 = new THREE.Mesh(new THREE.TorusGeometry(3.6, 0.01, 16, 100), new THREE.MeshBasicMaterial({ color: 0x128C7E, transparent: true, opacity: 0.4 }));
+            var r3 = new THREE.Mesh(new THREE.TorusGeometry(4.2, 0.03, 16, 100), new THREE.MeshBasicMaterial({ color: 0x075E54, transparent: true, opacity: 0.3 }));
+            ringGroup.add(r1); ringGroup.add(r2); ringGroup.add(r3);
+            scene.add(ringGroup);
+
+            // 4. Point Cloud Sphere (Orbiting particles)
+            var pCount = 300;
+            var pGeo = new THREE.BufferGeometry();
+            var pPos = new Float32Array(pCount * 3);
+            for(var i=0; i<pCount; i++) {
+              var phi = Math.acos( -1 + ( 2 * i ) / pCount );
+              var theta = Math.sqrt( pCount * Math.PI ) * phi;
+              var r = 2.5 + Math.random() * 2;
+              pPos[i*3] = r * Math.cos(theta) * Math.sin(phi);
+              pPos[i*3+1] = r * Math.sin(theta) * Math.sin(phi);
+              pPos[i*3+2] = r * Math.cos(phi);
+            }
+            pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+            var pMat = new THREE.PointsMaterial({ color: 0x25D366, size: 0.06, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending });
+            var particles = new THREE.Points(pGeo, pMat);
+            scene.add(particles);
+
+            var clock = new THREE.Clock();
+            var rafId;
+
+            function animate() {
+              if (!document.getElementById('three-canvas-container')) {
+                cancelAnimationFrame(rafId);
+                return;
+              }
+              rafId = requestAnimationFrame(animate);
+              var t = clock.getElapsedTime();
+              
+              // Animate logo bobbing and pulsing
+              logo.position.y = Math.sin(t * 3) * 0.15;
+              var scale = 3 + Math.sin(t * 4) * 0.1;
+              logo.scale.set(scale, scale, 1);
+              
+              // Animate aura
+              var auraScale = 7 + Math.sin(t * 2) * 0.5;
+              aura.scale.set(auraScale, auraScale, 1);
+              aura.material.opacity = 0.5 + Math.sin(t * 3) * 0.2;
+
+              // Animate rings
+              r1.rotation.x = t * 0.5; r1.rotation.y = t * 0.3;
+              r2.rotation.y = t * -0.4; r2.rotation.z = t * 0.2;
+              r3.rotation.x = t * 0.2; r3.rotation.z = t * -0.3;
+
+              // Animate particles
+              particles.rotation.y = t * 0.15;
+              particles.rotation.z = t * 0.05;
+
+              renderer.render(scene, camera);
+            }
+            animate();
+          })();
+        </script>
+      </div>
       <main class="seo-bootstrap">
         <nav aria-label="Primary">
           <ul>
