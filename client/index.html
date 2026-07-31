@@ -104,113 +104,410 @@
       Keep H2 count under 10. Every anchor text is unique.
     -->
     <div id="root">
-      <div id="three-loader" style="position: fixed; inset: 0; background: linear-gradient(135deg, rgba(247,251,248,1), rgba(255,255,255,1)); z-index: 9999; display: flex; justify-content: center; align-items: center; flex-direction: column;">
-        <div id="three-canvas-container" style="width: 200px; height: 200px;"></div>
-        <div style="margin-top: 1rem; font-family: 'Poppins', sans-serif; font-size: 1.5rem; font-weight: 700; color: #075E54; animation: pulse 1.5s ease-in-out infinite;">
-          convora<span style="color: #25D366;">.tech</span>
+      <div id="three-loader" style="position: fixed; inset: 0; background: radial-gradient(130% 110% at 50% 14%, #103F35 0%, #082720 40%, #030D0B 78%, #010605 100%); z-index: 9999; display: flex; justify-content: center; align-items: center; overflow: hidden; font-family: 'Poppins', sans-serif;">
+
+        <!-- ambient grain for depth -->
+        <div style="position:absolute;inset:0;opacity:0.045;pointer-events:none;mix-blend-mode:overlay;background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E&quot;);"></div>
+
+        <!-- faint vignette rings so the scene reads as a "signal" field rather than an empty void -->
+        <div class="cnv-vignette" aria-hidden="true"></div>
+
+        <div class="cnv-stage">
+
+          <!-- three.js canvas sits behind the bubble mark, providing the orbiting message network -->
+          <div id="three-canvas-container" class="cnv-canvas-wrap"></div>
+
+          <!-- crisp vector mark: a chat bubble with a WhatsApp-style read receipt that draws in -->
+          <div class="cnv-bubble-wrap">
+            <svg class="cnv-bubble-svg" viewBox="0 0 220 190" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                id="cnv-bubble-outline"
+                d="M56,26 L166,26 A22,22 0 0 1 188,48 L188,124 A22,22 0 0 1 166,146 L84,146 L58,176 L58,146 L54,146 A22,22 0 0 1 32,124 L32,48 A22,22 0 0 1 56,26 Z"
+                stroke="#7FE3B4" stroke-width="2.4" stroke-linejoin="round" fill="rgba(37,211,102,0.045)"
+              />
+              <path id="cnv-check-1" class="cnv-check" d="M74,90 L96,112 L128,68" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+              <path id="cnv-check-2" class="cnv-check" d="M92,90 L114,112 L146,68" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            </svg>
+          </div>
         </div>
+
+        <div class="cnv-footer">
+          <div class="cnv-wordmark">
+            convora<span class="dot">.</span><span class="tld">tech</span>
+          </div>
+
+          <div class="cnv-progress-track">
+            <div id="loader-bar" class="cnv-progress-bar"></div>
+          </div>
+
+          <div class="cnv-status-row">
+            <span id="loader-status">Sending message</span>
+            <span id="loader-pct">0%</span>
+          </div>
+        </div>
+
         <style>
-          @keyframes pulse {
-            0%, 100% { opacity: 0.5; transform: scale(0.98); }
-            50% { opacity: 1; transform: scale(1); }
+          .cnv-stage {
+            position: relative;
+            width: 300px;
+            height: 260px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          }
+
+          .cnv-canvas-wrap {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1;
+          }
+
+          .cnv-bubble-wrap {
+            position: relative;
+            z-index: 2;
+            width: 210px;
+            height: 182px;
+            animation: cnv-float 4.8s ease-in-out infinite;
+            filter: drop-shadow(0 0 22px rgba(37, 211, 102, 0.22));
+          }
+
+          .cnv-bubble-svg { width: 100%; height: 100%; overflow: visible; }
+
+          #cnv-bubble-outline {
+            stroke-dasharray: 620;
+            stroke-dashoffset: 620;
+            animation: cnv-draw-outline 1.4s cubic-bezier(0.5, 0, 0.15, 1) 0.15s forwards;
+          }
+
+          .cnv-check {
+            stroke: #8696A0;
+            opacity: 0;
+          }
+
+          .cnv-vignette {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background:
+              radial-gradient(circle at 50% 46%, transparent 0%, transparent 46%, rgba(37,211,102,0.035) 47%, transparent 48%),
+              radial-gradient(circle at 50% 46%, transparent 0%, transparent 58%, rgba(18,140,126,0.03) 59%, transparent 60%);
+          }
+
+          .cnv-footer {
+            position: absolute;
+            left: 50%;
+            bottom: 11%;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.85rem;
+            animation: cnv-fade-up 0.8s ease both;
+            animation-delay: 0.2s;
+          }
+
+          .cnv-wordmark {
+            font-size: 1.5rem;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            color: #EAF7F1;
+          }
+          .cnv-wordmark .dot { color: #25D366; }
+          .cnv-wordmark .tld { font-weight: 500; color: #6FBBA0; }
+
+          .cnv-progress-track {
+            width: 220px;
+            height: 3px;
+            border-radius: 2px;
+            background: rgba(255,255,255,0.08);
+            overflow: hidden;
+            position: relative;
+          }
+          .cnv-progress-bar {
+            position: absolute; left: 0; top: 0; height: 100%; width: 0%;
+            background: linear-gradient(90deg, #128C7E, #25D366);
+            border-radius: 2px;
+            transition: width 0.25s ease-out;
+          }
+
+          .cnv-status-row {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.72rem;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: #5F9B8B;
+          }
+          #loader-pct { color: #25D366; min-width: 2.4em; text-align: right; }
+
+          @keyframes cnv-draw-outline { to { stroke-dashoffset: 0; } }
+          @keyframes cnv-float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-6px); }
+          }
+          @keyframes cnv-fade-up {
+            from { opacity: 0; transform: translate(-50%, 8px); }
+            to { opacity: 1; transform: translate(-50%, 0); }
+          }
+
+          @media (prefers-reduced-motion: reduce) {
+            .cnv-bubble-wrap, #cnv-bubble-outline { animation: none !important; }
           }
         </style>
+
         <script>
-          (function() {
-            if (typeof THREE === 'undefined') return;
+          (function () {
+            // ---------------------------------------------------------------
+            // Signature moment: the loader tells Convora's actual story —
+            // a message being sent, delivered, then read — using the same
+            // check states customers watch in the product's own analytics.
+            // Three.js drives an ambient "message network" behind the mark;
+            // the mark itself (SVG) renders the crisp read-receipt states.
+            // ---------------------------------------------------------------
+
+            var statusEl = document.getElementById('loader-status');
+            var pctEl = document.getElementById('loader-pct');
+            var barEl = document.getElementById('loader-bar');
+            var check1 = document.getElementById('cnv-check-1');
+            var check2 = document.getElementById('cnv-check-2');
+
+            [check1, check2].forEach(function (el) {
+              if (!el) return;
+              var len = el.getTotalLength();
+              el.style.strokeDasharray = len;
+              el.style.strokeDashoffset = len;
+            });
+
+            var GRAY = [134, 150, 160];   // WhatsApp sent/delivered grey
+            var BLUE = [83, 189, 235];    // WhatsApp read blue
+            function lerpColor(a, b, t) {
+              return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ','
+                + Math.round(a[1] + (b[1] - a[1]) * t) + ','
+                + Math.round(a[2] + (b[2] - a[2]) * t) + ')';
+            }
+
+            var CYCLE = 3.6; // seconds per send -> deliver -> read loop
+            var cycleStart = null;
+            var lastPhase = -1;
+            var launchDot = null; // set by three.js layer
+            var spawnRipple = null; // set by three.js layer
+
+            function setChecks(len1, off1, op1, len2, off2, op2, color) {
+              if (check1) { check1.style.strokeDashoffset = off1; check1.style.opacity = op1; check1.style.stroke = color; }
+              if (check2) { check2.style.strokeDashoffset = off2; check2.style.opacity = op2; check2.style.stroke = color; }
+            }
+
+            function tickBubble(tNow) {
+              if (cycleStart === null) cycleStart = tNow;
+              var elapsed = (tNow - cycleStart) % CYCLE;
+              var p = elapsed / CYCLE;
+
+              var len1 = check1 ? check1.getTotalLength() : 1;
+              var len2 = check2 ? check2.getTotalLength() : 1;
+
+              if (p < 0.30) {
+                // Sending: first check draws in
+                var k = p / 0.30;
+                var ease = 1 - Math.pow(1 - k, 3);
+                setChecks(len1, len1 * (1 - ease), ease, len2, len2, 0, 'rgb(134,150,160)');
+                if (statusEl) statusEl.textContent = 'Sending message';
+                if (lastPhase !== 0 && launchDot) { launchDot(); }
+                lastPhase = 0;
+              } else if (p < 0.60) {
+                // Delivered: second check draws in, still grey
+                var k2 = (p - 0.30) / 0.30;
+                var ease2 = 1 - Math.pow(1 - k2, 3);
+                setChecks(len1, 0, 1, len2, len2 * (1 - ease2), ease2, 'rgb(134,150,160)');
+                if (statusEl) statusEl.textContent = 'Delivered';
+                if (lastPhase !== 1 && spawnRipple) { spawnRipple(); }
+                lastPhase = 1;
+              } else if (p < 0.85) {
+                // Read: both checks tint blue
+                var k3 = (p - 0.60) / 0.25;
+                var col = lerpColor(GRAY, BLUE, Math.min(1, k3));
+                setChecks(len1, 0, 1, len2, 0, 1, col);
+                if (statusEl) statusEl.textContent = 'Read';
+                lastPhase = 2;
+              } else {
+                // Hold, then loop
+                setChecks(len1, 0, 1, len2, 0, 1, 'rgb(83,189,235)');
+                if (statusEl) statusEl.textContent = 'Read';
+                lastPhase = 3;
+              }
+            }
+
+            var progress = 0;
+            function tickProgress(dt) {
+              progress = Math.min(99, progress + (1 - progress / 100) * dt * 38);
+              var pctInt = Math.round(progress);
+              if (barEl) barEl.style.width = pctInt + '%';
+              if (pctEl) pctEl.textContent = pctInt + '%';
+            }
+
+            if (typeof THREE === 'undefined') {
+              // Graceful fallback: still animate the read-receipt mark without three.js
+              var lastT = null;
+              function fallbackLoop(ts) {
+                var tSec = ts / 1000;
+                if (lastT === null) lastT = tSec;
+                var dt = Math.min(tSec - lastT, 0.05);
+                lastT = tSec;
+                tickBubble(tSec);
+                tickProgress(dt);
+                if (document.getElementById('three-loader')) requestAnimationFrame(fallbackLoop);
+              }
+              requestAnimationFrame(fallbackLoop);
+              return;
+            }
+
             var container = document.getElementById('three-canvas-container');
             if (!container) return;
-            
+
+            var W = 300, H = 260;
             var scene = new THREE.Scene();
-            var camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
-            camera.position.z = 8;
+            var camera = new THREE.PerspectiveCamera(42, W / H, 0.1, 100);
+            camera.position.set(0, 0.3, 9.5);
 
             var renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-            renderer.setSize(200, 200);
-            renderer.setPixelRatio(window.devicePixelRatio > 1 ? 2 : 1);
+            renderer.setSize(W, H);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
             container.appendChild(renderer.domElement);
 
-            // 1. Aura (Glowing background)
-            var auraCanvas = document.createElement('canvas');
-            auraCanvas.width = 128; auraCanvas.height = 128;
-            var ctx = auraCanvas.getContext('2d');
-            var gradient = ctx.createRadialGradient(64,64,0, 64,64,64);
-            gradient.addColorStop(0, 'rgba(37, 211, 102, 0.3)');
-            gradient.addColorStop(1, 'rgba(37, 211, 102, 0)');
-            ctx.fillStyle = gradient;
-            ctx.fillRect(0,0,128,128);
-            var auraTex = new THREE.Texture(auraCanvas);
-            auraTex.needsUpdate = true;
-            var auraMat = new THREE.SpriteMaterial({ map: auraTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
-            var aura = new THREE.Sprite(auraMat);
-            aura.scale.set(7, 7, 1);
+            function glowTexture(rgb, soft) {
+              var c = document.createElement('canvas');
+              c.width = c.height = 128;
+              var ctx = c.getContext('2d');
+              var g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+              g.addColorStop(0, 'rgba(' + rgb + ',' + (soft ? 0.55 : 0.95) + ')');
+              g.addColorStop(0.4, 'rgba(' + rgb + ',' + (soft ? 0.2 : 0.4) + ')');
+              g.addColorStop(1, 'rgba(' + rgb + ',0)');
+              ctx.fillStyle = g;
+              ctx.fillRect(0, 0, 128, 128);
+              var tex = new THREE.Texture(c);
+              tex.needsUpdate = true;
+              return tex;
+            }
+
+            // Soft ambient core glow behind the vector mark
+            var aura = new THREE.Sprite(new THREE.SpriteMaterial({
+              map: glowTexture('37,211,102', true),
+              transparent: true, blending: THREE.AdditiveBlending, depthWrite: false
+            }));
+            aura.scale.set(5.6, 5.6, 1);
             scene.add(aura);
 
-            // 2. WhatsApp Logo
-            var svgStr = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="512" height="512"><path fill="%2325D366" d="M12.031 0C5.385 0 0 5.386 0 12.031c0 2.12.553 4.195 1.602 6.015L.177 23.327l5.421-1.423A11.968 11.968 0 0 0 12.03 24.06c6.645 0 12.03-5.386 12.03-12.03C24.061 5.385 18.675 0 12.031 0z"/><path fill="%23FFF" d="M19.167 16.915c-.328 1.01-1.636 1.83-2.617 1.954-.847.106-1.929.281-5.617-1.246-4.44-1.837-7.299-6.398-7.518-6.69-.219-.292-1.795-2.39-1.795-4.557 0-2.167 1.135-3.23 1.541-3.655.405-.425.875-.53 1.164-.53.288 0 .576 0 .825.013.264.013.62-.102.97.747.362.875 1.238 3.018 1.344 3.23.106.212.176.459.043.725-.133.264-.2.424-.397.653-.198.228-.413.51-.595.69-.2.197-.41.41-.184.797.228.388 1.012 1.666 2.166 2.693 1.492 1.328 2.748 1.738 3.136 1.922.387.185.613.153.842-.11.23-.263.993-1.156 1.258-1.554.265-.398.53-.332.883-.198.353.133 2.234 1.053 2.617 1.246.383.193.64.288.733.447.094.159.094.922-.234 1.932z"/></svg>';
-            var img = new Image();
-            img.src = 'data:image/svg+xml;charset=utf-8,' + svgStr;
-            var logoTex = new THREE.Texture(img);
-            img.onload = function() { logoTex.needsUpdate = true; };
-            var logoMat = new THREE.SpriteMaterial({ map: logoTex, transparent: true, depthTest: false });
-            var logo = new THREE.Sprite(logoMat);
-            logo.scale.set(3, 3, 1);
-            scene.add(logo);
+            // Rotating wireframe icosahedron — the "network" the bubble sits inside
+            var icoGeo = new THREE.IcosahedronGeometry(3.15, 1);
+            var icoMat = new THREE.MeshBasicMaterial({ color: 0x1E6E5F, wireframe: true, transparent: true, opacity: 0.22 });
+            var ico = new THREE.Mesh(icoGeo, icoMat);
+            scene.add(ico);
 
-            // 3. High-Tech Rings (Gyroscope effect)
-            var ringGroup = new THREE.Group();
-            var r1 = new THREE.Mesh(new THREE.TorusGeometry(3, 0.02, 16, 100), new THREE.MeshBasicMaterial({ color: 0x25D366, transparent: true, opacity: 0.5 }));
-            var r2 = new THREE.Mesh(new THREE.TorusGeometry(3.6, 0.01, 16, 100), new THREE.MeshBasicMaterial({ color: 0x128C7E, transparent: true, opacity: 0.4 }));
-            var r3 = new THREE.Mesh(new THREE.TorusGeometry(4.2, 0.03, 16, 100), new THREE.MeshBasicMaterial({ color: 0x075E54, transparent: true, opacity: 0.3 }));
-            ringGroup.add(r1); ringGroup.add(r2); ringGroup.add(r3);
-            scene.add(ringGroup);
+            var icoOuterGeo = new THREE.IcosahedronGeometry(4.0, 0);
+            var icoOuterMat = new THREE.MeshBasicMaterial({ color: 0x25D366, wireframe: true, transparent: true, opacity: 0.09 });
+            var icoOuter = new THREE.Mesh(icoOuterGeo, icoOuterMat);
+            scene.add(icoOuter);
 
-            // 4. Point Cloud Sphere (Orbiting particles)
-            var pCount = 300;
-            var pGeo = new THREE.BufferGeometry();
-            var pPos = new Float32Array(pCount * 3);
-            for(var i=0; i<pCount; i++) {
-              var phi = Math.acos( -1 + ( 2 * i ) / pCount );
-              var theta = Math.sqrt( pCount * Math.PI ) * phi;
-              var r = 2.5 + Math.random() * 2;
-              pPos[i*3] = r * Math.cos(theta) * Math.sin(phi);
-              pPos[i*3+1] = r * Math.sin(theta) * Math.sin(phi);
-              pPos[i*3+2] = r * Math.cos(phi);
+            // Ring of orbiting "message" nodes representing contacts / team inbox
+            var RING_COUNT = 22;
+            var ringRadius = 4.55;
+            var ringDots = [];
+            var ringGeo = new THREE.BufferGeometry();
+            var ringPositions = new Float32Array(RING_COUNT * 3);
+            for (var i = 0; i < RING_COUNT; i++) {
+              var a = (i / RING_COUNT) * Math.PI * 2;
+              var x = Math.cos(a) * ringRadius;
+              var y = Math.sin(a) * ringRadius * 0.42;
+              var z = Math.sin(a * 1.7) * 0.6;
+              ringPositions[i * 3] = x;
+              ringPositions[i * 3 + 1] = y;
+              ringPositions[i * 3 + 2] = z;
+              ringDots.push({ angle: a, x: x, y: y, z: z });
             }
-            pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
-            var pMat = new THREE.PointsMaterial({ color: 0x25D366, size: 0.06, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending });
-            var particles = new THREE.Points(pGeo, pMat);
-            scene.add(particles);
+            ringGeo.setAttribute('position', new THREE.BufferAttribute(ringPositions, 3));
+            var ringMat = new THREE.PointsMaterial({
+              color: 0x25D366, size: 0.11, map: glowTexture('37,211,102', false),
+              transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false
+            });
+            var ringPoints = new THREE.Points(ringGeo, ringMat);
+            scene.add(ringPoints);
+
+            // Traveling "message" dot: flies from a ring node to the center on send
+            var travelTex = glowTexture('234,247,241', false);
+            var travelSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+              map: travelTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0
+            }));
+            travelSprite.scale.set(0.5, 0.5, 1);
+            scene.add(travelSprite);
+
+            var travel = null; // { from, t, duration }
+            launchDot = function () {
+              var idx = Math.floor(Math.random() * RING_COUNT);
+              var d = ringDots[idx];
+              travel = { from: new THREE.Vector3(d.x, d.y, d.z), t: 0, duration: 1.0 };
+            };
+
+            // Ripple rings pulse outward from the center on "delivered"
+            var ripples = [];
+            spawnRipple = function () {
+              var geo = new THREE.RingGeometry(0.08, 0.14, 48);
+              var mat = new THREE.MeshBasicMaterial({ color: 0x25D366, transparent: true, opacity: 0.55, side: THREE.DoubleSide });
+              var mesh = new THREE.Mesh(geo, mat);
+              mesh.rotation.x = Math.PI / 2 + 0.5;
+              scene.add(mesh);
+              ripples.push({ mesh: mesh, t: 0 });
+            };
 
             var clock = new THREE.Clock();
-            var rafId;
 
             function animate() {
-              if (!document.getElementById('three-canvas-container')) {
-                cancelAnimationFrame(rafId);
-                return;
-              }
-              rafId = requestAnimationFrame(animate);
+              if (!document.getElementById('three-canvas-container')) return;
+              requestAnimationFrame(animate);
+
               var t = clock.getElapsedTime();
-              
-              // Animate logo bobbing and pulsing
-              logo.position.y = Math.sin(t * 3) * 0.15;
-              var scale = 3 + Math.sin(t * 4) * 0.1;
-              logo.scale.set(scale, scale, 1);
-              
-              // Animate aura
-              var auraScale = 7 + Math.sin(t * 2) * 0.5;
-              aura.scale.set(auraScale, auraScale, 1);
-              aura.material.opacity = 0.5 + Math.sin(t * 3) * 0.2;
+              var dt = Math.min(clock.getDelta(), 0.05);
 
-              // Animate rings
-              r1.rotation.x = t * 0.5; r1.rotation.y = t * 0.3;
-              r2.rotation.y = t * -0.4; r2.rotation.z = t * 0.2;
-              r3.rotation.x = t * 0.2; r3.rotation.z = t * -0.3;
+              tickBubble(t);
+              tickProgress(dt);
 
-              // Animate particles
-              particles.rotation.y = t * 0.15;
-              particles.rotation.z = t * 0.05;
+              ico.rotation.y = t * 0.16;
+              ico.rotation.x = Math.sin(t * 0.22) * 0.15;
+              icoOuter.rotation.y = -t * 0.1;
+              icoOuter.rotation.x = t * 0.07;
+
+              ringPoints.rotation.y = t * 0.22;
+              ringPoints.rotation.z = Math.sin(t * 0.3) * 0.08;
+
+              var auraPulse = 5.6 + Math.sin(t * 1.7) * 0.35;
+              aura.scale.set(auraPulse, auraPulse, 1);
+              aura.material.opacity = 0.55 + Math.sin(t * 1.7) * 0.15;
+
+              if (travel) {
+                travel.t += dt;
+                var k = Math.min(1, travel.t / travel.duration);
+                var ease = 1 - Math.pow(1 - k, 2);
+                travelSprite.position.lerpVectors(travel.from, new THREE.Vector3(0, 0, 0.4), ease);
+                travelSprite.material.opacity = k < 0.9 ? 0.9 : 0.9 * (1 - (k - 0.9) / 0.1);
+                if (k >= 1) { travel = null; travelSprite.material.opacity = 0; }
+              }
+
+              for (var j = ripples.length - 1; j >= 0; j--) {
+                var rp = ripples[j];
+                rp.t += dt;
+                var s = 1 + rp.t * 3.4;
+                rp.mesh.scale.set(s, s, s);
+                rp.mesh.material.opacity = Math.max(0, 0.55 - rp.t * 0.4);
+                if (rp.t > 1.5) {
+                  scene.remove(rp.mesh);
+                  rp.mesh.geometry.dispose();
+                  rp.mesh.material.dispose();
+                  ripples.splice(j, 1);
+                }
+              }
 
               renderer.render(scene, camera);
             }

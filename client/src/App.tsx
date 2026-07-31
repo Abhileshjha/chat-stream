@@ -244,11 +244,7 @@ function AppContent() {
   }, [user, isLoading, location, setLocation, isAdminRoute]);
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    );
+    return null;
   }
 
   if (!user) {
@@ -259,11 +255,7 @@ function AppContent() {
     if (isAdminRoute) {
       return <AdminApp />;
     }
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    );
+    return null;
   }
 
   if (PUBLIC_CONTENT_PATHS.has(location)) {
@@ -272,11 +264,7 @@ function AppContent() {
 
   // /, /login, /admin-login — brief spinner while useEffect redirects to app
   if (PUBLIC_PATHS.has(location)) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    );
+    return null;
   }
 
   return <AuthenticatedApp />;
