@@ -357,7 +357,7 @@ export default function Landing() {
                 from one dashboard.
               </p>
               <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 mb-10">
-                <a href="/login" className="w-full sm:w-auto">
+                <a href={import.meta.env.VITE_LOGIN_URL || "https://app.convora.tech/login"} className="w-full sm:w-auto">
                   <Button
                     size="lg"
                     className="w-full sm:w-auto gap-2 bg-[#25D366] text-white font-semibold hover:bg-[#20bd5a] shadow-lg shadow-[#25D366]/30"
@@ -792,7 +792,7 @@ export default function Landing() {
                       </li>
                     ))}
                   </ul>
-                  <a href="/login" className="block">
+                  <a href={import.meta.env.VITE_LOGIN_URL || "https://app.convora.tech/login"} className="block">
                     <Button
                       className={`w-full font-semibold gap-2 ${
                         plan.featured
@@ -896,7 +896,7 @@ export default function Landing() {
                   Set up in a day, send your first campaign this week, and watch the read rates speak for
                   themselves.
                 </p>
-                <a href="/login" className="inline-block w-full sm:w-auto">
+                <a href={import.meta.env.VITE_LOGIN_URL || "https://app.convora.tech/login"} className="inline-block w-full sm:w-auto">
                   <Button size="lg" className="w-full sm:w-auto gap-2 bg-[#25D366] text-white font-semibold hover:bg-[#20bd5a] shadow-lg shadow-[#25D366]/30">
                     <FaWhatsapp className="h-5 w-5" /> Start Your Free Trial <ArrowRight className="h-4 w-4" />
                   </Button>

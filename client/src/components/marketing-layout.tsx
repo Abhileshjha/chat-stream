@@ -81,14 +81,14 @@ export function MarketingCta({
         <p className={`text-sm md:text-base mb-8 max-w-lg mx-auto ${dark ? "text-white/70" : "text-[#075E54]/60"}`}>
           {subtitle}
         </p>
-        <Link href="/login" className="inline-block w-full sm:w-auto">
+        <a href={import.meta.env.VITE_LOGIN_URL || "https://app.convora.tech/login"} className="inline-block w-full sm:w-auto">
           <Button
             size="lg"
             className="w-full sm:w-auto gap-2 bg-[#25D366] text-white font-semibold hover:bg-[#20bd5a] shadow-lg shadow-[#25D366]/30"
           >
             <FaWhatsapp className="h-5 w-5" /> Start Free Trial <ArrowRight className="h-4 w-4" />
           </Button>
-        </Link>
+        </a>
       </div>
     </div>
   );
@@ -179,16 +179,16 @@ function MarketingNav() {
           ))}
         </div>
         <div className="flex items-center gap-1.5 sm:gap-3">
-          <Link href="/login" className="hidden sm:block">
+          <a href={import.meta.env.VITE_LOGIN_URL || "https://app.convora.tech/login"} className="hidden sm:block">
             <Button variant="ghost" size="sm" className="text-[#075E54] hover:bg-[#25D366]/10">
               Log In
             </Button>
-          </Link>
-          <Link href="/login" className="hidden sm:block">
+          </a>
+          <a href={import.meta.env.VITE_LOGIN_URL || "https://app.convora.tech/login"} className="hidden sm:block">
             <Button size="sm" className="bg-[#25D366] text-white hover:bg-[#20bd5a] shadow-md shadow-[#25D366]/25 gap-1.5">
               <FaWhatsapp className="h-4 w-4" /> Get Started
             </Button>
-          </Link>
+          </a>
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger asChild>
               <Button
@@ -229,18 +229,18 @@ function MarketingNav() {
               </nav>
               <div className="border-t border-[#075E54]/10 p-4 space-y-2">
                 <SheetClose asChild>
-                  <Link href="/login" className="block">
+                  <a href={import.meta.env.VITE_LOGIN_URL || "https://app.convora.tech/login"} className="block">
                     <Button variant="outline" className="w-full border-[#075E54]/15 text-[#075E54]">
                       Log In
                     </Button>
-                  </Link>
+                  </a>
                 </SheetClose>
                 <SheetClose asChild>
-                  <Link href="/login" className="block">
+                  <a href={import.meta.env.VITE_LOGIN_URL || "https://app.convora.tech/login"} className="block">
                     <Button className="w-full bg-[#25D366] text-white hover:bg-[#20bd5a] gap-2">
                       <FaWhatsapp className="h-4 w-4" /> Get Started
                     </Button>
-                  </Link>
+                  </a>
                 </SheetClose>
               </div>
             </SheetContent>

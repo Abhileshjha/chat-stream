@@ -201,6 +201,13 @@ const features = [
 ];
 
 export default function Login() {
+  useEffect(() => {
+    const loginUrl = import.meta.env.VITE_LOGIN_URL;
+    if (loginUrl && loginUrl !== "/login" && loginUrl !== window.location.pathname) {
+      window.location.replace(loginUrl);
+    }
+  }, []);
+
   const [, navigate] = useLocation();
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<"login" | "register">("login");

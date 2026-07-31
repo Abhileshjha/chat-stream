@@ -75,7 +75,7 @@ export default function PricingPage() {
                         </li>
                       ))}
                     </ul>
-                    <a href="/login" className="block">
+                    <a href={import.meta.env.VITE_LOGIN_URL || "https://app.convora.tech/login"} className="block">
                       <Button
                         className={`w-full font-semibold gap-2 ${
                           plan.featured
