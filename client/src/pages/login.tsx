@@ -203,7 +203,7 @@ const features = [
 export default function Login() {
   useEffect(() => {
     const loginUrl = import.meta.env.VITE_LOGIN_URL;
-    if (loginUrl && loginUrl !== "/login" && loginUrl !== window.location.pathname) {
+    if (loginUrl && loginUrl !== "/login" && loginUrl !== window.location.pathname && loginUrl !== window.location.href) {
       window.location.replace(loginUrl);
     }
   }, []);
