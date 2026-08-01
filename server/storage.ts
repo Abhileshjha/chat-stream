@@ -1206,7 +1206,7 @@ export class DatabaseStorage implements IStorage {
   async bulkDeleteContacts(ids: string[], accountId: string): Promise<number> {
     if (ids.length === 0) return 0;
     const toDelete = await db
-      .select({ phone: contacts.phone })
+      .select({ phone: contacts.phone, listIds: contacts.listIds, tagIds: contacts.tagIds })
       .from(contacts)
       .where(and(inArray(contacts.id, ids), eq(contacts.accountId, accountId)));
     const result = await db.delete(contacts)
@@ -1214,6 +1214,13 @@ export class DatabaseStorage implements IStorage {
     const deletedCount = result.rowCount ?? 0;
     if (deletedCount > 0 && toDelete.length > 0) {
       await this.deleteMessagesForPhones(accountId, toDelete.map((c) => c.phone));
+      const listDec = toDelete.flatMap((c) => (c.listIds as string[]) || []);
+      const tagDec = toDelete.flatMap((c) => (c.tagIds as string[]) || []);
+      void Promise.all([
+        bumpAccountContactDelta(accountId, -deletedCount),
+        adjustListCounts([], listDec),
+        adjustTagCounts([], tagDec),
+      ]).catch((err) => console.error("[counters] bulkDeleteContacts:", err.message));
     }
     return deletedCount;
   }
@@ -1296,13 +1303,16 @@ export class DatabaseStorage implements IStorage {
     const toInsert: any[] = [];
     const toUpdate: { id: string; listIds: string[]; name?: string }[] = [];
 
+    const listIncFromMerge: string[] = [];
     for (const c of uniqueIncoming) {
       const existing = existingByPhone.get(c.phone);
       if (existing) {
         // Contact already exists elsewhere - merge this list into it and
         // refresh its name, instead of silently skipping it.
         const currentListIds = (existing.listIds as string[]) || [];
-        const mergedListIds = listId && !currentListIds.includes(listId) ? [...currentListIds, listId] : currentListIds;
+        const addsNewList = !!listId && !currentListIds.includes(listId);
+        const mergedListIds = addsNewList ? [...currentListIds, listId!] : currentListIds;
+        if (addsNewList) listIncFromMerge.push(listId!);
         toUpdate.push({ id: existing.id, listIds: mergedListIds, name: c.name || undefined });
       } else {
         toInsert.push({ ...c, listIds: listId ? [listId] : (c.listIds || []) });
@@ -1332,8 +1342,19 @@ export class DatabaseStorage implements IStorage {
       updated += chunk.length;
     }
 
-    // Counters are maintained on create/update/delete/import via server/counters.ts.
-    // After deploy, run backfillAccountCounters once if counts look stale.
+    // Keep denormalized counters in sync: newly inserted rows count toward
+    // their lists/tags/account total, and existing contacts that merged in
+    // this list (but weren't already on it) count toward the list once.
+    if (imported > 0 || listIncFromMerge.length > 0) {
+      const listInc = toInsert.flatMap((c: any) => (c.listIds as string[]) || []).concat(listIncFromMerge);
+      const tagInc = toInsert.flatMap((c: any) => (c.tagIds as string[]) || []);
+      void Promise.all([
+        imported > 0 ? bumpAccountContactDelta(accountId, imported) : Promise.resolve(),
+        adjustListCounts(listInc, []),
+        adjustTagCounts(tagInc, []),
+      ]).catch((err) => console.error("[counters] importContacts:", err.message));
+    }
+
     return { imported, updated };
   }
 
