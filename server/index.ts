@@ -5,6 +5,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { setupAuth, registerAuthRoutes } from "./auth";
 import { registerSecurityAndCanonicalMiddleware } from "./security";
+import { registerHostRouting } from "./hostRouting";
 
 // Without these, a single unhandled error anywhere in the app - a bad
 // webhook payload, a failed Meta API call in a fire-and-forget send loop,
@@ -27,6 +28,7 @@ const app = express();
 const httpServer = createServer(app);
 
 registerSecurityAndCanonicalMiddleware(app);
+registerHostRouting(app);
 
 // Dedicated health check target for Render (Settings -> Health Check Path).
 // Registered before any other middleware so it never waits on auth/session

@@ -30,6 +30,10 @@ export function getSession() {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       maxAge: sessionTtl,
+      // Set to e.g. ".chatstream.in" once the app subdomain is live, so a
+      // session started on the root domain (login) is also valid on
+      // app.<domain> without signing in twice.
+      ...(process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {}),
     },
   });
 }

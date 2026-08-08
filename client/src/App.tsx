@@ -228,6 +228,17 @@ function AppContent() {
   const [location, setLocation] = useLocation();
   const isAdminRoute = location === "/admin" || location.startsWith("/admin/users/");
 
+  const primaryDomain = import.meta.env.VITE_PRIMARY_DOMAIN as string | undefined;
+  const isAppHost =
+    !!primaryDomain && window.location.hostname === `app.${primaryDomain}`;
+
+  // The app subdomain never renders marketing/login pages — bounce logged-out
+  // visitors back to the root domain's login instead.
+  useEffect(() => {
+    if (isLoading || user || !isAppHost) return;
+    window.location.href = `https://${primaryDomain}/login`;
+  }, [isLoading, user, isAppHost, primaryDomain]);
+
   useEffect(() => {
     if (isLoading || !user) return;
 
@@ -248,6 +259,8 @@ function AppContent() {
   }
 
   if (!user) {
+    // Brief spinner while the effect above redirects off the app subdomain.
+    if (isAppHost) return null;
     return <PublicRouter />;
   }
 

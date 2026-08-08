@@ -201,13 +201,6 @@ const features = [
 ];
 
 export default function Login() {
-  useEffect(() => {
-    const loginUrl = import.meta.env.VITE_LOGIN_URL;
-    if (loginUrl && loginUrl !== "/login" && loginUrl !== window.location.pathname && loginUrl !== window.location.href) {
-      window.location.replace(loginUrl);
-    }
-  }, []);
-
   const [, navigate] = useLocation();
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<"login" | "register">("login");
@@ -269,7 +262,18 @@ export default function Login() {
       });
       const destination =
         data.user?.role === "super_admin" ? "/admin" : "/dashboard";
-      navigate(destination);
+
+      // Login always happens on the root domain; the authenticated app
+      // lives on the app.<domain> subdomain. Cross-subdomain requires a
+      // real navigation (SPA routing can't move to a different host), and
+      // the session cookie must already be shared via COOKIE_DOMAIN for
+      // this to land the user already logged in.
+      const primaryDomain = import.meta.env.VITE_PRIMARY_DOMAIN as string | undefined;
+      if (primaryDomain && window.location.hostname !== `app.${primaryDomain}`) {
+        window.location.href = `https://app.${primaryDomain}${destination}`;
+      } else {
+        navigate(destination);
+      }
     } catch {
       setError("Network error. Please try again.");
     } finally {
