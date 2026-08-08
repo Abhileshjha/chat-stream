@@ -27,7 +27,7 @@ export default function FaqPage() {
           <PageHero
             eyebrow="FAQ"
             title="Questions, answered"
-            subtitle="Everything you need to know about Convora, the official WhatsApp Business API, and getting started."
+            subtitle="Everything you need to know about Chat Stream, the official WhatsApp Business API, and getting started."
             centered
           />
         </div>

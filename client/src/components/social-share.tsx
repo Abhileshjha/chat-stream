@@ -11,7 +11,7 @@ type SocialShareProps = {
 };
 
 export function SocialShare({
-  title = "Convora — WhatsApp Business API Platform",
+  title = "Chat Stream — WhatsApp Business API Platform",
   className,
 }: SocialShareProps) {
   const [location] = useLocation();

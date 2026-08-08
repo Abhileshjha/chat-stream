@@ -99,7 +99,7 @@ export function AdminLayout({ activeTab, onTabSelect, children }: AdminLayoutPro
           </div>
           <div>
             <div className="font-heading font-bold text-[15px]">
-              convora<span className="text-cyan-500">.tech</span>
+              Chat Stream
             </div>
             <div className="text-[10px] tracking-widest uppercase text-[#14205a]/45">
               Admin panel

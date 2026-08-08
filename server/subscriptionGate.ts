@@ -17,11 +17,11 @@ async function getSubscriptionRequiredMessage(): Promise<string> {
   try {
     const cheapest = await getCheapestActivePlan();
     const price = cheapest?.priceLabel ?? "a paid plan";
-    const message = `Your plan has expired or your trial has ended. Subscribe starting at ${price}/month to continue using Convora.`;
+    const message = `Your plan has expired or your trial has ended. Subscribe starting at ${price}/month to continue using Chat Stream.`;
     cachedPaywallMessage = { message, at: now };
     return message;
   } catch {
-    return "Your plan has expired or your trial has ended. Subscribe to continue using Convora.";
+    return "Your plan has expired or your trial has ended. Subscribe to continue using Chat Stream.";
   }
 }
 
@@ -137,4 +137,4 @@ export {
 };
 
 export const SUBSCRIPTION_REQUIRED_MESSAGE =
-  "Your plan has expired or your trial has ended. Subscribe to continue using Convora.";
+  "Your plan has expired or your trial has ended. Subscribe to continue using Chat Stream.";

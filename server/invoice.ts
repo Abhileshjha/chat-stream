@@ -46,13 +46,13 @@ export async function buildPaymentInvoiceHtml(params: {
         : typeLabel(payment.type));
 
   const amountLabel = formatPriceLabel(payment.amountInr);
-  const filename = `convora-invoice-${invoiceNo}.html`;
+  const filename = `chat-stream-invoice-${invoiceNo}.html`;
 
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>${escapeHtml(invoiceNo)} — Convora</title>
+  <title>${escapeHtml(invoiceNo)} — Chat Stream</title>
   <style>
     :root { color-scheme: light; }
     body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #0f3d36; margin: 0; background: #f7fbf8; }
@@ -86,7 +86,7 @@ export async function buildPaymentInvoiceHtml(params: {
   <div class="page">
     <div class="header">
       <div>
-        <div class="brand">convora<span>.tech</span></div>
+        <div class="brand">Chat Stream</div>
         <div class="muted">WhatsApp Business API platform<br/>Payment receipt / tax invoice</div>
       </div>
       <div class="right">
@@ -139,8 +139,8 @@ export async function buildPaymentInvoiceHtml(params: {
     </table>
 
     <div class="footer">
-      This receipt confirms payment collected via Razorpay for Convora. GST, if applicable, is included as per your checkout.
-      For support contact your Convora account manager or reply from your registered email.
+      This receipt confirms payment collected via Razorpay for Chat Stream. GST, if applicable, is included as per your checkout.
+      For support contact your Chat Stream account manager or reply from your registered email.
       <br/><br/>
       Generated on ${escapeHtml(new Date().toLocaleString("en-IN"))}.
     </div>

@@ -302,7 +302,7 @@ export default function Login() {
             </div>
             <div>
               <h1 className="font-heading text-2xl font-bold text-[#075E54]">
-                convora<span className="text-[#25D366]">.tech</span>
+                Chat Stream
               </h1>
               <p className="text-xs text-[#075E54]/60 tracking-wide">WhatsApp Business Platform</p>
             </div>
@@ -377,7 +377,7 @@ export default function Login() {
               <FaWhatsapp className="h-5 w-5" />
             </div>
             <h1 className="font-heading text-xl font-bold text-[#075E54]">
-              convora<span className="text-[#25D366]">.tech</span>
+              Chat Stream
             </h1>
           </div>
 

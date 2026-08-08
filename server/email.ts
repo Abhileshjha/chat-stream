@@ -15,7 +15,7 @@ function getClient(): Resend {
 // Resend requires a verified sending domain for anything other than their
 // shared test address. Falls back to the test sender so registration still
 // works before convora.tech's domain is verified in the Resend dashboard.
-const FROM_ADDRESS = process.env.EMAIL_FROM || "Convora <onboarding@resend.dev>";
+const FROM_ADDRESS = process.env.EMAIL_FROM || "Chat Stream <onboarding@resend.dev>";
 
 export async function sendVerificationEmail(to: string, token: string, firstName?: string) {
   if (!process.env.RESEND_API_KEY) {
@@ -30,10 +30,10 @@ export async function sendVerificationEmail(to: string, token: string, firstName
   await resend.emails.send({
     from: FROM_ADDRESS,
     to,
-    subject: "Verify your Convora account",
+    subject: "Verify your Chat Stream account",
     html: `
       <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-        <h2>Welcome to Convora${firstName ? `, ${firstName}` : ""}!</h2>
+        <h2>Welcome to Chat Stream${firstName ? `, ${firstName}` : ""}!</h2>
         <p>Please verify your email address to activate your 7-day free trial.</p>
         <p>
           <a href="${verifyUrl}" style="display:inline-block;background:#25D366;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">

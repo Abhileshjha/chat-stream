@@ -82,7 +82,7 @@ export const steps = [
 ];
 
 export const setupTree = {
-  label: "Go live on Convora",
+  label: "Go live on Chat Stream",
   children: [
     {
       label: "Meta Business",
@@ -130,7 +130,7 @@ export const setupChecklist = [
   {
     phase: "Day 1 — Connect",
     items: [
-      "Sign up on Convora and open Settings → WhatsApp API",
+      "Sign up on Chat Stream and open Settings → WhatsApp API",
       "Complete Meta embedded signup flow",
       "Paste your permanent access token and WABA ID",
     ],
@@ -189,7 +189,7 @@ export const useCases = [
 export const faqs = [
   {
     q: "Is this the official WhatsApp Business API?",
-    a: "Yes. Convora runs entirely on the official Meta WhatsApp Business Platform. Your number gets a verified business profile, and there's no risk of the bans that come with unofficial bulk-sender tools.",
+    a: "Yes. Chat Stream runs entirely on the official Meta WhatsApp Business Platform. Your number gets a verified business profile, and there's no risk of the bans that come with unofficial bulk-sender tools.",
   },
   {
     q: "Do I need a new phone number?",
@@ -201,7 +201,7 @@ export const faqs = [
   },
   {
     q: "How fast do templates get approved?",
-    a: "Most templates are reviewed by Meta within minutes to a few hours. Convora shows the live approval status of every template, and our team helps you fix rejected ones.",
+    a: "Most templates are reviewed by Meta within minutes to a few hours. Chat Stream shows the live approval status of every template, and our team helps you fix rejected ones.",
   },
   {
     q: "Can my whole team use one number?",
@@ -251,7 +251,7 @@ export const testimonials = [
   },
   {
     quote:
-      "Clients ask for WhatsApp delivery proofs. Convora gives us clean campaign reports without custom tooling.",
+      "Clients ask for WhatsApp delivery proofs. Chat Stream gives us clean campaign reports without custom tooling.",
     name: "Neha M.",
     role: "Agency founder",
   },

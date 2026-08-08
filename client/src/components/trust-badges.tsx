@@ -230,9 +230,9 @@ export function TrustBadgeRow({
   );
 }
 
-/** Section label + compact trust badges — matches hero "Why teams trust Convora" */
+/** Section label + compact trust badges — matches hero "Why teams trust Chat Stream" */
 export function TrustBadgeSection({
-  title = "Why teams trust Convora",
+  title = "Why teams trust Chat Stream",
   badges,
   variant = "light",
   className,
