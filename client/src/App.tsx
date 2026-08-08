@@ -239,8 +239,29 @@ function AppContent() {
     window.location.href = `https://${primaryDomain}/login`;
   }, [isLoading, user, isAppHost, primaryDomain]);
 
+  // Any authenticated view (dashboard, settings, admin, ...) belongs on the
+  // app subdomain. A logged-in user can still land on the root domain via
+  // the back button, a bookmark, or typing the bare URL — same-origin
+  // client routing can't move them to a different host, so this has to be
+  // a real navigation.
+  const needsAppHostRedirect =
+    !!user && !!primaryDomain && !isAppHost && !PUBLIC_CONTENT_PATHS.has(location);
+
   useEffect(() => {
     if (isLoading || !user) return;
+
+    if (needsAppHostRedirect) {
+      const dest =
+        user.role === "super_admin"
+          ? isAdminRoute
+            ? location
+            : "/admin"
+          : location === "/" || location === "/login" || location === "/admin-login"
+            ? "/dashboard"
+            : location;
+      window.location.href = `https://app.${primaryDomain}${dest}${window.location.search}`;
+      return;
+    }
 
     if (user.role === "super_admin") {
       if (!isAdminRoute) {
@@ -252,7 +273,7 @@ function AppContent() {
     if (location === "/" || location === "/login" || location === "/admin-login") {
       setLocation("/dashboard");
     }
-  }, [user, isLoading, location, setLocation, isAdminRoute]);
+  }, [user, isLoading, location, setLocation, isAdminRoute, needsAppHostRedirect, primaryDomain]);
 
   if (isLoading) {
     return null;
@@ -262,6 +283,11 @@ function AppContent() {
     // Brief spinner while the effect above redirects off the app subdomain.
     if (isAppHost) return null;
     return <PublicRouter />;
+  }
+
+  if (needsAppHostRedirect) {
+    // Brief spinner while the effect above redirects to app.<domain>.
+    return null;
   }
 
   if (user.role === "super_admin") {
