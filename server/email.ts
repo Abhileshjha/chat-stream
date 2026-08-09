@@ -27,7 +27,11 @@ export async function sendVerificationEmail(to: string, token: string, firstName
   const verifyUrl = `${appUrl}/api/verify-email?token=${token}`;
 
   const resend = getClient();
-  await resend.emails.send({
+  // The Resend SDK resolves with { data, error } instead of throwing on
+  // API-level failures (e.g. the sandbox sender's "own address only"
+  // restriction) - without checking .error here, a failed send looked
+  // identical to a successful one and the UI reported "Sent" regardless.
+  const { error } = await resend.emails.send({
     from: FROM_ADDRESS,
     to,
     subject: "Verify your Chat Stream account",
@@ -44,4 +48,7 @@ export async function sendVerificationEmail(to: string, token: string, firstName
       </div>
     `,
   });
+  if (error) {
+    throw new Error(`Resend rejected verification email to ${to}: ${error.message}`);
+  }
 }
