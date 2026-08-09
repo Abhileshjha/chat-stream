@@ -114,6 +114,7 @@ class FairBroadcastDispatcher {
     const limiter = bullMqLimiterForAccount({
       messagingLimit: account?.messagingLimit,
       throughputLevel: account?.throughputLevel,
+      qualityRating: account?.qualityRating,
     });
 
     const worker = new Worker<SendBatchJobData>(

@@ -3,13 +3,52 @@ import { storage } from "../storage";
 import * as whatsappApi from "../whatsapp-api";
 import { broadcast } from "../realtime";
 import { getRedisConnection } from "./connection";
+import { messagesPerSecondForAccount } from "./rate-limit";
 import {
   GLOBAL_SEND_CONCURRENCY,
   META_RATE_LIMIT_CODES,
   SEND_CONCURRENCY_PER_JOB,
+  TRANSIENT_RETRY_CODES,
+  ENGAGEMENT_THROTTLE_CODE,
+  ENGAGEMENT_THROTTLE_WINDOW_MS,
+  ENGAGEMENT_THROTTLE_MIN_SAMPLE,
+  ENGAGEMENT_THROTTLE_FAILURE_RATE,
+  ENGAGEMENT_THROTTLE_COOLDOWN_MS,
+  engagementWindowKey,
+  engagementCooldownKey,
   remainingKey,
 } from "./constants";
 import type { SendBatchJobData } from "./types";
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Tracks a rolling window of send outcomes per account. When the share that
+ * are Meta's engagement throttle (131049 - not a transient error, Meta
+ * deliberately declined delivery) crosses the threshold, pause that
+ * account's sends for a cooldown instead of continuing to blast into it.
+ */
+async function recordEngagementOutcome(accountId: string, wasThrottled: boolean): Promise<void> {
+  const redis = getRedisConnection();
+  const key = engagementWindowKey(accountId);
+  const multi = redis.multi();
+  multi.hincrby(key, "total", 1);
+  multi.hincrby(key, "throttled", wasThrottled ? 1 : 0);
+  multi.pexpire(key, ENGAGEMENT_THROTTLE_WINDOW_MS);
+  const results = await multi.exec();
+  const total = Number(results?.[0]?.[1] ?? 0);
+  const throttled = Number(results?.[1]?.[1] ?? 0);
+
+  if (total >= ENGAGEMENT_THROTTLE_MIN_SAMPLE && throttled / total >= ENGAGEMENT_THROTTLE_FAILURE_RATE) {
+    await redis.set(engagementCooldownKey(accountId), "1", "PX", ENGAGEMENT_THROTTLE_COOLDOWN_MS);
+    console.warn(
+      `[broadcast-queue] account ${accountId} engagement-throttle rate ${throttled}/${total} >= ` +
+        `${ENGAGEMENT_THROTTLE_FAILURE_RATE * 100}% — pausing sends for ${ENGAGEMENT_THROTTLE_COOLDOWN_MS / 60000}min`,
+    );
+  }
+}
 
 /** Process-wide semaphore so concurrent account workers don't stampede Meta. */
 let globalInFlight = 0;
@@ -113,18 +152,33 @@ async function sendOne(
         console.error(`[broadcast] conversation update failed for ${phone}:`, convErr.message);
       }
 
+      await recordEngagementOutcome(data.accountId, false);
       return { status: "sent", message_id: messageId, phone };
     }
 
     const code = result.error?.code;
+    const numericCode = Number(code);
     if (isRateLimited(code)) {
       // Signal BullMQ to retry the whole job with exponential backoff.
       const err = new Error(result.error?.message || "Meta rate limit") as Error & {
         code?: number;
       };
-      err.code = Number(code);
+      err.code = numericCode;
       throw err;
     }
+
+    if (TRANSIENT_RETRY_CODES.has(numericCode)) {
+      // Genuinely transient (e.g. "Message undeliverable") - worth retrying
+      // via BullMQ's job-level attempts/backoff, unlike the engagement
+      // throttle below which retrying would not fix.
+      const err = new Error(result.error?.message || "Transient delivery failure") as Error & {
+        code?: number;
+      };
+      err.code = numericCode;
+      throw err;
+    }
+
+    await recordEngagementOutcome(data.accountId, numericCode === ENGAGEMENT_THROTTLE_CODE);
 
     await storage.createMessage({
       accountId: data.accountId,
@@ -143,9 +197,15 @@ async function sendOne(
       errorCode: String(code ?? ""),
     };
   } catch (err: any) {
-    if (isRateLimited(err?.code) || /rate limit|too many requests|131056|130429/i.test(err?.message || "")) {
+    if (
+      isRateLimited(err?.code) ||
+      TRANSIENT_RETRY_CODES.has(Number(err?.code)) ||
+      /rate limit|too many requests|131056|130429/i.test(err?.message || "")
+    ) {
       throw err;
     }
+
+    await recordEngagementOutcome(data.accountId, false);
 
     await storage.createMessage({
       accountId: data.accountId,
@@ -272,8 +332,41 @@ export async function processSendBatchJob(job: Job<SendBatchJobData>): Promise<{
     }
   }
 
+  // If a recent burst of engagement-throttle failures tripped the circuit
+  // breaker for this account, wait out the remainder of the cooldown before
+  // sending anything else instead of continuing to blast into the throttle.
+  const redis = getRedisConnection();
+  const cooldownRemaining = await redis.pttl(engagementCooldownKey(data.accountId));
+  if (cooldownRemaining > 0) {
+    console.warn(
+      `[broadcast-queue] account ${data.accountId} waiting out engagement-throttle cooldown (${cooldownRemaining}ms)`,
+    );
+    await sleep(cooldownRemaining);
+  }
+
   const creds = { phoneNumberId: account.phoneNumberId, accessToken: account.accessToken };
-  const results = await mapPool(phones, SEND_CONCURRENCY_PER_JOB, (phone) => sendOne(data, phone, creds));
+
+  // A brand-new/low-quality number's safe rate can be well below what
+  // PHONES_PER_JOB sent at SEND_CONCURRENCY_PER_JOB would imply (that
+  // combination alone can fire ~10 sends in well under a second). Fall back
+  // to sending this job's phones one at a time, paced to the account's
+  // actual budget, whenever that budget is the tighter constraint.
+  const mps = messagesPerSecondForAccount({
+    messagingLimit: account.messagingLimit,
+    throughputLevel: account.throughputLevel,
+    qualityRating: account.qualityRating,
+  });
+  const concurrency = mps < SEND_CONCURRENCY_PER_JOB ? 1 : SEND_CONCURRENCY_PER_JOB;
+  const interSendDelayMs = concurrency === 1 ? Math.ceil(1000 / mps) : 0;
+
+  let isFirstSend = true;
+  const results = await mapPool(phones, concurrency, async (phone) => {
+    if (interSendDelayMs > 0) {
+      if (!isFirstSend) await sleep(interSendDelayMs);
+      isFirstSend = false;
+    }
+    return sendOne(data, phone, creds);
+  });
 
   let sent = 0;
   let failed = 0;
@@ -303,7 +396,6 @@ export async function processSendBatchJob(job: Job<SendBatchJobData>): Promise<{
     });
   }
 
-  const redis = getRedisConnection();
   await redis.hincrby(`wa-send:stats:${data.accountId}`, "sent", sent);
   await redis.hincrby(`wa-send:stats:${data.accountId}`, "failed", failed);
   await redis.hset(`wa-send:stats:${data.accountId}`, "lastProcessedAt", String(Date.now()));
