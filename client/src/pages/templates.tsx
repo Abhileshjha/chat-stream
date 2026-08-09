@@ -43,6 +43,24 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { parseApiError } from "@/lib/errors";
 import type { Template } from "@shared/schema";
 
+// "gaur_01" -> "gaur_02" (preserving zero-padding width); if the name has
+// no trailing number, appends "_2". Skips forward past any name that's
+// already taken so duplicating the same template twice never collides.
+function nextDuplicateName(baseName: string, existing: Template[]): string {
+  const existingNames = new Set(existing.map((t) => t.name));
+  const match = baseName.match(/^(.*?)(\d+)$/);
+  const prefix = match ? match[1] : `${baseName}_`;
+  const width = match ? match[2].length : 1;
+  let n = match ? parseInt(match[2], 10) + 1 : 2;
+
+  let candidate = `${prefix}${String(n).padStart(width, "0")}`;
+  while (existingNames.has(candidate)) {
+    n += 1;
+    candidate = `${prefix}${String(n).padStart(width, "0")}`;
+  }
+  return candidate;
+}
+
 export default function Templates() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -70,7 +88,7 @@ export default function Templates() {
   const duplicateMutation = useMutation({
     mutationFn: async (template: Template) => {
       const duplicateData = {
-        name: `${template.name}_copy_${Date.now().toString(36)}`,
+        name: nextDuplicateName(template.name, templates),
         category: template.category,
         language: template.language,
         components: template.components,
