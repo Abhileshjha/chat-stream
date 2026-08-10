@@ -230,13 +230,40 @@ async function resolveTemplateMediaHandle(
     return { mediaHandle: (headerComp as any).mediaHandle };
   }
 
-  if (!headerComp.mediaUrl) return {};
+  let file: { buffer: Buffer; mimeType: string; originalName?: string | null } | null = null;
 
-  const file = await getUploadedMediaBuffer(headerComp.mediaUrl);
-  if (!file) {
-    console.warn("Media file not found, submitting template without media sample:", headerComp.mediaUrl);
-    return {};
+  if (headerComp.mediaUrl) {
+    file = await getUploadedMediaBuffer(headerComp.mediaUrl);
+    if (!file) {
+      console.warn("Media file not found, submitting template without media sample:", headerComp.mediaUrl);
+    }
   }
+
+  // Templates synced in from Meta (or duplicated from one) carry Meta's own
+  // response shape instead of our mediaUrl/mediaHandle - the header's only
+  // media reference is example.header_handle, a CDN URL Meta hosts the
+  // approved template's media at. Fetch and re-upload it as a fresh sample
+  // rather than submitting an IMAGE/VIDEO/DOCUMENT header with none at all,
+  // which Meta now hard-rejects ("Missing sample parameter for title type").
+  if (!file) {
+    const cdnUrl = (headerComp as any).example?.header_handle?.[0];
+    if (typeof cdnUrl === "string" && /^https?:\/\//i.test(cdnUrl)) {
+      try {
+        const res = await fetch(cdnUrl);
+        if (res.ok) {
+          const buffer = Buffer.from(await res.arrayBuffer());
+          const mimeType = res.headers.get("content-type") || "application/octet-stream";
+          file = { buffer, mimeType, originalName: "header" };
+        } else {
+          console.warn(`Failed to fetch synced header media (${res.status}), submitting without a sample:`, cdnUrl);
+        }
+      } catch (err: any) {
+        console.warn("Failed to fetch synced header media, submitting without a sample:", err.message);
+      }
+    }
+  }
+
+  if (!file) return {};
 
   const uploadResult = await uploadSessionMedia(effectiveAppId, accessToken, file.buffer, file.mimeType, file.originalName || "header");
 
