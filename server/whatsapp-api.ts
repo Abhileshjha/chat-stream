@@ -4,6 +4,14 @@ import { getUploadedMediaBuffer } from "./uploadStorage";
 const META_API_VERSION = "v21.0";
 const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`;
 
+// Template creation (POST .../message_templates) rejects with a generic
+// "does not exist, cannot be loaded due to missing permissions, or does not
+// support this operation" (code 100, subcode 33) on v21.0 for this app,
+// while the identical request succeeds on v19.0 - confirmed by testing both
+// directly against Meta. Every other endpoint (messaging, media, template
+// listing/fetching) is unaffected and stays on v21.0.
+const META_TEMPLATE_CREATE_API_BASE = "https://graph.facebook.com/v19.0";
+
 export interface MetaApiError {
   message: string;
   type: string;
@@ -283,7 +291,7 @@ export async function createTemplate(
   };
 
   const submit = () =>
-    metaApiRequest(`${META_API_BASE}/${wabaId}/message_templates`, {
+    metaApiRequest(`${META_TEMPLATE_CREATE_API_BASE}/${wabaId}/message_templates`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
