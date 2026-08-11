@@ -1,4 +1,4 @@
-# https://app.convora.tech/robots.txt
+# https://sampark.tech/robots.txt
 User-agent: *
 Allow: /
 Allow: /features
@@ -30,4 +30,4 @@ Disallow: /settings
 Disallow: /billing
 Disallow: /api/
 
-Sitemap: https://app.convora.tech/sitemap.xml
+Sitemap: https://sampark.tech/sitemap.xml

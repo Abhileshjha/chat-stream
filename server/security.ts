@@ -1,6 +1,6 @@
 /**
  * Security headers, host canonicalization, and HSTS for production.
- * Preferred host comes from APP_URL (e.g. https://app.convora.tech).
+ * Preferred host comes from APP_URL (e.g. https://sampark.tech).
  */
 import type { Express, RequestHandler } from "express";
 

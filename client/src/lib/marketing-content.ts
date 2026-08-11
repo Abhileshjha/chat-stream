@@ -17,9 +17,9 @@ import {
 
 export const HELP_NUMBER = "9217730926";
 export const HELP_NUMBER_DISPLAY = "+91 9217730926";
-export const EMAIL_INFO = "info@convora.tech";
-export const EMAIL_SUPPORT = "support@convora.tech";
-export const EMAIL_BILLING = "billing@convora.tech";
+export const EMAIL_INFO = "info@sampark.tech";
+export const EMAIL_SUPPORT = "support@sampark.tech";
+export const EMAIL_BILLING = "billing@sampark.tech";
 
 export const WA = {
   green: "#25D366",
@@ -82,7 +82,7 @@ export const steps = [
 ];
 
 export const setupTree = {
-  label: "Go live on Chat Stream",
+  label: "Go live on Sampark",
   children: [
     {
       label: "Meta Business",
@@ -130,7 +130,7 @@ export const setupChecklist = [
   {
     phase: "Day 1 — Connect",
     items: [
-      "Sign up on Chat Stream and open Settings → WhatsApp API",
+      "Sign up on Sampark and open Settings → WhatsApp API",
       "Complete Meta embedded signup flow",
       "Paste your permanent access token and WABA ID",
     ],
@@ -189,7 +189,7 @@ export const useCases = [
 export const faqs = [
   {
     q: "Is this the official WhatsApp Business API?",
-    a: "Yes. Chat Stream runs entirely on the official Meta WhatsApp Business Platform. Your number gets a verified business profile, and there's no risk of the bans that come with unofficial bulk-sender tools.",
+    a: "Yes. Sampark runs entirely on the official Meta WhatsApp Business Platform. Your number gets a verified business profile, and there's no risk of the bans that come with unofficial bulk-sender tools.",
   },
   {
     q: "Do I need a new phone number?",
@@ -201,7 +201,7 @@ export const faqs = [
   },
   {
     q: "How fast do templates get approved?",
-    a: "Most templates are reviewed by Meta within minutes to a few hours. Chat Stream shows the live approval status of every template, and our team helps you fix rejected ones.",
+    a: "Most templates are reviewed by Meta within minutes to a few hours. Sampark shows the live approval status of every template, and our team helps you fix rejected ones.",
   },
   {
     q: "Can my whole team use one number?",
@@ -251,7 +251,7 @@ export const testimonials = [
   },
   {
     quote:
-      "Clients ask for WhatsApp delivery proofs. Chat Stream gives us clean campaign reports without custom tooling.",
+      "Clients ask for WhatsApp delivery proofs. Sampark gives us clean campaign reports without custom tooling.",
     name: "Neha M.",
     role: "Agency founder",
   },

@@ -34,7 +34,7 @@ export default function SetupGuidePage() {
           <PageHero
             eyebrow="Setup guide"
             title="Your path from signup to first campaign"
-            subtitle="Follow this interactive tree to connect Meta, approve templates, and launch your first WhatsApp broadcast on Chat Stream."
+            subtitle="Follow this interactive tree to connect Meta, approve templates, and launch your first WhatsApp broadcast on Sampark."
             centered
           />
         </div>

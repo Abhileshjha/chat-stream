@@ -45,7 +45,7 @@ export default function Contact() {
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                 <MessageSquare className="h-5 w-5" />
               </div>
-              <span className="text-xl font-bold">Chat Stream</span>
+              <span className="text-xl font-bold">Sampark</span>
             </div>
           </Link>
           <Link href="/">
@@ -162,7 +162,7 @@ export default function Contact() {
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground">
-                  Chat Stream Pvt. Ltd.<br />
+                  Sampark Pvt. Ltd.<br />
                   123 Business Park, Tower A<br />
                   Sector 62, Noida<br />
                   Uttar Pradesh 201301, India
