@@ -306,30 +306,13 @@ export async function processSendBatchJob(job: Job<SendBatchJobData>): Promise<{
     return { sent: 0, failed: 0 };
   }
 
-  // Soft daily-tier guard: if Meta's 24h conversation cap is known and already
-  // exhausted on this number, mark the batch failed without calling Meta.
+  // Meta's messaging_limit_tier field is unreliable (it stopped being reported
+  // for many numbers) and only refreshed on manual sync, so a stale/low cached
+  // value must never be trusted as a hard local ceiling — Meta's own API is
+  // the source of truth for tier rejections, not a cached snapshot.
   const account = await storage.getAccount(data.accountId);
   if (!account?.accessToken || !account?.phoneNumberId) {
     throw new Error(`WhatsApp account ${data.accountId} is missing credentials`);
-  }
-
-  if (account.messagingLimit && account.messagingLimit > 0 && account.messagingLimit < 999999) {
-    const used = await storage.getMessagingUsed24h(data.accountId);
-    if (used >= account.messagingLimit) {
-      for (const phone of phones) {
-        await storage.createMessage({
-          accountId: data.accountId,
-          campaignId: data.campaignId,
-          templateId: data.templateId,
-          recipientPhone: phone,
-          status: "failed",
-          errorCode: "TIER_LIMIT",
-          errorDescription: `Messaging tier limit reached (${account.messagingLimit}/24h)`,
-        });
-      }
-      await maybeFinalizeCampaign(data);
-      return { sent: 0, failed: phones.length };
-    }
   }
 
   // If a recent burst of engagement-throttle failures tripped the circuit
