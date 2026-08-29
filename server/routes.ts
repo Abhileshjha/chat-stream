@@ -2177,10 +2177,13 @@ export async function registerRoutes(
           }
 
           for (const phone of phoneNumbers) {
-            // Create account for each phone number
-            const existingAccounts = await storage.getAccountsByUser(userId);
-            const alreadyExists = existingAccounts.some(a => a.phoneNumberId === phone.id);
-            
+            // Must check globally: the webhook handler looks up the receiving
+            // account by phoneNumberId across every user, so a phone number
+            // already connected under another Sampark account would otherwise
+            // get re-added here too, splitting incoming messages between them.
+            const allAccounts = await storage.getAccounts();
+            const alreadyExists = allAccounts.some(a => a.phoneNumberId === phone.id);
+
             if (!alreadyExists) {
               const owner = await authStorage.getUser(userId);
               if (owner) {
@@ -2273,14 +2276,18 @@ export async function registerRoutes(
 
       const { phoneNumberId, businessAccountId, accessToken, name, appId } = validation.data;
 
-      // Check if account with this phone number ID already exists
-      const existingAccounts = await storage.getAccountsByUser(userId);
-      const alreadyExists = existingAccounts.some(a => a.phoneNumberId === phoneNumberId);
-      
+      // Must check globally, not just this user's accounts: the webhook handler
+      // looks up the receiving account by phoneNumberId across the whole
+      // platform, so two accounts (even under different users) sharing one
+      // phoneNumberId causes incoming messages to be attributed arbitrarily
+      // to whichever row the DB happens to return first.
+      const allAccounts = await storage.getAccounts();
+      const alreadyExists = allAccounts.some(a => a.phoneNumberId === phoneNumberId);
+
       if (alreadyExists) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: "Account already exists",
-          message: "A WhatsApp account with this Phone Number ID is already connected."
+          message: "This Phone Number ID is already connected to a Sampark account."
         });
       }
 
@@ -2455,10 +2462,11 @@ export async function registerRoutes(
           }
 
           for (const phone of phoneNumbers) {
-            // Create account for each phone number
-            const existingAccounts = await storage.getAccountsByUser(userId);
-            const alreadyExists = existingAccounts.some(a => a.phoneNumberId === phone.id);
-            
+            // Must check globally - see comment in the other embedded-signup
+            // handler above.
+            const allAccounts = await storage.getAccounts();
+            const alreadyExists = allAccounts.some(a => a.phoneNumberId === phone.id);
+
             if (!alreadyExists) {
               const owner = await authStorage.getUser(userId);
               if (owner) {
