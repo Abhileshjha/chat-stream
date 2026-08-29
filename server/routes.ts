@@ -3205,7 +3205,12 @@ export async function registerRoutes(
       completedAt: new Date(),
       sentCount: totalSent,
       failedCount: totalFailed,
-      deliveredCount: totalSent,
+      // deliveredCount/readCount are NOT set here - counts.sent means "still
+      // at status sent, not yet delivered." Setting deliveredCount to it
+      // mislabeled every freshly-sent message as delivered before Meta ever
+      // confirmed delivery. Those fields only move via real webhook
+      // confirmations (bumpNotificationOnStatusChange), which continue to
+      // arrive well after the send loop itself finishes.
     });
 
     const activity = await storage.addActivity({
@@ -3453,7 +3458,8 @@ export async function registerRoutes(
           completedAt: new Date(),
           sentCount: counts.sent,
           failedCount: counts.failed,
-          deliveredCount: counts.sent,
+          // deliveredCount intentionally left alone - see comment at the
+          // other completion site above.
         });
         return res.json({ message: "Nothing left to resume - every recipient has already been attempted.", remaining: 0 });
       }
