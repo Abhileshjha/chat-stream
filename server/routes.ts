@@ -329,6 +329,17 @@ export async function registerRoutes(
     console.error("[Subscription] Column ensure failed:", err);
   });
 
+  // Every /api response is per-session data (dashboard metrics, accounts,
+  // inbox, etc). Without this, responses carry only an ETag and no
+  // Cache-Control, so a browser can serve a cached response for a URL from
+  // one login to a different login in the same browser profile without ever
+  // reaching the server - surfaced as one user's dashboard/inbox data
+  // appearing under someone else's freshly logged-in session.
+  app.use("/api", (req, res, next) => {
+    res.setHeader("Cache-Control", "no-store, private");
+    next();
+  });
+
   // ============== WebSocket Setup ==============
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
   
