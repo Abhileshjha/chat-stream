@@ -20,6 +20,9 @@ const COLUMNS: string[] = [
   `ALTER TABLE whatsapp_accounts ADD COLUMN IF NOT EXISTS contact_total_count integer NOT NULL DEFAULT 0`,
   `ALTER TABLE whatsapp_accounts ADD COLUMN IF NOT EXISTS template_approved_count integer NOT NULL DEFAULT 0`,
   `ALTER TABLE whatsapp_accounts ADD COLUMN IF NOT EXISTS template_pending_count integer NOT NULL DEFAULT 0`,
+  // Per-account Meta App ID — accounts connected under different Meta Apps
+  // (e.g. separate businesses) need their own app_id for media uploads.
+  `ALTER TABLE whatsapp_accounts ADD COLUMN IF NOT EXISTS app_id varchar(100)`,
   // Campaign recipient length without parsing jsonb every list load
   `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS recipient_count integer NOT NULL DEFAULT 0`,
 ];

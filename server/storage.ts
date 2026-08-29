@@ -1044,7 +1044,9 @@ export class DatabaseStorage implements IStorage {
       ...account,
       status: "connected",
       qualityRating: "UNKNOWN",
-      messagingLimit: 1000,
+      // 0 = unknown, matching the sync path (routes.ts) which is honest about
+      // Meta not reporting a tier rather than presenting a fabricated cap.
+      messagingLimit: 0,
       messagingUsed: 0,
     }).returning();
     return rows[0];

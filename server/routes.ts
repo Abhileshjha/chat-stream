@@ -310,6 +310,9 @@ const manualWhatsAppAccountSchema = z.object({
   businessAccountId: z.string().min(1, "WABA ID is required"),
   accessToken: z.string().min(1, "Access Token is required"),
   name: z.string().optional(),
+  // Optional: only needed when this token comes from a Meta App other than
+  // the one FACEBOOK_APP_ID points at (e.g. a separate business's own app).
+  appId: z.string().optional(),
 });
 
 export async function registerRoutes(
@@ -690,7 +693,7 @@ export async function registerRoutes(
       // upload being re-fetched later.
       let mediaHandle: string | undefined;
       try {
-        const facebookAppId = process.env.FACEBOOK_APP_ID;
+        const facebookAppId = active?.account?.appId || process.env.FACEBOOK_APP_ID;
         if (active?.account?.accessToken && facebookAppId) {
           const uploadResult = await whatsappApi.uploadSessionMedia(
             facebookAppId,
@@ -858,7 +861,7 @@ export async function registerRoutes(
       let metaError: string | null = null;
 
       if (!saveAsDraft && activeAccount?.accessToken && activeAccount?.businessAccountId) {
-        const facebookAppId = process.env.FACEBOOK_APP_ID || undefined;
+        const facebookAppId = activeAccount?.appId || process.env.FACEBOOK_APP_ID || undefined;
 
         const metaResult = await whatsappApi.createTemplate(
           activeAccount.businessAccountId,
@@ -957,7 +960,7 @@ export async function registerRoutes(
       if (contentChanged && activeAccount?.accessToken && activeAccount?.businessAccountId) {
         const mergedComponents = (updates.components ?? existing.components) as any[];
         const mergedCategory = updates.category ?? existing.category;
-        const facebookAppId = process.env.FACEBOOK_APP_ID || undefined;
+        const facebookAppId = activeAccount?.appId || process.env.FACEBOOK_APP_ID || undefined;
 
         if (existing.metaTemplateId) {
           const metaResult = await whatsappApi.updateTemplateOnMeta(
@@ -1081,7 +1084,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Template body text is required" });
       }
 
-      const facebookAppId = process.env.FACEBOOK_APP_ID || undefined;
+      const facebookAppId = account?.appId || process.env.FACEBOOK_APP_ID || undefined;
       // A rejected/paused/disabled template already exists on Meta's side
       // under the same name - resubmitting via create would just collide.
       // Edit it in place instead, which resets it to PENDING review.
@@ -2268,7 +2271,7 @@ export async function registerRoutes(
         });
       }
 
-      const { phoneNumberId, businessAccountId, accessToken, name } = validation.data;
+      const { phoneNumberId, businessAccountId, accessToken, name, appId } = validation.data;
 
       // Check if account with this phone number ID already exists
       const existingAccounts = await storage.getAccountsByUser(userId);
@@ -2313,6 +2316,7 @@ export async function registerRoutes(
           phoneNumberId,
           businessAccountId,
           accessToken,
+          appId: appId || null,
         });
 
         // Update status to connected since we verified successfully

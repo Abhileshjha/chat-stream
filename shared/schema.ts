@@ -282,6 +282,11 @@ export const whatsappAccounts = pgTable("whatsapp_accounts", {
   phoneNumberId: varchar("phone_number_id", { length: 100 }).notNull(),
   businessAccountId: varchar("business_account_id", { length: 100 }).notNull(),
   accessToken: text("access_token").notNull(),
+  /** Meta App ID that issued accessToken — required for the resumable media
+   *  upload endpoint (POST /{app-id}/uploads), which rejects tokens issued by
+   *  a different app. Null falls back to the global FACEBOOK_APP_ID env var
+   *  for accounts connected under that same app. */
+  appId: varchar("app_id", { length: 100 }),
   status: varchar("status", { length: 20 }).notNull().default("connected"),
   qualityRating: varchar("quality_rating", { length: 20 }).default("UNKNOWN"),
   messagingLimit: integer("messaging_limit").default(0),

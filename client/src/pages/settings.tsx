@@ -27,6 +27,7 @@ export default function Settings() {
     businessAccountId: "",
     accessToken: "",
     name: "",
+    appId: "",
   });
 
   const { data: settings, isLoading } = useQuery<ApiSettings>({
@@ -123,6 +124,7 @@ export default function Settings() {
         businessAccountId: "",
         accessToken: "",
         name: "",
+        appId: "",
       });
     },
     onError: (error: any) => {
@@ -604,7 +606,7 @@ function AddNumberSection({
   setShowManualToken,
   addManualAccountMutation,
 }: {
-  manualAccount: { phoneNumberId: string; businessAccountId: string; accessToken: string; name: string };
+  manualAccount: { phoneNumberId: string; businessAccountId: string; accessToken: string; name: string; appId: string };
   setManualAccount: (fn: (prev: any) => any) => void;
   showManualToken: boolean;
   setShowManualToken: (v: boolean) => void;
@@ -719,6 +721,23 @@ function AddNumberSection({
           </div>
           <p className="text-xs text-muted-foreground">
             Generate a permanent System User token from Meta Business Settings
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="manual-app-id">Meta App ID (only if different from your main app)</Label>
+          <Input
+            id="manual-app-id"
+            value={manualAccount.appId}
+            onChange={(e) => setManualAccount((prev: any) => ({ ...prev, appId: e.target.value }))}
+            placeholder="Leave blank unless this number's token came from a separate Meta App"
+            className="font-mono text-sm"
+            autoComplete="off"
+            data-testid="input-manual-app-id"
+          />
+          <p className="text-xs text-muted-foreground">
+            Required for image/video/document template headers when this number belongs to a
+            different business with its own Meta App — otherwise leave blank.
           </p>
         </div>
 
