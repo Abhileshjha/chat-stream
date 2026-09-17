@@ -27,12 +27,21 @@ export interface MetaApiResponse<T = any> {
   rawStatus?: number;
 }
 
+// Plain fetch() has no default timeout - a single Meta request that hangs
+// (rather than erroring) never resolves or rejects, so the caller's finally
+// block never runs and a platform-wide send concurrency slot leaks forever.
+// Enough of these accumulate to jam every account's sends, not just the one
+// that hit the hang. 30s comfortably covers Meta's normal response times.
+const META_API_TIMEOUT_MS = 30_000;
+
 async function metaApiRequest<T = any>(
   url: string,
   options: RequestInit = {}
 ): Promise<MetaApiResponse<T>> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), META_API_TIMEOUT_MS);
   try {
-    const response = await fetch(url, options);
+    const response = await fetch(url, { ...options, signal: controller.signal });
     const responseText = await response.text();
 
     let data: any;
@@ -64,14 +73,19 @@ async function metaApiRequest<T = any>(
 
     return { success: true, data: data as T };
   } catch (err: any) {
+    const timedOut = err?.name === "AbortError";
     return {
       success: false,
       error: {
-        message: err.message || "Network error",
-        type: "NetworkError",
+        message: timedOut
+          ? `Meta API request timed out after ${META_API_TIMEOUT_MS / 1000}s`
+          : err.message || "Network error",
+        type: timedOut ? "TimeoutError" : "NetworkError",
         code: -1,
       },
     };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
