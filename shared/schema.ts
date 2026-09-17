@@ -287,6 +287,11 @@ export const whatsappAccounts = pgTable("whatsapp_accounts", {
    *  a different app. Null falls back to the global FACEBOOK_APP_ID env var
    *  for accounts connected under that same app. */
   appId: varchar("app_id", { length: 100 }),
+  /** When set, incoming-message webhook payloads for this account are also
+   *  forwarded here verbatim (fire-and-forget) - e.g. a separate bot/CRM
+   *  backend that needs its own copy of inbound messages while this app
+   *  remains the source of truth for delivery/read/failed tracking. */
+  incomingRelayUrl: text("incoming_relay_url"),
   status: varchar("status", { length: 20 }).notNull().default("connected"),
   qualityRating: varchar("quality_rating", { length: 20 }).default("UNKNOWN"),
   messagingLimit: integer("messaging_limit").default(0),

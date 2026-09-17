@@ -1738,7 +1738,12 @@ export async function registerRoutes(
   app.post("/api/webhook", async (req, res) => {
     try {
       const body = req.body;
-      
+      // Accounts with incomingRelayUrl set get a verbatim copy of this
+      // payload forwarded to them (e.g. a separate bot/CRM backend) - one
+      // relay per unique URL per request, regardless of how many messages
+      // or accounts triggered it.
+      const relayTargets = new Set<string>();
+
       if (body.object === "whatsapp_business_account") {
         for (const entry of body.entry || []) {
           for (const change of entry.changes || []) {
@@ -1765,6 +1770,10 @@ export async function registerRoutes(
                   continue;
                 }
                 const accountId = account.id;
+
+                if (account.incomingRelayUrl) {
+                  relayTargets.add(account.incomingRelayUrl);
+                }
 
                 let msgContent = "";
                 if (incoming.type === "text") {
@@ -1922,7 +1931,17 @@ export async function registerRoutes(
           }
         }
       }
-      
+
+      for (const relayUrl of Array.from(relayTargets)) {
+        fetch(relayUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }).catch((err) => {
+          console.error(`[Webhook] Relay to ${relayUrl} failed:`, err.message);
+        });
+      }
+
       res.sendStatus(200);
     } catch (error) {
       console.error("Webhook error:", error);

@@ -23,6 +23,10 @@ const COLUMNS: string[] = [
   // Per-account Meta App ID — accounts connected under different Meta Apps
   // (e.g. separate businesses) need their own app_id for media uploads.
   `ALTER TABLE whatsapp_accounts ADD COLUMN IF NOT EXISTS app_id varchar(100)`,
+  // Optional forwarding target for a separate bot/CRM backend that needs its
+  // own copy of inbound messages (this app stays the source of truth for
+  // delivery/read/failed tracking).
+  `ALTER TABLE whatsapp_accounts ADD COLUMN IF NOT EXISTS incoming_relay_url text`,
   // Campaign recipient length without parsing jsonb every list load
   `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS recipient_count integer NOT NULL DEFAULT 0`,
 ];
