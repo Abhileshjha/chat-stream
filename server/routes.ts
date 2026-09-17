@@ -1742,7 +1742,7 @@ export async function registerRoutes(
       // payload forwarded to them (e.g. a separate bot/CRM backend) - one
       // relay per unique URL per request, regardless of how many messages
       // or accounts triggered it.
-      const relayTargets = new Set<string>();
+      const relayTargets = new Map<string, string | null>(); // url -> signing secret
 
       if (body.object === "whatsapp_business_account") {
         for (const entry of body.entry || []) {
@@ -1772,7 +1772,7 @@ export async function registerRoutes(
                 const accountId = account.id;
 
                 if (account.incomingRelayUrl) {
-                  relayTargets.add(account.incomingRelayUrl);
+                  relayTargets.set(account.incomingRelayUrl, account.incomingRelaySecret || null);
                 }
 
                 let msgContent = "";
@@ -1932,11 +1932,21 @@ export async function registerRoutes(
         }
       }
 
-      for (const relayUrl of Array.from(relayTargets)) {
+      for (const [relayUrl, relaySecret] of Array.from(relayTargets.entries())) {
+        const payload = JSON.stringify(body);
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        // Relay receivers are commonly built to accept direct Meta webhooks
+        // and reject unsigned requests - sign with the same app secret Meta
+        // itself would have used, so the relay is indistinguishable from a
+        // direct delivery.
+        if (relaySecret) {
+          const signature = crypto.createHmac("sha256", relaySecret).update(payload).digest("hex");
+          headers["X-Hub-Signature-256"] = `sha256=${signature}`;
+        }
         fetch(relayUrl, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+          headers,
+          body: payload,
         }).catch((err) => {
           console.error(`[Webhook] Relay to ${relayUrl} failed:`, err.message);
         });

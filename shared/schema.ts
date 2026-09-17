@@ -292,6 +292,11 @@ export const whatsappAccounts = pgTable("whatsapp_accounts", {
    *  backend that needs its own copy of inbound messages while this app
    *  remains the source of truth for delivery/read/failed tracking. */
   incomingRelayUrl: text("incoming_relay_url"),
+  /** App secret used to sign the relayed payload as X-Hub-Signature-256,
+   *  since relay receivers (built to accept direct Meta webhooks) commonly
+   *  reject unsigned requests. Must match whichever Meta app's secret the
+   *  receiver expects. */
+  incomingRelaySecret: text("incoming_relay_secret"),
   status: varchar("status", { length: 20 }).notNull().default("connected"),
   qualityRating: varchar("quality_rating", { length: 20 }).default("UNKNOWN"),
   messagingLimit: integer("messaging_limit").default(0),
