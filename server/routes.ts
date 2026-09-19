@@ -1743,6 +1743,9 @@ export async function registerRoutes(
       // relay per unique URL per request, regardless of how many messages
       // or accounts triggered it.
       const relayTargets = new Map<string, string | null>(); // url -> signing secret
+      // Delivery/read/failed events for messages this app didn't send, bound
+      // for the relay of the account they belong to.
+      const statusRelays: Array<{ url: string; secret: string | null; payload: unknown }> = [];
 
       if (body.object === "whatsapp_business_account") {
         for (const entry of body.entry || []) {
@@ -1841,9 +1844,16 @@ export async function registerRoutes(
               }
 
               const statuses = change.value?.statuses || [];
-              
+              // Statuses for messages this app didn't send (e.g. a campaign
+              // sent by the relay target) can't be matched here - collect
+              // them so they can be forwarded to that account's relay.
+              const unownedStatuses: any[] = [];
+
               for (const status of statuses) {
                 const message = await storage.getMessagesByWhatsappId(status.id);
+                if (!message) {
+                  unownedStatuses.push(status);
+                }
                 if (message) {
                   const updates: any = { status: status.status };
                   
@@ -1899,6 +1909,33 @@ export async function registerRoutes(
                   });
                 }
               }
+
+              if (unownedStatuses.length > 0) {
+                const statusPhoneNumberId = change.value?.metadata?.phone_number_id;
+                const statusAccount = (await storage.getAccounts()).find(
+                  (a) => a.phoneNumberId === statusPhoneNumberId,
+                );
+                if (statusAccount?.incomingRelayUrl) {
+                  statusRelays.push({
+                    url: statusAccount.incomingRelayUrl,
+                    secret: statusAccount.incomingRelaySecret || null,
+                    payload: {
+                      object: body.object,
+                      entry: [{
+                        id: entry.id,
+                        changes: [{
+                          field: change.field,
+                          value: {
+                            messaging_product: change.value?.messaging_product,
+                            metadata: change.value?.metadata,
+                            statuses: unownedStatuses,
+                          },
+                        }],
+                      }],
+                    },
+                  });
+                }
+              }
             } else if (change.field === "message_template_status_update") {
               const templateUpdate = change.value;
               const templates = await storage.getTemplates();
@@ -1932,8 +1969,7 @@ export async function registerRoutes(
         }
       }
 
-      for (const [relayUrl, relaySecret] of Array.from(relayTargets.entries())) {
-        const payload = JSON.stringify(body);
+      const dispatchRelay = (relayUrl: string, relaySecret: string | null, payload: string) => {
         const headers: Record<string, string> = { "Content-Type": "application/json" };
         // Relay receivers are commonly built to accept direct Meta webhooks
         // and reject unsigned requests - sign with the same app secret Meta
@@ -1950,6 +1986,13 @@ export async function registerRoutes(
         }).catch((err) => {
           console.error(`[Webhook] Relay to ${relayUrl} failed:`, err.message);
         });
+      };
+
+      for (const [relayUrl, relaySecret] of Array.from(relayTargets.entries())) {
+        dispatchRelay(relayUrl, relaySecret, JSON.stringify(body));
+      }
+      for (const relay of statusRelays) {
+        dispatchRelay(relay.url, relay.secret, JSON.stringify(relay.payload));
       }
 
       res.sendStatus(200);
