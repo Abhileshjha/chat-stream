@@ -297,6 +297,13 @@ export const whatsappAccounts = pgTable("whatsapp_accounts", {
    *  reject unsigned requests. Must match whichever Meta app's secret the
    *  receiver expects. */
   incomingRelaySecret: text("incoming_relay_secret"),
+  /** Sukriti CRM's Project _id this account's campaigns should attribute to.
+   *  When set, every recipient phone in a campaign/notification send from
+   *  this account is reported to Sukriti's bulk campaign-attribution
+   *  endpoint, so a lead's eventual reply resolves to the right project even
+   *  if Sukriti has no prior Lead for that phone. Null skips attribution
+   *  entirely for this account. */
+  sukritiProjectId: text("sukriti_project_id"),
   status: varchar("status", { length: 20 }).notNull().default("connected"),
   qualityRating: varchar("quality_rating", { length: 20 }).default("UNKNOWN"),
   messagingLimit: integer("messaging_limit").default(0),

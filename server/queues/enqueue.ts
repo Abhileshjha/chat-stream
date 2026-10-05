@@ -7,6 +7,7 @@ import {
   remainingKey,
   statsKey,
 } from "./constants";
+import { reportCampaignAttribution } from "./attribution";
 import type { EnqueueBroadcastInput, EnqueueBroadcastResult, SendBatchJobData } from "./types";
 
 const queues = new Map<string, Queue<SendBatchJobData>>();
@@ -64,6 +65,14 @@ export async function enqueueBroadcast(input: EnqueueBroadcastInput): Promise<En
     if (unique.length === 0) continue;
 
     totalRecipients += unique.length;
+
+    reportCampaignAttribution({
+      projectId: input.sukritiProjectId,
+      campaignId: input.campaignId,
+      campaignName: input.campaignName,
+      accountId: input.accountId,
+      phones: unique,
+    });
 
     for (const phones of chunkPhones(unique, PHONES_PER_JOB)) {
       pendingJobs.push({

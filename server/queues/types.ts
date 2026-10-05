@@ -21,6 +21,7 @@ export interface EnqueueBroadcastInput {
   kind: BroadcastKind;
   accountId: string;
   campaignId: string;
+  campaignName?: string;
   templateId: string;
   templateName: string;
   templateLanguage: string;
@@ -32,6 +33,9 @@ export interface EnqueueBroadcastInput {
   conversationMediaUrl?: string;
   /** Known total when caller already counted; otherwise counted while enqueueing. */
   totalRecipients?: number;
+  /** Sukriti CRM project _id to attribute this send's recipients to — see
+   *  attribution.ts. Omitted/null skips attribution entirely. */
+  sukritiProjectId?: string | null;
 }
 
 export interface EnqueueBroadcastResult {

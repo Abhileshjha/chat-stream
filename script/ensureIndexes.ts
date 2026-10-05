@@ -28,6 +28,7 @@ const COLUMNS: string[] = [
   // delivery/read/failed tracking).
   `ALTER TABLE whatsapp_accounts ADD COLUMN IF NOT EXISTS incoming_relay_url text`,
   `ALTER TABLE whatsapp_accounts ADD COLUMN IF NOT EXISTS incoming_relay_secret text`,
+  `ALTER TABLE whatsapp_accounts ADD COLUMN IF NOT EXISTS sukriti_project_id text`,
   // Campaign recipient length without parsing jsonb every list load
   `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS recipient_count integer NOT NULL DEFAULT 0`,
 ];

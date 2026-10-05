@@ -1385,12 +1385,14 @@ export async function registerRoutes(
           kind: "campaign",
           accountId: activeAccount.id,
           campaignId: campaign.id,
+          campaignName: campaign.name,
           templateId: template.id,
           templateName: template.name,
           templateLanguage: template.language || "en",
           phoneChunks: phoneChunks(),
           bodyPreview,
           totalRecipients: recipients.length,
+          sukritiProjectId: activeAccount.sukritiProjectId,
         });
 
         return res.json({
@@ -3408,6 +3410,7 @@ export async function registerRoutes(
           kind: "notification",
           accountId: activeAccount.id,
           campaignId: notification.id,
+          campaignName: notification.name,
           templateId: template.id,
           templateName: template.name,
           templateLanguage: template.language || "en",
@@ -3421,6 +3424,7 @@ export async function registerRoutes(
           bodyPreview,
           conversationMediaUrl,
           totalRecipients,
+          sukritiProjectId: activeAccount.sukritiProjectId,
         });
 
         return res.json({
@@ -3586,6 +3590,7 @@ export async function registerRoutes(
           kind: "notification",
           accountId: activeAccount.id,
           campaignId: notification.id,
+          campaignName: notification.name,
           templateId: template.id,
           templateName: template.name,
           templateLanguage: template.language || "en",
@@ -3595,6 +3600,7 @@ export async function registerRoutes(
           bodyPreview,
           conversationMediaUrl,
           totalRecipients: (notification.totalRecipients || 0) || remainingCount + attemptedPhones.size,
+          sukritiProjectId: activeAccount.sukritiProjectId,
         });
 
         return res.json({
